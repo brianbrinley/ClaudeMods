@@ -25,6 +25,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PAGES = [
     ("README.md", "", "Home"),
     ("boomi-runtime/README.md", "boomi-runtime", "Boomi Runtime"),
+    ("IDEAS.md", "ideas", "Ideas"),
     ("site/style.md", "style", None),
 ]
 # Copied verbatim to the same path on the site (only what the pages use)
@@ -50,7 +51,7 @@ def rel(from_dir, target):
     return "" if r == "." else r
 
 
-def rewrite_links(body, src_dir, out_dir, page_dirs, site_files):
+def rewrite_links(body, src_dir, out_dir, page_dirs, site_files, page_sources):
     def fix(match):
         attr, quote, url = match.group(1), match.group(2), match.group(3)
         if re.match(r"^([a-z][a-z0-9+.-]*:|#|//)", url, re.I):
@@ -59,7 +60,9 @@ def rewrite_links(body, src_dir, out_dir, page_dirs, site_files):
         frag = "#" + frag if frag else ""
         target = posixpath.normpath(posixpath.join(src_dir, path)) if path else src_dir
         target = "" if target == "." else target
-        if target.endswith("README.md"):
+        if target in page_sources:
+            target = page_sources[target]
+        elif target.endswith("README.md"):
             target = posixpath.dirname(target)
         if target in page_dirs:
             new = rel(out_dir, target) + ("/" if target and rel(out_dir, target) else "")
@@ -166,6 +169,7 @@ def main():
         for f in files:
             site_files.add(posixpath.relpath(os.path.join(base, f), out).replace(os.sep, "/"))
     page_dirs = {d for _, d, _ in PAGES}
+    page_sources = {s: d for s, d, _ in PAGES}
 
     template = open(os.path.join(ROOT, "site", "template.html"), encoding="utf-8").read()
     night_init = open(os.path.join(ROOT, "brand", "mermaid-init-night.txt"), encoding="utf-8").read().strip()
@@ -197,7 +201,7 @@ def main():
                      "connector group.</small></p>")
             # After the first heading
             body = re.sub(r"(</h1>)", r"\1" + block.replace("\\", "\\\\"), body, count=1)
-        body = rewrite_links(body, src_dir, out_dir, page_dirs, site_files)
+        body = rewrite_links(body, src_dir, out_dir, page_dirs, site_files, page_sources)
 
         nav = "\n".join(
             f'    <a href="{rel(out_dir, d) + "/" if rel(out_dir, d) else "./"}"'
