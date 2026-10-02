@@ -1,6 +1,8 @@
 # Mod Ideas
 
-Ideas for mods we could build next, starting with Boomi and integration work. Nothing on this page is built yet. Treat it as a brainstorm: add ideas, argue with the rankings, and claim one to build.
+Ideas for mods we could build next, starting with Boomi and integration work. The ideas below aren't built yet. Treat it as a brainstorm: add ideas, argue with the rankings, and claim one to build.
+
+**Built from this page so far:** the Companion guardrail, now the [boomi-standards](boomi-standards/README.md) mod.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
 
@@ -34,7 +36,6 @@ quadrantChart
     quadrant-2 Build next
     quadrant-3 Nice to have
     quadrant-4 Wait
-    Guardrail: [0.32, 0.88]
     Execution debugger: [0.36, 0.80]
     Broker quick wins: [0.14, 0.74]
     Test harness: [0.72, 0.84]
@@ -48,32 +49,17 @@ quadrantChart
 
 | Rank | Idea | Business value | Effort | Status |
 |---|---|---|---|---|
-| 1 | [Companion guardrail](#companion-guardrail) | High | Small to medium | **Next up** |
-| 2 | [Execution debugger](#execution-debugger) | High | Small to medium | Idea |
-| 3 | [Credential broker: quick wins](#credential-broker) | High | Small | Idea |
-| 4 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
-| 5 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
-| 6 | [General secret guard](#general-secret-guard) | Medium | Small to medium | Idea |
-| 7 | [Promotion diff](#promotion-diff) | Medium | Medium | Idea |
-| 8 | [Environment extensions manager](#environment-extensions-manager) | Medium | Medium | Idea |
-| 9 | [Deployment watcher](#deployment-watcher) | Medium | Medium | Idea |
-| 10 | [Credential broker: full](#credential-broker) | Medium | Large | Idea |
+| 1 | [Execution debugger](#execution-debugger) | High | Small to medium | **Next up** |
+| 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Idea |
+| 3 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
+| 4 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
+| 5 | [General secret guard](#general-secret-guard) | Medium | Small to medium | Idea |
+| 6 | [Promotion diff](#promotion-diff) | Medium | Medium | Idea |
+| 7 | [Environment extensions manager](#environment-extensions-manager) | Medium | Medium | Idea |
+| 8 | [Deployment watcher](#deployment-watcher) | Medium | Medium | Idea |
+| 9 | [Credential broker: full](#credential-broker) | Medium | Large | Idea |
 
 ## The ideas
-
-### Companion guardrail
-
-**Check components against the team's standards before Boomi Companion deploys them.**
-
-- **Problem:** A team can't adopt AI-built Boomi work if nobody can enforce its conventions. Reviewers end up checking names, folders and connection settings by hand.
-- **Idea:** A `boomi-standards` mod with a before-tool-call hook that recognizes Companion's deploy scripts. It checks the components about to be deployed against rules in a checked-in `standards.json`:
-  - naming patterns for processes, connections and profiles
-  - required folders
-  - no hard-coded passwords, tokens or hostnames in connection settings
-  - required error handling, such as a Try/Catch on every process
-- **Outcome:** A blocked deploy comes back to Claude as a refused tool call with the reasons, so Claude fixes the components and tries again. A `/standards check` command runs the same checks on demand.
-- **Why a mod:** It reuses the before-tool-call hook that already guards the token in `boomi-runtime`. It needs no pane, so it works on the web.
-- **Open question:** Does Companion keep component XML in the workspace before its scripts push it? If so, the checks read those files. If not, the mod has to fetch the components through the Platform API before deploy, which adds effort.
 
 ### Execution debugger
 

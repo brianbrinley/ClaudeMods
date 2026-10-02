@@ -1,0 +1,15 @@
+{
+  "naming": {
+    "process": "^[A-Z]{2,5}_[A-Za-z0-9 ]+$",
+    "connector-settings": "^CON_",
+    "connector-action": "^OP_",
+    "*": "^[A-Za-z0-9_ .-]+$"
+  },
+  "folders": [],
+  "forbiddenText": [
+    { "pattern": "prod\\.example\\.com", "message": "points at the production host; use an environment extension" }
+  ],
+  "severity": {
+    "try-catch": "warning"
+  }
+}
