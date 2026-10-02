@@ -2,7 +2,7 @@
 
 ## Layout
 
-One mod per top-level folder, each a self-contained plugin: `.claude-plugin/plugin.json`, `hooks/hooks.json`, the hooks module, `types/` for its state contract, `tests/` and a `README.md`. Add every new mod to the **Mods** table in the root README and to the docs site's `PAGES` (see below).
+One mod per top-level folder, each a self-contained plugin: `.claude-plugin/plugin.json`, `hooks/hooks.json`, the hooks module, `types/` for its state contract, `tests/` and a `README.md`. Add every new mod to the **Mods** table in the root README and to the docs site's `PAGES` (see below). Mod ideas that aren't built yet go in `IDEAS.md`; when one ships, move it from there to the Mods table.
 
 Before pushing a mod change, run `claude plugin validate <mod>` and `claude plugin test <mod>`, and type-check it with `tsc -p <mod>` once Claude Code has loaded it (that's when it lays `.claude-plugin/types/`, which is gitignored).
 

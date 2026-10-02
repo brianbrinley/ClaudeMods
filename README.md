@@ -15,6 +15,8 @@ Mods for [Claude Code](https://claude.com/claude-code): plugins of function hook
 |---|---|
 | [boomi-runtime](boomi-runtime/) | A temporary Boomi runtime for the session, handed to Boomi Companion: provision, smoke test, tear down. |
 
+**Ideas for what to build next** are on the [Ideas](IDEAS.md) page, ranked by business value and effort. Add your own, or claim one to build.
+
 ## Plugins this repository pulls in
 
 [`.claude/settings.json`](.claude/settings.json) declares [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) (`bc-integration@boomi-companion`), which the boomi-runtime mod works with. On Claude Code on the web, install it from the environment's setup script; see the [boomi-runtime README](boomi-runtime/README.md#works-with-boomi-companion).
