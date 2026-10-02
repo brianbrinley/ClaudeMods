@@ -43,8 +43,8 @@ flowchart LR
 2. Creates a **TEST** environment named after the runtime. If your account can't create environments, it falls back to `BOOMI_ENVIRONMENT_ID`.
 3. Downloads the Linux installer and installs the runtime in quiet mode under `~/.boomi-runtimes/<name>`. The installer puts it one folder deeper, in `Atom_<name>` with dashes turned into underscores; the mod finds `bin/atom` there. The quiet install starts the runtime itself, and the mod runs `bin/atom start` only if the runtime hasn't come online after 90 seconds.
 4. Waits for the runtime to show as `ONLINE`, attaches it to the environment, and writes `BOOMI_TEST_ATOM_ID` and `BOOMI_ENVIRONMENT_ID` into Companion's `.env`. The previous values are kept so teardown can restore them.
-5. **Smoke test** (`/boomi smoke`): creates a hello-world process (No Data → Message → Notify → Stop), packages it, deploys it to the environment, executes it, and waits for `COMPLETE`.
-6. **Teardown** (`/boomi down`, or when the session ends): undeploys and deletes the smoke test, stops the runtime, deletes it and its environment from the platform, restores `.env` and removes the install folder.
+5. **Smoke test** (`/boomi smoke`): packages a hello-world process (No Data → Message → Notify → Stop), deploys it to the environment, executes it, and waits for `COMPLETE`. The Platform API can't delete components, so the process, `boomi-runtime hello world`, is created once in `BOOMI_TARGET_FOLDER` and reused by every run.
+6. **Teardown** (`/boomi down`, or when the session ends): undeploys the smoke test, stops the runtime, deletes it and its environment from the platform, restores `.env` and removes the install folder.
 
 Runtimes are named `<prefix>-<date>-<session>`, for example `cc-20261002-dwmarays`. If a cloud container is reclaimed before teardown runs, `/boomi reap` deletes offline runtimes with your prefix.
 
@@ -74,7 +74,7 @@ In the cloud environment's settings (environment menu in the session's title bar
 
 Values in Companion's `.env` win over environment variables. With no `.env`, the mod writes one for Companion the first time it provisions; `.env` is gitignored. Never paste the API token into a chat.
 
-The API user needs permission to create installer tokens and environments, attach runtimes, deploy, execute, and delete runtimes, environments and components.
+The API user needs permission to create installer tokens and environments, attach runtimes, deploy, execute, and delete runtimes and environments.
 
 On a local machine, load it with `claude --plugin-dir boomi-runtime`.
 
@@ -94,7 +94,6 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-runtime"].
 ## Not yet verified against a live account
 
 - The `InstallerToken`, `Environment` and `EnvironmentAtomAttachment` request and response shapes, and the `LIKE` filter used by `reap`.
-- Deleting a component through the API. If that's refused, teardown reports it and the smoke test process stays in your account.
 
 ## Development
 

@@ -72,6 +72,10 @@ const requireString = (value: unknown, action: string, field: string): string =>
 export const attribute = (text: string, name: string): string | undefined =>
   text.match(new RegExp(`"?${name}"?\\s*[:=]\\s*"([^"]+)"`))?.[1]
 
+/** The text of the first `<name>` or `<prefix:name>` element in an XML answer. */
+export const element = (text: string, name: string): string | undefined =>
+  text.match(new RegExp(`<(?:[A-Za-z]+:)?${name}>([^<]*)</`))?.[1]
+
 export const escapeXml = (text: string): string =>
   text.replace(/[<>&"']/g, char => `&#${char.charCodeAt(0)};`)
 
@@ -103,10 +107,11 @@ export const platformClient = (fetch: Fetch, credentials: Credentials) => {
     path: string,
     body?: string,
     contentType = 'application/json',
+    accept = 'application/json',
   ): Promise<HttpResponse> => {
     const response = await fetch(`${base}/${path}`, {
       method,
-      headers: { ...headers, 'Content-Type': contentType },
+      headers: { ...headers, 'Content-Type': contentType, Accept: accept },
       body,
     })
     if (!response.ok) throw new PlatformError(action, response.status, response.text)
@@ -248,12 +253,36 @@ export const platformClient = (fetch: Fetch, credentials: Credentials) => {
 
     /** Creates a component from its XML; resolves its componentId. */
     createComponent: async (xml: string): Promise<string> => {
-      const response = await send('Create component', 'POST', 'Component', xml, 'application/xml')
+      // The Component API answers only in XML (JSON is refused with 406).
+      const response = await send(
+        'Create component',
+        'POST',
+        'Component',
+        xml,
+        'application/xml',
+        'application/xml',
+      )
       return requireString(attribute(response.text, 'componentId'), 'Create component', 'componentId')
     },
 
-    deleteComponent: async (componentId: string): Promise<void> => {
-      await call('Delete component', 'DELETE', `Component/${encodeURIComponent(componentId)}`)
+    /**
+     * The current, undeleted component named `name` (in `folderId`, when given).
+     * The Platform API cannot delete components, so the smoke test reuses one.
+     */
+    findComponent: async (name: string, folderId?: string): Promise<string | undefined> => {
+      const query = {
+        QueryFilter: { expression: { operator: 'EQUALS', property: 'name', argument: [name] } },
+      }
+      const found = results(await call('Find component', 'POST', 'ComponentMetadata/query', query))
+      const isTrue = (value: unknown) => value === true || value === 'true'
+      const current = found.find(
+        raw =>
+          String(raw.name ?? '') === name &&
+          isTrue(raw.currentVersion) &&
+          !isTrue(raw.deleted) &&
+          (folderId === undefined || String(raw.folderId ?? '') === folderId),
+      )
+      return current ? String(current.componentId ?? '') || undefined : undefined
     },
 
     packageComponent: async (componentId: string, packageVersion: string): Promise<string> => {
@@ -281,22 +310,32 @@ export const platformClient = (fetch: Fetch, credentials: Credentials) => {
     /** Starts a process on a runtime; resolves the request ID to poll. */
     execute: async (processId: string, atomId: string): Promise<string> => {
       const xml = `<?xml version="1.0" encoding="UTF-8"?><ExecutionRequest processId="${escapeXml(processId)}" atomId="${escapeXml(atomId)}" xmlns="http://api.platform.boomi.com/"/>`
-      const response = await send('Execute process', 'POST', 'ExecutionRequest', xml, 'application/xml')
+      const response = await send(
+        'Execute process',
+        'POST',
+        'ExecutionRequest',
+        xml,
+        'application/xml',
+        'application/xml',
+      )
       return requireString(attribute(response.text, 'requestId'), 'Execute process', 'requestId')
     },
 
     /** The execution a request started, or undefined while it is still running. */
     executionOutcome: async (requestId: string): Promise<ExecutionOutcome | undefined> => {
+      // XML, as Boomi Companion reads it.
       const response = await send(
         'Read execution',
         'GET',
         `ExecutionRecord/async/${encodeURIComponent(requestId)}`,
+        undefined,
+        'application/json',
+        'application/xml',
       )
       if (response.status === 202 || !response.text) return undefined
-      const record = results(parseJson(response.text))[0]
-      const status = String(record?.status ?? '')
-      if (!record || status === 'INPROCESS' || status === 'STARTED') return undefined
-      return { executionId: String(record.executionId ?? ''), status }
+      const status = element(response.text, 'status')
+      if (!status || status === 'INPROCESS' || status === 'STARTED') return undefined
+      return { executionId: element(response.text, 'executionId') ?? '', status }
     },
   }
 }
