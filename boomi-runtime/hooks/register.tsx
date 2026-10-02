@@ -19,6 +19,7 @@ import {
   tail,
 } from './linux'
 import { platformClient } from './platform'
+import type { PlatformClient } from './platform'
 import { helloWorldProcess } from './smoke'
 
 type Engine = EngineInterface
@@ -308,6 +309,27 @@ const provision = async ($: Engine, settings: Settings): Promise<void> => {
   }
 }
 
+/**
+ * BOOMI_TARGET_FOLDER as a folder ID. A name or path is looked up, and the ID
+ * written back to .env: Companion's scripts take only the ID.
+ */
+const targetFolderId = async (
+  $: Engine,
+  settings: Settings,
+  platform: PlatformClient,
+  value: string,
+): Promise<string> => {
+  const folder = await platform.resolveFolder(value)
+  if (folder.id !== value) {
+    await note($, `BOOMI_TARGET_FOLDER ${value} is folder ${folder.id} (${folder.fullPath})`)
+    const env = await loadEnv($, settings)
+    if (env.credentials.targetFolder === value) {
+      await $.fs.write(env.path, setEnvValue(env.text, 'BOOMI_TARGET_FOLDER', folder.id))
+    }
+  }
+  return folder.id
+}
+
 const setSmoke = ($: Engine, change: Partial<SmokeTest>) =>
   update($, runtime, current => ({
     ...current,
@@ -332,8 +354,11 @@ const smoke = async ($: Engine, settings: Settings): Promise<void> => {
       smoke: { phase: 'running' as const, message: 'Creating the hello-world process' },
     }))
 
+    const folderId = credentials.targetFolder
+      ? await targetFolderId($, settings, platform, credentials.targetFolder)
+      : undefined
     const componentId = await platform.createComponent(
-      helloWorldProcess(`${name} hello world`, credentials.targetFolder),
+      helloWorldProcess(`${name} hello world`, folderId),
     )
     await setSmoke($, { componentId, message: 'Packaging' })
     await note($, `Smoke: created process ${componentId}`)
@@ -566,6 +591,14 @@ const doctor = async ($: Engine, settings: Settings): Promise<string> => {
       check(true, `Platform API reachable at ${credentials.apiUrl}`)
     } catch (error) {
       check(false, `Platform API: ${messageOf(error)}`)
+    }
+    if (credentials.targetFolder) {
+      try {
+        const folder = await client($, credentials).resolveFolder(credentials.targetFolder)
+        check(true, `BOOMI_TARGET_FOLDER is ${folder.fullPath} (${folder.id})`)
+      } catch (error) {
+        check(false, `BOOMI_TARGET_FOLDER: ${messageOf(error)}`)
+      }
     }
   }
 

@@ -21,6 +21,11 @@ export type Execution = {
   executionTime: string
 }
 
+export type Folder = {
+  id: string
+  fullPath: string
+}
+
 export type ExecutionOutcome = {
   executionId: string
   status: string
@@ -188,6 +193,45 @@ export const platformClient = (fetch: Fetch, credentials: Credentials) => {
           status: String(raw.status ?? ''),
           executionTime: String(raw.executionTime ?? ''),
         }))
+    },
+
+    /**
+     * The folder `value` names: a folder ID, a name, or a full path such as
+     * `Account/Parent/Folder`. Deleted folders never match; a name shared by
+     * several folders is refused, listing their paths.
+     */
+    resolveFolder: async (value: string): Promise<Folder> => {
+      const wanted = value.trim().replace(/\/+$/, '')
+      const name = wanted.split('/').pop() ?? wanted
+      const query = {
+        QueryFilter: { expression: { operator: 'EQUALS', property: 'name', argument: [name] } },
+      }
+      const toFolder = (raw: Record<string, unknown>): Folder => ({
+        id: String(raw.id ?? ''),
+        fullPath: String(raw.fullPath ?? ''),
+      })
+      const live = results(await call('Find folder', 'POST', 'Folder/query', query)).filter(
+        raw => raw.deleted !== true && raw.deleted !== 'true' && String(raw.name ?? '') === name,
+      )
+      const matches = (wanted.includes('/')
+        ? live.filter(raw => String(raw.fullPath ?? '') === wanted)
+        : live
+      ).map(toFolder)
+      if (matches.length === 1 && matches[0]) return matches[0]
+      if (matches.length > 1) {
+        throw new PlatformError(
+          'Find folder',
+          200,
+          `several folders are named ${value}: ${matches.map(folder => folder.fullPath).join(', ')}. Use the full path or the folder ID`,
+        )
+      }
+      try {
+        const raw = (await call('Find folder', 'GET', `Folder/${encodeURIComponent(wanted)}`)) as
+          | Record<string, unknown>
+          | undefined
+        if (raw && raw.deleted !== true && raw.deleted !== 'true') return toFolder(raw)
+      } catch {}
+      throw new PlatformError('Find folder', 404, `no folder has the name, path or ID ${value}`)
     },
 
     createEnvironment: async (name: string): Promise<string> => {

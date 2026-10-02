@@ -172,6 +172,38 @@ describe('the Platform API client', () => {
     expect(calls.map(call => call.method)).toEqual(['DELETE', 'DELETE'])
   })
 
+  test('resolves a target folder by name, path or ID', async () => {
+    const folders = (results: object[]) => ({ status: 200, text: JSON.stringify({ result: results }) })
+    const claudeMods = { id: 'Rjo4ODc3Mzc2', name: 'ClaudeMods', fullPath: 'Acct/ClaudeMods' }
+    const { calls, fetch } = recorder({ 'Folder/query': folders([claudeMods, { ...claudeMods, id: 'old', deleted: true }]) })
+    const platform = platformClient(fetch, CREDENTIALS)
+    expect(await platform.resolveFolder('ClaudeMods')).toEqual({ id: 'Rjo4ODc3Mzc2', fullPath: 'Acct/ClaudeMods' })
+    expect(JSON.parse(calls[0]?.body ?? '').QueryFilter.expression).toEqual({
+      operator: 'EQUALS', property: 'name', argument: ['ClaudeMods'],
+    })
+    expect((await platform.resolveFolder('Acct/ClaudeMods/')).id).toBe('Rjo4ODc3Mzc2')
+
+    const byId = platformClient(
+      recorder({ 'Folder/query': folders([]), 'Folder/Rjo4ODc3Mzc2': { status: 200, text: JSON.stringify(claudeMods) } }).fetch,
+      CREDENTIALS,
+    )
+    expect((await byId.resolveFolder('Rjo4ODc3Mzc2')).fullPath).toBe('Acct/ClaudeMods')
+  })
+
+  test('refuses an ambiguous or unknown folder', async () => {
+    const twins = [
+      { id: 'a', name: 'Shared', fullPath: 'Acct/One/Shared' },
+      { id: 'b', name: 'Shared', fullPath: 'Acct/Two/Shared' },
+    ]
+    const platform = platformClient(
+      recorder({ 'Folder/query': { status: 200, text: JSON.stringify({ result: twins }) } }).fetch,
+      CREDENTIALS,
+    )
+    await expect(platform.resolveFolder('Shared')).rejects.toThrow('Acct/One/Shared, Acct/Two/Shared')
+    expect((await platform.resolveFolder('Acct/Two/Shared')).id).toBe('b')
+    await expect(platform.resolveFolder('Nope')).rejects.toThrow('no folder has the name, path or ID Nope')
+  })
+
   test('reads attributes from JSON and XML answers', () => {
     expect(attribute('{"componentId" : "c-1"}', 'componentId')).toBe('c-1')
     expect(attribute('<bns:Component componentId="c-2" name="n">', 'componentId')).toBe('c-2')
