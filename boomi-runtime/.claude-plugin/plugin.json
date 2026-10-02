@@ -13,7 +13,7 @@
     "installRoot": {
       "type": "string",
       "title": "Install root",
-      "description": "Folder the runtime is installed under; empty means ~/.boomi-runtimes",
+      "description": "Folder the runtime is installed under; empty means $BOOMI_RUNTIME_ROOT, else ~/.boomi-runtimes",
       "default": ""
     },
     "envFile": {

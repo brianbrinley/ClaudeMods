@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { credentialsFrom, parseEnv, setEnvValue } from '../hooks/envfile'
-import { isRuntimeDir, linux, runtimeName } from '../hooks/linux'
+import { isNamedRuntimeHome, isRuntimeDir, linux, pickRuntimeHome, runtimeName } from '../hooks/linux'
 import { attribute, basicAuth, platformClient } from '../hooks/platform'
 import type { Fetch } from '../hooks/platform'
 import { helloWorldProcess } from '../hooks/smoke'
@@ -60,6 +60,29 @@ describe('the Linux runtime', () => {
     expect(isRuntimeDir('/root/.boomi-runtimes/cc-1/x', '/root/.boomi-runtimes', 'cc')).toBe(false)
     expect(isRuntimeDir('/etc/cc-1', '/root/.boomi-runtimes', 'cc')).toBe(false)
     expect(isRuntimeDir('/cc-1', '', 'cc')).toBe(false)
+  })
+
+  test('sends a daemon-starting command\'s output to a file, not the pipe', () => {
+    const argv = linux.toLogFile(['/r/cc-1/bin/atom', 'start'], '/r/cc-1-start.log')
+    expect(argv.slice(0, 2)).toEqual(['sh', '-c'])
+    expect(argv[2]).toContain('>"$log" 2>&1 </dev/null')
+    expect(argv.slice(3)).toEqual(['sh', '/r/cc-1-start.log', '/r/cc-1/bin/atom', 'start'])
+    expect(isRuntimeDir(linux.startLog('/r', 'cc-1'), '/r', 'cc')).toBe(true)
+  })
+
+  test('finds the runtime folder wherever the installer put it', () => {
+    const dir = '/root/.boomi-runtimes/cc-1'
+    expect(pickRuntimeHome([`${dir}/Atom - cc-1/bin/atom`], dir, 'cc-1')).toBe(`${dir}/Atom - cc-1`)
+    // The layout the Linux quiet installer really produces: Atom_<name>, dashes as underscores.
+    const live = '/root/.boomi-runtimes/cc-20261002-25e7b32a'
+    expect(
+      pickRuntimeHome([`${live}/Atom_cc_20261002_25e7b32a/bin/atom`], live, 'cc-20261002-25e7b32a'),
+    ).toBe(`${live}/Atom_cc_20261002_25e7b32a`)
+    expect(pickRuntimeHome(['/root/Boomi AtomSphere/other/bin/atom', '/root/Boomi AtomSphere/cc-1/bin/atom'], dir, 'cc-1'))
+      .toBe('/root/Boomi AtomSphere/cc-1')
+    expect(pickRuntimeHome(['/root/Boomi AtomSphere/other/bin/atom'], dir, 'cc-1')).toBeUndefined()
+    expect(isNamedRuntimeHome('/root/Boomi AtomSphere/Atom - cc-1', 'cc-1')).toBe(true)
+    expect(isNamedRuntimeHome('/root/Boomi AtomSphere', 'cc-1')).toBe(false)
   })
 
   test('installs quietly with the token and name', () => {
@@ -136,6 +159,17 @@ describe('the Platform API client', () => {
       executionId: 'execution-1',
       status: 'COMPLETE',
     })
+  })
+
+  test('accepts a successful delete whose answer is not JSON', async () => {
+    const { calls, fetch } = recorder({
+      'Atom/atom-1': { status: 200, text: '<bns:deleteResponse/>' },
+      'Environment/env-1': { status: 200, text: '{' },
+    })
+    const platform = platformClient(fetch, CREDENTIALS)
+    await platform.deleteAtom('atom-1')
+    await platform.deleteEnvironment('env-1')
+    expect(calls.map(call => call.method)).toEqual(['DELETE', 'DELETE'])
   })
 
   test('reads attributes from JSON and XML answers', () => {

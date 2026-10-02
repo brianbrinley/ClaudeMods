@@ -41,7 +41,7 @@ flowchart LR
 
 1. Creates an installer token through the Platform API.
 2. Creates a **TEST** environment named after the runtime. If your account can't create environments, it falls back to `BOOMI_ENVIRONMENT_ID`.
-3. Downloads the Linux installer and installs the runtime in quiet mode under `~/.boomi-runtimes/<name>`, then starts it with `bin/atom start`.
+3. Downloads the Linux installer and installs the runtime in quiet mode under `~/.boomi-runtimes/<name>`. The installer puts it one folder deeper, in `Atom_<name>` with dashes turned into underscores; the mod finds `bin/atom` there. The quiet install starts the runtime itself, and the mod runs `bin/atom start` only if the runtime hasn't come online after 90 seconds.
 4. Waits for the runtime to show as `ONLINE`, attaches it to the environment, and writes `BOOMI_TEST_ATOM_ID` and `BOOMI_ENVIRONMENT_ID` into Companion's `.env`. The previous values are kept so teardown can restore them.
 5. **Smoke test** (`/boomi smoke`): creates a hello-world process (No Data → Message → Notify → Stop), packages it, deploys it to the environment, executes it, and waits for `COMPLETE`.
 6. **Teardown** (`/boomi down`, or when the session ends): undeploys and deletes the smoke test, stops the runtime, deletes it and its environment from the platform, restores `.env` and removes the install folder.
@@ -69,7 +69,7 @@ In the cloud environment's settings (environment menu in the session's title bar
 1. **Network access:** allow `*.boomi.com` (the Platform API, the installer download and the runtime's own connection to the platform), plus any systems your integration calls.
 2. **Environment variables:**
    - `CLAUDE_CODE_PLUGIN_DIRS=/home/user/ClaudeMods/boomi-runtime` loads the mod in every session of an environment that clones this repository.
-   - The Platform API credentials, unless the session already has Companion's `.env`: `BOOMI_API_URL` (for example `https://api.boomi.com`), `BOOMI_USERNAME`, `BOOMI_API_TOKEN` and `BOOMI_ACCOUNT_ID`. `BOOMI_ENVIRONMENT_ID` and `BOOMI_TARGET_FOLDER` are optional.
+   - The Platform API credentials, unless the session already has Companion's `.env`: `BOOMI_API_URL` (for example `https://api.boomi.com`), `BOOMI_USERNAME`, `BOOMI_API_TOKEN` and `BOOMI_ACCOUNT_ID`. `BOOMI_ENVIRONMENT_ID`, `BOOMI_TARGET_FOLDER` and `BOOMI_RUNTIME_ROOT` (the install root) are optional.
 3. Start a new session and run `/boomi doctor`.
 
 Values in Companion's `.env` win over environment variables. With no `.env`, the mod writes one for Companion the first time it provisions; `.env` is gitignored. Never paste the API token into a chat.
@@ -85,7 +85,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-runtime"].
 | Setting | Default | |
 |---|---|---|
 | `namePrefix` | `cc` | Start of every runtime name; `/boomi reap` matches on it. |
-| `installRoot` | `~/.boomi-runtimes` | Where runtimes are installed. |
+| `installRoot` | `$BOOMI_RUNTIME_ROOT`, else `~/.boomi-runtimes` | Where runtimes are installed. The mod finds `bin/atom` under it, or in the installer's default folders. |
 | `envFile` | `.env` | Companion's `.env`, relative to the session's folder. |
 | `installerUrl` | `https://platform.boomi.com/atom/atom_install64.sh` | The Linux installer. |
 | `installerArgs` | | Extra quiet-install arguments, such as proxy settings. |
@@ -93,7 +93,6 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-runtime"].
 
 ## Not yet verified against a live account
 
-- The quiet installer's `-dir`, `-VatomName`, `-VaccountId` and `-VinstallToken` arguments, and whether the installer creates `bin/atom` directly under `-dir`.
 - The `InstallerToken`, `Environment` and `EnvironmentAtomAttachment` request and response shapes, and the `LIKE` filter used by `reap`.
 - Deleting a component through the API. If that's refused, teardown reports it and the smoke test process stays in your account.
 

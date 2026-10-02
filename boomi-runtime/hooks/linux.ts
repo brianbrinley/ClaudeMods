@@ -43,10 +43,59 @@ export const linux = {
     ...request.extraArgs,
   ],
   launcher: (dir: string) => `${dir}/bin/atom`,
+  /** Finds bin/atom under `roots`; the quiet installer may not use -dir as is. */
+  findLaunchers: (roots: readonly string[]) => [
+    'find',
+    ...roots,
+    '-maxdepth',
+    '4',
+    '-path',
+    '*/bin/atom',
+    '-type',
+    'f',
+  ],
+  /** Where install4j installers put a runtime when they ignore -dir. */
+  defaultRoots: (home: string) => [`${home}/Boomi AtomSphere`, '/opt/Boomi AtomSphere'],
   start: (dir: string) => [`${dir}/bin/atom`, 'start'],
   stop: (dir: string) => [`${dir}/bin/atom`, 'stop'],
   remove: (dir: string) => ['rm', '-rf', '--', dir],
+  /**
+   * Runs `argv` with its output sent to `logPath` instead of the caller's pipe.
+   * `bin/atom start` (and a quiet install that starts the runtime) leaves a
+   * daemon holding whatever stdout it was given: on a pipe, the caller would
+   * wait for an end that never comes.
+   */
+  toLogFile: (argv: readonly string[], logPath: string) => [
+    'sh',
+    '-c',
+    'log="$1"; shift; "$@" >"$log" 2>&1 </dev/null',
+    'sh',
+    logPath,
+    ...argv,
+  ],
+  installLog: (root: string, name: string) => `${root}/${name}-install.log`,
+  startLog: (root: string, name: string) => `${root}/${name}-start.log`,
   logsDir: (dir: string) => `${dir}/logs`,
+}
+
+/**
+ * The runtime folder for `name` among `launchers` (paths ending in /bin/atom):
+ * one inside `dir` first, then one whose path names the runtime.
+ */
+export const pickRuntimeHome = (
+  launchers: readonly string[],
+  dir: string,
+  name: string,
+): string | undefined => {
+  const homes = launchers.map(path => path.replace(/\/bin\/atom$/, ''))
+  return homes.find(home => home === dir || home.startsWith(`${dir}/`)) ??
+    homes.find(home => (home.split('/').pop() ?? '').includes(name))
+}
+
+/** True when `home` is a folder named for runtime `name`, safe to delete. */
+export const isNamedRuntimeHome = (home: string, name: string): boolean => {
+  const last = home.replace(/\/+$/, '').split('/').pop() ?? ''
+  return home.startsWith('/') && name.length > 0 && last.includes(name) && !home.includes('..')
 }
 
 /** The last `count` lines of `text`, without a trailing blank line. */
