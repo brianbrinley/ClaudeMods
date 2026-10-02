@@ -46,6 +46,18 @@ const summary = (body: string): string => {
   return text ? `: ${text}` : ''
 }
 
+/**
+ * A successful answer's JSON, or undefined when it has none: the platform
+ * answers some calls (a DELETE, for one) with a body that is not JSON.
+ */
+const parseJson = (text: string): unknown => {
+  try {
+    return text ? JSON.parse(text) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const requireString = (value: unknown, action: string, field: string): string => {
   if (typeof value === 'string' && value) return value
   throw new PlatformError(action, 200, `no ${field} in the answer`)
@@ -108,7 +120,7 @@ export const platformClient = (fetch: Fetch, credentials: Credentials) => {
       path,
       body === undefined ? undefined : JSON.stringify(body),
     )
-    return response.text ? JSON.parse(response.text) : undefined
+    return parseJson(response.text)
   }
 
   const results = (answer: unknown): Record<string, unknown>[] => {
@@ -237,7 +249,7 @@ export const platformClient = (fetch: Fetch, credentials: Credentials) => {
         `ExecutionRecord/async/${encodeURIComponent(requestId)}`,
       )
       if (response.status === 202 || !response.text) return undefined
-      const record = results(JSON.parse(response.text))[0]
+      const record = results(parseJson(response.text))[0]
       const status = String(record?.status ?? '')
       if (!record || status === 'INPROCESS' || status === 'STARTED') return undefined
       return { executionId: String(record.executionId ?? ''), status }

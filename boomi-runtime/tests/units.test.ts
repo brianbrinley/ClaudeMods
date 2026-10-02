@@ -161,6 +161,17 @@ describe('the Platform API client', () => {
     })
   })
 
+  test('accepts a successful delete whose answer is not JSON', async () => {
+    const { calls, fetch } = recorder({
+      'Atom/atom-1': { status: 200, text: '<bns:deleteResponse/>' },
+      'Environment/env-1': { status: 200, text: '{' },
+    })
+    const platform = platformClient(fetch, CREDENTIALS)
+    await platform.deleteAtom('atom-1')
+    await platform.deleteEnvironment('env-1')
+    expect(calls.map(call => call.method)).toEqual(['DELETE', 'DELETE'])
+  })
+
   test('reads attributes from JSON and XML answers', () => {
     expect(attribute('{"componentId" : "c-1"}', 'componentId')).toBe('c-1')
     expect(attribute('<bns:Component componentId="c-2" name="n">', 'componentId')).toBe('c-2')
