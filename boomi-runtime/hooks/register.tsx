@@ -20,7 +20,7 @@ import {
 } from './linux'
 import { platformClient } from './platform'
 import type { PlatformClient } from './platform'
-import { helloWorldProcess } from './smoke'
+import { SMOKE_PROCESS, helloWorldProcess } from './smoke'
 
 type Engine = EngineInterface
 
@@ -344,24 +344,24 @@ const smoke = async ($: Engine, settings: Settings): Promise<void> => {
     return
   }
   if (info.smoke?.phase === 'running') return
-  const { atomId, environmentId, name } = info
+  const { atomId, environmentId } = info
 
   try {
     const { credentials } = await loadEnv($, settings)
     const platform = client($, credentials)
     await update($, runtime, current => ({
       ...current,
-      smoke: { phase: 'running' as const, message: 'Creating the hello-world process' },
+      smoke: { phase: 'running' as const, message: 'Finding the hello-world process' },
     }))
 
     const folderId = credentials.targetFolder
       ? await targetFolderId($, settings, platform, credentials.targetFolder)
       : undefined
-    const componentId = await platform.createComponent(
-      helloWorldProcess(`${name} hello world`, folderId),
-    )
+    const existing = await platform.findComponent(SMOKE_PROCESS, folderId)
+    const componentId =
+      existing ?? (await platform.createComponent(helloWorldProcess(SMOKE_PROCESS, folderId)))
     await setSmoke($, { componentId, message: 'Packaging' })
-    await note($, `Smoke: created process ${componentId}`)
+    await note($, `Smoke: ${existing ? 'reusing' : 'created'} process ${componentId}`)
 
     const packageId = await platform.packageComponent(componentId, `smoke-${await $.clock.now()}`)
     await setSmoke($, { packageId, message: 'Deploying' })
@@ -440,11 +440,6 @@ const teardown = async ($: Engine, settings: Settings): Promise<string> => {
     const { smoke: test } = info
     if (test?.deploymentId) {
       await attempt('Undeployed the smoke test', () => platform.undeploy(test.deploymentId ?? ''))
-    }
-    if (test?.componentId) {
-      await attempt('Deleted the smoke test process', () =>
-        platform.deleteComponent(test.componentId ?? ''),
-      )
     }
     const atomId = info.atomId ?? (await platform.findAtom(info.name))?.id
     if (atomId) {

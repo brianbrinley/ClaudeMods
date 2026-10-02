@@ -1,15 +1,18 @@
 // The smoke test's process: No Data start → Message "Hello world" → Notify → Stop.
+// One process, created once and reused: the Platform API cannot delete components.
 // Shapes follow Boomi Companion's process_component reference.
 
 import { escapeXml } from './platform'
 
+export const SMOKE_PROCESS = 'boomi-runtime hello world'
+
 export const helloWorldProcess = (name: string, folderId?: string): string => {
   const folder = folderId ? ` folderId="${escapeXml(folderId)}"` : ''
-  const greeting = escapeXml(`Hello world from ${name}`)
+  const greeting = escapeXml('Hello world from the boomi-runtime mod')
   return `<?xml version="1.0" encoding="UTF-8"?>
 <bns:Component xmlns:bns="http://api.platform.boomi.com/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"${folder} name="${escapeXml(name)}" type="process">
   <bns:encryptedValues/>
-  <bns:description>Created by the boomi-runtime mod's smoke test; deleted with the runtime.</bns:description>
+  <bns:description>Created by the boomi-runtime mod's smoke test and reused by every run. Safe to delete; the next smoke test creates it again.</bns:description>
   <bns:object>
     <process allowSimultaneous="false" enableUserLog="false" processLogOnErrorOnly="false" purgeDataImmediately="false" stopProcessingIfZeroDocuments="false" updateRunDates="true" workload="general">
       <shapes>

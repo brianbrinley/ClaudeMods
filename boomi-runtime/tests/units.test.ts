@@ -148,10 +148,10 @@ describe('the Platform API client', () => {
   })
 
   test('reads the finished execution', async () => {
-    const { fetch } = recorder({
+    const { calls, fetch } = recorder({
       'ExecutionRecord/async/req-1': {
         status: 200,
-        text: '{"result":[{"executionId":"execution-1","status":"COMPLETE"}]}',
+        text: '<bns:AsyncOperationResult xmlns:bns="http://api.platform.boomi.com/"><bns:result><bns:executionId>execution-1</bns:executionId><bns:status>COMPLETE</bns:status></bns:result></bns:AsyncOperationResult>',
       },
     })
     const platform = platformClient(fetch, CREDENTIALS)
@@ -159,6 +159,7 @@ describe('the Platform API client', () => {
       executionId: 'execution-1',
       status: 'COMPLETE',
     })
+    expect(calls[0]?.headers.Accept).toBe('application/xml')
   })
 
   test('accepts a successful delete whose answer is not JSON', async () => {
@@ -204,6 +205,35 @@ describe('the Platform API client', () => {
     await expect(platform.resolveFolder('Nope')).rejects.toThrow('no folder has the name, path or ID Nope')
   })
 
+  test('creates components over XML, which is all that API speaks', async () => {
+    const { calls, fetch } = recorder({
+      Component: {
+        status: 200,
+        text: '<?xml version="1.0"?><bns:Component xmlns:bns="http://api.platform.boomi.com/" folderFullPath="Acct/ClaudeMods" componentId="9690294f-8d01-4c57-bc86-f66a84a2420e" version="1"/>',
+      },
+    })
+    const platform = platformClient(fetch, CREDENTIALS)
+    expect(await platform.createComponent('<bns:Component/>')).toBe('9690294f-8d01-4c57-bc86-f66a84a2420e')
+    expect(calls[0]?.headers.Accept).toBe('application/xml')
+    expect(calls[0]?.headers['Content-Type']).toBe('application/xml')
+  })
+
+  test('finds the reusable smoke process, never a deleted or old version', async () => {
+    const meta = (extra: object) => ({
+      componentId: 'c-1', name: 'boomi-runtime hello world', folderId: 'f-1',
+      currentVersion: true, deleted: false, ...extra,
+    })
+    const answer = (results: object[]) =>
+      recorder({ 'ComponentMetadata/query': { status: 200, text: JSON.stringify({ result: results }) } }).fetch
+    const find = (results: object[], folder?: string) =>
+      platformClient(answer(results), CREDENTIALS).findComponent('boomi-runtime hello world', folder)
+    expect(await find([meta({})], 'f-1')).toBe('c-1')
+    expect(await find([meta({})])).toBe('c-1')
+    expect(await find([meta({})], 'f-2')).toBeUndefined()
+    expect(await find([meta({ deleted: true })])).toBeUndefined()
+    expect(await find([meta({ currentVersion: false })])).toBeUndefined()
+  })
+
   test('reads attributes from JSON and XML answers', () => {
     expect(attribute('{"componentId" : "c-1"}', 'componentId')).toBe('c-1')
     expect(attribute('<bns:Component componentId="c-2" name="n">', 'componentId')).toBe('c-2')
@@ -215,7 +245,7 @@ describe('the smoke test process', () => {
     const xml = helloWorldProcess('cc-1 <hello>', 'folder-1')
     expect(xml).toContain('<noaction/>')
     expect(xml).toContain('folderId="folder-1"')
-    expect(xml).toContain('name="cc-1 &#60;hello&#62; "'.replace(' "', '"'))
+    expect(xml).toContain('name="cc-1 &#60;hello&#62;"')
     expect(xml).toContain('shapetype="stop"')
     expect(helloWorldProcess('x')).not.toContain('folderId')
   })
