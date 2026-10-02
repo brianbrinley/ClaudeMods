@@ -73,6 +73,11 @@ describe('the Linux runtime', () => {
   test('finds the runtime folder wherever the installer put it', () => {
     const dir = '/root/.boomi-runtimes/cc-1'
     expect(pickRuntimeHome([`${dir}/Atom - cc-1/bin/atom`], dir, 'cc-1')).toBe(`${dir}/Atom - cc-1`)
+    // The layout the Linux quiet installer really produces: Atom_<name>, dashes as underscores.
+    const live = '/root/.boomi-runtimes/cc-20261002-25e7b32a'
+    expect(
+      pickRuntimeHome([`${live}/Atom_cc_20261002_25e7b32a/bin/atom`], live, 'cc-20261002-25e7b32a'),
+    ).toBe(`${live}/Atom_cc_20261002_25e7b32a`)
     expect(pickRuntimeHome(['/root/Boomi AtomSphere/other/bin/atom', '/root/Boomi AtomSphere/cc-1/bin/atom'], dir, 'cc-1'))
       .toBe('/root/Boomi AtomSphere/cc-1')
     expect(pickRuntimeHome(['/root/Boomi AtomSphere/other/bin/atom'], dir, 'cc-1')).toBeUndefined()
