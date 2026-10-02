@@ -1,0 +1,25 @@
+{
+  "name": "boomi-standards",
+  "version": "0.1.0",
+  "description": "Checks Boomi Companion's components against the team's standards before they are created, pushed or deployed",
+  "userConfig": {
+    "enforce": {
+      "type": "boolean",
+      "title": "Block components that break the standards",
+      "description": "Refuse a Companion create, push or deploy while a component has an error; off, findings are only reported to Claude",
+      "default": true
+    },
+    "rulesFile": {
+      "type": "string",
+      "title": "Standards file",
+      "description": "The team's standards, relative to the session's working directory; without it the default rules apply",
+      "default": "boomi-standards.json"
+    },
+    "componentsDir": {
+      "type": "string",
+      "title": "Components folder",
+      "description": "Where Boomi Companion keeps component XML; /standards check with no files checks everything under it",
+      "default": "active-development"
+    }
+  }
+}

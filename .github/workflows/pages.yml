@@ -12,6 +12,7 @@ on:
       - "brand/**"
       - "site/**"
       - "boomi-runtime/**"
+      - "boomi-standards/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
