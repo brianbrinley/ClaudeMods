@@ -1,0 +1,7 @@
+# Credentials a mod reads (Boomi Companion's .env, for one)
+.env
+
+# Laid beside each mod by Claude Code when it loads it
+*/.claude-plugin/types/
+
+node_modules/
