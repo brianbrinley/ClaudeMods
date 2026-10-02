@@ -9,7 +9,9 @@ Mods for [Claude Code](https://claude.com/claude-code): plugins of function hook
 
 ## Mods
 
-None yet.
+| Mod | What it does |
+|---|---|
+| [boomi-runtime](boomi-runtime/) | A temporary Boomi runtime for the session, handed to Boomi Companion: provision, smoke test, tear down. |
 
 ## Loading a mod
 
