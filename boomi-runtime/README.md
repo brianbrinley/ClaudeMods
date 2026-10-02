@@ -62,6 +62,20 @@ Runtimes are named `<prefix>-<date>-<session>`, for example `cc-20261002-dwmaray
 
 The tools are listed to Claude as `mcp__boomi-runtime__<name>`. A status line shows the runtime's state with an icon and a label (✓ online, ◐ installing, ⚠ offline, ✗ error). Where the surface supports panes, a **Boomi runtime** pane shows progress, the smoke test, recent executions and the install log.
 
+## Works with Boomi Companion
+
+[Boomi Companion](https://github.com/OfficialBoomi/bc-integration) (the `bc-integration` plugin) builds, deploys and tests Boomi components. This repository pulls it in automatically, so a session has both the runtime and the tools to build on it:
+
+- **Cloud sessions** install it from the environment's setup script (see [Setup](#setup-on-claude-code-on-the-web)): `claude plugin marketplace add OfficialBoomi/boomi-companion`, then `claude plugin install bc-integration@boomi-companion`. It's installed before the session starts, so its skill and commands, such as `/bc-integration:boomi-integration` and `/bc-integration:env-setup-guide`, are ready from the first message.
+- **The repository** also declares it in [`.claude/settings.json`](../.claude/settings.json) under `extraKnownMarketplaces` and `enabledPlugins`. On its own, that didn't install Companion in a cloud session, which is why the setup script does it.
+
+The two share one set of credentials and one `.env`:
+
+1. Set the `BOOMI_*` variables once, in the environment. You don't need Companion's `/bc-integration:env-setup-guide`.
+2. `/boomi up` writes Companion's `.env` from those variables. It adds `BOOMI_TEST_ATOM_ID` and `BOOMI_ENVIRONMENT_ID` for this session's runtime and environment, and turns a `BOOMI_TARGET_FOLDER` name into its ID.
+3. Ask Claude to build something, for example "build a process that reads this CSV and posts each row to this API, then deploy and test it". Companion's scripts deploy to this session's environment and run the tests on this session's runtime.
+4. `/boomi down`, or the end of the session, restores `.env` to its earlier values.
+
 ## Setup on Claude Code on the web
 
 In the cloud environment's settings (environment menu in the session's title bar → **Edit**):
@@ -153,6 +167,23 @@ Limits:
 - The mod API is early access and may change between releases.
 - `session.end` doesn't run if the cloud container is reclaimed first. `/boomi reap` deletes offline runtimes left behind that way.
 - The Platform API can't delete components, so the smoke test reuses one `boomi-runtime hello world` process instead of creating one per run.
+
+## To do
+
+**Secure the Platform API credentials.** Today the API token can leak in more ways than it should:
+
+- Environment variables are visible to every process in the session's container, including commands Claude runs (`env`, `printenv`), so the token could end up in the transcript.
+- `.env` is plain text in the working directory. Companion steers Claude away from reading it, but nothing enforces that.
+
+Ideas to work through:
+
+- [ ] Store `BOOMI_API_TOKEN` in the environment's protected credentials, where the cloud environment offers that, instead of a plain variable.
+- [ ] Declare the token as a `sensitive` setting in `plugin.json`, which Claude Code keeps in secure storage, and stop reading it from the environment or `.env`.
+- [ ] Add a guard to the mod (a `tool.call` hook) that refuses tool calls that would show the token: reading or searching `.env`, and shell commands such as `env`, `printenv` or `cat .env`.
+- [ ] Redact the token from everything the mod logs or returns (the pane's log, tool results, process output), with a test that proves it.
+- [ ] Use a dedicated API user with only the permissions the mod needs, and document rotating its token.
+
+**Windows.** A native Windows runtime, with WSL2 and a container as fallbacks.
 
 ## Development
 
