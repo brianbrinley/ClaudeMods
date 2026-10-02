@@ -30,6 +30,8 @@ export type RuntimeInfo = {
   name?: string
   atomId?: string
   installDir?: string
+  /** The folder holding bin/atom, wherever the installer put it. */
+  runtimeHome?: string
   platformStatus?: string
   environmentId?: string
   /** Set when this mod created the environment, which teardown then deletes. */

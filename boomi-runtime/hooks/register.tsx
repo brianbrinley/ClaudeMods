@@ -9,7 +9,15 @@ import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 import type { RuntimeInfo, SmokeTest } from '../types'
 import { credentialsFrom, parseEnv, setEnvValue } from './envfile'
 import type { Credentials } from './envfile'
-import { isRuntimeDir, linux, runtimeName, splitArgs, tail } from './linux'
+import {
+  isNamedRuntimeHome,
+  isRuntimeDir,
+  linux,
+  pickRuntimeHome,
+  runtimeName,
+  splitArgs,
+  tail,
+} from './linux'
 import { platformClient } from './platform'
 import { helloWorldProcess } from './smoke'
 
@@ -45,6 +53,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
 const ONLINE_TIMEOUT_MS = 10 * 60_000
 const POLL_MS = 10_000
 const SMOKE_TIMEOUT_MS = 5 * 60_000
+const SELF_START_MS = 90_000
 const PANE = 'boomi-runtime'
 
 // The pane is a convenience: a surface that cannot seat one must not stop the work.
@@ -67,7 +76,9 @@ const envPath = async ($: Engine, settings: Settings) =>
     : `${await $.session.cwd()}/${settings.envFile}`
 
 const installRoot = async ($: Engine, settings: Settings) =>
-  settings.installRoot || `${(await $.env.get('HOME')) ?? '/tmp'}/.boomi-runtimes`
+  settings.installRoot ||
+  (await $.env.get('BOOMI_RUNTIME_ROOT')) ||
+  `${(await $.env.get('HOME')) ?? '/tmp'}/.boomi-runtimes`
 
 type Loaded = { credentials: Credentials; path: string; text: string }
 
@@ -130,6 +141,37 @@ const mustRun = async ($: Engine, argv: readonly string[], label: string) => {
   if (code !== 0) throw new Error(`${label} exited with ${code}`)
 }
 
+/** The folder holding the runtime's bin/atom, wherever the installer put it. */
+const locateRuntimeHome = async ($: Engine, dir: string, name: string) => {
+  const home = (await $.env.get('HOME')) ?? '/root'
+  const roots: string[] = []
+  for (const root of [dir, ...linux.defaultRoots(home)]) {
+    if (await $.fs.exists(root)) roots.push(root)
+  }
+  if (roots.length === 0) return undefined
+  const found = await $.process.run(linux.findLaunchers(roots), { timeoutMs: 60_000 })
+  const launchers = found.stdout.split('\n').filter(Boolean)
+  return pickRuntimeHome(launchers, dir, name)
+}
+
+/**
+ * Runs a command whose output goes to `logPath` (see linux.toLogFile), then
+ * copies the log's last lines into the pane's log. Throws on a non-zero exit.
+ */
+const mustRunToFile = async (
+  $: Engine,
+  argv: readonly string[],
+  label: string,
+  logPath: string,
+) => {
+  const code = await runLogged($, linux.toLogFile(argv, logPath), label)
+  const output = (await $.fs.exists(logPath)) ? tail(await $.fs.read(logPath), 40) : []
+  for (const line of output) if (line.trim()) await note($, line)
+  if (code !== 0) {
+    throw new Error(`${label} exited with ${code}${output.length ? `: ${output.at(-1)}` : ''}`)
+  }
+}
+
 /**
  * Installs, starts and registers a runtime, then points Companion at it.
  * Long-running: callers start it without awaiting and watch the state.
@@ -163,6 +205,7 @@ const provision = async ($: Engine, settings: Settings): Promise<void> => {
       message: `Installing ${name}`,
       name,
       installDir: dir,
+      runtimeHome: undefined,
       atomId: undefined,
       platformStatus: undefined,
       environmentId: undefined,
@@ -196,7 +239,7 @@ const provision = async ($: Engine, settings: Settings): Promise<void> => {
       await mustRun($, linux.makeExecutable(installer), 'chmod +x installer')
     }
     // The command line holds the install token, so it is labelled, never echoed.
-    await mustRun(
+    await mustRunToFile(
       $,
       linux.install({
         installer,
@@ -207,16 +250,31 @@ const provision = async ($: Engine, settings: Settings): Promise<void> => {
         extraArgs: settings.installerArgs,
       }),
       `install ${name} into ${dir}`,
+      linux.installLog(root, name),
     )
 
     await patch($, { phase: 'starting', message: `Starting ${name}` })
-    if (!(await $.fs.exists(linux.launcher(dir)))) {
-      throw new Error(`the installer left no ${linux.launcher(dir)}`)
+    const home = await locateRuntimeHome($, dir, name)
+    if (home) {
+      await patch($, { runtimeHome: home })
+      await note($, `Runtime folder: ${home}`)
     }
-    await mustRun($, linux.start(dir), `${linux.launcher(dir)} start`)
+
+    // The quiet install starts the runtime itself: run bin/atom start only if
+    // it has not registered as online after a short wait.
+    const installedAt = await $.clock.now()
+    let atom = await platform.findAtom(name)
+    while (atom?.status !== 'ONLINE' && (await $.clock.now()) - installedAt < SELF_START_MS) {
+      await $.clock.sleep(POLL_MS)
+      atom = await platform.findAtom(name)
+      await patch($, { platformStatus: atom?.status ?? 'not registered yet' })
+    }
+    if (atom?.status !== 'ONLINE') {
+      if (!home) throw new Error(`found no bin/atom under ${dir} or the installer's default folders`)
+      await mustRunToFile($, linux.start(home), `${linux.launcher(home)} start`, linux.startLog(root, name))
+    }
 
     const startedAt = await $.clock.now()
-    let atom = await platform.findAtom(name)
     while (atom?.status !== 'ONLINE') {
       if ((await $.clock.now()) - startedAt > ONLINE_TIMEOUT_MS) {
         throw new Error(`${name} did not come online within 10 minutes`)
@@ -345,8 +403,9 @@ const teardown = async ($: Engine, settings: Settings): Promise<string> => {
   }
   const dir = info.installDir
 
-  if (dir && (await $.fs.exists(linux.launcher(dir)))) {
-    const code = await runLogged($, linux.stop(dir), `${linux.launcher(dir)} stop`)
+  const home = info.runtimeHome ?? dir
+  if (home && (await $.fs.exists(linux.launcher(home)))) {
+    const code = await runLogged($, linux.stop(home), `${linux.launcher(home)} stop`)
     if (code !== 0) problems.push(`stop exited with ${code}`)
   }
 
@@ -387,9 +446,18 @@ const teardown = async ($: Engine, settings: Settings): Promise<string> => {
   }
 
   const root = await installRoot($, settings)
-  if (dir && isRuntimeDir(dir, root, settings.namePrefix)) {
-    const code = await runLogged($, linux.remove(dir), `rm -rf ${dir}`)
-    if (code !== 0) problems.push(`removing ${dir} exited with ${code}`)
+  const leftovers = [dir, linux.installLog(root, info.name), linux.startLog(root, info.name)]
+  if (info.runtimeHome && info.runtimeHome !== dir && isNamedRuntimeHome(info.runtimeHome, info.name)) {
+    leftovers.push(info.runtimeHome)
+  }
+  for (const path of leftovers) {
+    if (!path) continue
+    const isOurs =
+      isRuntimeDir(path, root, settings.namePrefix) ||
+      (path === info.runtimeHome && isNamedRuntimeHome(path, info.name))
+    if (!isOurs) continue
+    const code = await runLogged($, linux.remove(path), `rm -rf ${path}`)
+    if (code !== 0) problems.push(`removing ${path} exited with ${code}`)
   }
   await $.store.delete(`runtime:${info.name}`)
 
@@ -452,8 +520,9 @@ const reap = async ($: Engine, settings: Settings): Promise<string> => {
 /** The last lines of the runtime's newest log file. */
 const logs = async ($: Engine, lines: number): Promise<string> => {
   const info = await read($, runtime)
-  if (!info.installDir) return 'No runtime installed.'
-  const folder = linux.logsDir(info.installDir)
+  const home = info.runtimeHome ?? info.installDir
+  if (!home) return 'No runtime installed.'
+  const folder = linux.logsDir(home)
   if (!(await $.fs.exists(folder))) return `No log folder yet at ${folder}.`
   const newest = (await $.fs.list(folder))
     .filter(entry => entry.kind === 'file' && entry.name.endsWith('.log'))
@@ -521,6 +590,7 @@ const summarize = (info: RuntimeInfo): string =>
     info.platformStatus && `platform status: ${info.platformStatus}`,
     info.environmentId && `environment: ${info.environmentId}`,
     info.installDir && `install dir: ${info.installDir}`,
+    info.runtimeHome && info.runtimeHome !== info.installDir && `runtime folder: ${info.runtimeHome}`,
     info.smoke && `smoke test: ${info.smoke.phase}: ${info.smoke.message}`,
     ...info.executions.map(run => `execution ${run.at} ${run.status} ${run.process} (${run.id})`),
   ]
