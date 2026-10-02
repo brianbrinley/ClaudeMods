@@ -5,3 +5,6 @@
 */.claude-plugin/types/
 
 node_modules/
+
+# Docs site build output
+_site/

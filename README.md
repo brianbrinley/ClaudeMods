@@ -5,6 +5,8 @@
 
 # Claude Mods
 
+**Docs site:** [brianbrinley.github.io/ClaudeMods](https://brianbrinley.github.io/ClaudeMods/)
+
 Mods for [Claude Code](https://claude.com/claude-code): plugins of function hooks that add live panes, status lines, slash commands, tools Claude can call, and session hooks. Each folder in this repository is one self-contained mod.
 
 ## Mods
