@@ -20,6 +20,7 @@ import {
 } from './linux'
 import { platformClient } from './platform'
 import type { PlatformClient } from './platform'
+import { containsSecret, guardReason, maskEnv, redact, secretValues } from './secrets'
 import { SMOKE_PROCESS, helloWorldProcess } from './smoke'
 
 type Engine = EngineInterface
@@ -38,6 +39,7 @@ type Settings = {
   installerUrl: string
   installerArgs: string[]
   isEphemeral: boolean
+  isGuarded: boolean
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -49,6 +51,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   ),
   installerArgs: splitArgs(String(options.installerArgs || '')),
   isEphemeral: options.ephemeral !== false,
+  isGuarded: options.guard !== false,
 })
 
 const ONLINE_TIMEOUT_MS = 10 * 60_000
@@ -65,8 +68,19 @@ const openPane = ($: Engine) => {
 const patch = ($: Engine, change: Partial<RuntimeInfo>) =>
   update($, runtime, current => ({ ...current, ...change }))
 
+// Every form of the API token seen so far (the token and its Basic auth
+// pair): nothing the mod logs, shows or returns may contain one.
+let knownSecrets: string[] = []
+
+const rememberSecrets = (token: string | undefined, envToken: string | undefined, username: string | undefined) => {
+  const values = [...secretValues(token, username), ...secretValues(envToken, username)]
+  if (values.length > 0) knownSecrets = [...new Set([...knownSecrets, ...values])]
+}
+
+const clean = (text: string) => redact(text, knownSecrets)
+
 const note = ($: Engine, line: string) =>
-  update($, runtime, current => ({ ...current, log: [...current.log, line].slice(-200) }))
+  update($, runtime, current => ({ ...current, log: [...current.log, clean(line)].slice(-200) }))
 
 const isBusy = (info: RuntimeInfo) =>
   info.phase === 'installing' || info.phase === 'starting' || info.phase === 'stopping'
@@ -110,13 +124,59 @@ const loadEnv = async ($: Engine, settings: Settings): Promise<Loaded> => {
   const text = (await $.fs.exists(path))
     ? await $.fs.read(path)
     : Object.entries(fallback).reduce((seed, [key, value]) => setEnvValue(seed, key, value), '')
-  const found = credentialsFrom({ ...fallback, ...parseEnv(text) })
+  const values = { ...fallback, ...parseEnv(text) }
+  rememberSecrets(values.BOOMI_API_TOKEN, fallback.BOOMI_API_TOKEN, values.BOOMI_USERNAME)
+  const found = credentialsFrom(values)
   if ('missing' in found) {
     throw new Error(
       `missing ${found.missing.join(', ')}: set them in ${path} (/bc-integration:env-setup-guide) or as environment variables`,
     )
   }
   return { credentials: found.credentials, path, text }
+}
+
+/** The token's known forms, refreshed from .env and the environment. */
+const currentSecrets = async ($: Engine, settings: Settings) => {
+  const fallback = await processEnv($)
+  rememberSecrets(undefined, fallback.BOOMI_API_TOKEN, fallback.BOOMI_USERNAME)
+  try {
+    await loadEnv($, settings)
+  } catch {}
+  return knownSecrets
+}
+
+// Keys /boomi set may change: never the token, which belongs in the environment's settings.
+const SETTABLE = new Set([
+  'BOOMI_API_URL',
+  'BOOMI_USERNAME',
+  'BOOMI_ACCOUNT_ID',
+  'BOOMI_ENVIRONMENT_ID',
+  'BOOMI_TEST_ATOM_ID',
+  'BOOMI_TARGET_FOLDER',
+  'BOOMI_VERIFY_SSL',
+])
+
+/** Companion's .env with the token masked: what Claude may see of it. */
+const showEnv = async ($: Engine, settings: Settings): Promise<string> => {
+  const path = await envPath($, settings)
+  if (await $.fs.exists(path)) return `${path}:\n${maskEnv(await $.fs.read(path))}`
+  const names = Object.keys(await processEnv($))
+  return `No ${path} yet; /boomi up writes one. From environment variables: ${names.join(', ') || 'none'}.`
+}
+
+/** Sets one non-secret key in Companion's .env: `/boomi set KEY=VALUE`. */
+const setEnv = async ($: Engine, settings: Settings, assignment: string): Promise<string> => {
+  const match = assignment.trim().match(/^([A-Z_][A-Z0-9_]*)=(.*)$/)
+  if (!match?.[1]) return 'Usage: /boomi set KEY=VALUE'
+  const [, key, value = ''] = match
+  if (!SETTABLE.has(key)) {
+    return key === 'BOOMI_API_TOKEN'
+      ? 'The API token is not set from the chat. Set BOOMI_API_TOKEN in the cloud environment\'s settings instead.'
+      : `Only ${[...SETTABLE].join(', ')} can be set this way.`
+  }
+  const env = await loadEnv($, settings)
+  await $.fs.write(env.path, setEnvValue(env.text, key, value || undefined))
+  return value ? `Set ${key} in ${env.path}.` : `Removed ${key} from ${env.path}.`
 }
 
 const client = ($: Engine, credentials: Credentials) =>
@@ -666,7 +726,48 @@ const USAGE = [
   '/boomi down     stop it, delete it from the platform, remove its files',
   '/boomi reap     delete offline runtimes left by earlier sessions',
   '/boomi doctor   check what provisioning needs',
+  '/boomi env      show Companion\'s .env with the API token masked',
+  '/boomi set K=V  set one non-secret value in Companion\'s .env',
 ].join('\n')
+
+/** Runs /boomi <args>; resolves the text to show. */
+const runCommand = async ($: Engine, settings: Settings, args: string): Promise<string> => {
+  const [action = 'status', count] = args.trim().split(/\s+/)
+  try {
+    switch (action) {
+      case 'up': {
+        const refusal = upRefusal(await read($, runtime))
+        if (refusal) return refusal
+        void provision($, settings)
+        openPane($)
+        return 'Provisioning started. Progress is in the Boomi runtime pane.'
+      }
+      case 'env':
+        return await showEnv($, settings)
+      case 'set':
+        return await setEnv($, settings, args.trim().slice('set'.length))
+      case 'smoke':
+        void smoke($, settings)
+        openPane($)
+        return 'Smoke test started. Progress is in the Boomi runtime pane.'
+      case 'down':
+        return await teardown($, settings)
+      case 'logs':
+        return await logs($, Number(count) || 40)
+      case 'reap':
+        return await reap($, settings)
+      case 'doctor':
+        return await doctor($, settings)
+      case 'status':
+        openPane($)
+        return summarize(await read($, runtime))
+      default:
+        return USAGE
+    }
+  } catch (error) {
+    return `boomi ${action}: ${messageOf(error)}`
+  }
+}
 
 export const register: Register = (on, options) => {
   const settings = settingsFrom(options)
@@ -676,7 +777,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'boomi',
       description: 'Temporary Boomi runtime for this session',
-      argumentHint: 'up | smoke | status | logs [n] | down | reap | doctor',
+      argumentHint: 'up | smoke | status | logs [n] | down | reap | doctor | env | set K=V',
     })
     await $.tool.register({
       name: 'up',
@@ -716,44 +817,33 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  on('command.run', { command: 'boomi' }, async ($, e) => {
-    const [action = 'status', count] = e.args.trim().split(/\s+/)
-    try {
-      switch (action) {
-        case 'up': {
-          const refusal = upRefusal(await read($, runtime))
-          if (refusal) return { text: refusal }
-          void provision($, settings)
-          openPane($)
-          return { text: 'Provisioning started. Progress is in the Boomi runtime pane.' }
-        }
-        case 'smoke':
-          void smoke($, settings)
-          openPane($)
-          return { text: 'Smoke test started. Progress is in the Boomi runtime pane.' }
-        case 'down':
-          return { text: await teardown($, settings) }
-        case 'logs':
-          return { text: await logs($, Number(count) || 40) }
-        case 'reap':
-          return { text: await reap($, settings) }
-        case 'doctor':
-          return { text: await doctor($, settings) }
-        case 'status':
-          openPane($)
-          return { text: summarize(await read($, runtime)) }
-        default:
-          return { text: USAGE }
+  // The guard: refuse tool calls that would show the token, and withhold any
+  // output that contains it. The mod's own tools answer below and never do.
+  on('tool.call', async ($, e, next) => {
+    const tool = String(e.tool)
+    if (!settings.isGuarded || tool.startsWith('mcp__boomi-runtime__')) return next(e)
+    const reason = guardReason(tool, e as unknown as Record<string, unknown>)
+    if (reason) return { deny: `boomi-runtime: ${reason}` }
+    const ran = await next(e)
+    // The output as the model reads it, and the tool's record behind it.
+    const shown = ran.deny === undefined ? `${ran.text ?? ''}\n${JSON.stringify(ran.result ?? '')}` : ''
+    if (shown.trim() && containsSecret(shown, await currentSecrets($, settings))) {
+      return {
+        deny: 'boomi-runtime: the output was withheld because it contained the Boomi API token.',
       }
-    } catch (error) {
-      return { text: `boomi ${action}: ${messageOf(error)}` }
     }
+    return ran
   })
+
+  on('command.run', { command: 'boomi' }, async ($, e) => ({
+    text: clean(await runCommand($, settings, e.args)),
+  }))
+
 
   on('tool.call', { tool: 'mcp__boomi-runtime__up' }, async $ => {
     const before = await read($, runtime)
     const refusal = upRefusal(before)
-    if (refusal) return { result: `${refusal}\n${summarize(before)}` }
+    if (refusal) return { result: clean(`${refusal}\n${summarize(before)}`) }
     void provision($, settings)
     openPane($)
     return { result: 'Provisioning started. Poll the status tool until phase is online or error.' }
@@ -765,20 +855,20 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'mcp__boomi-runtime__status' }, async $ => ({
-    result: summarize(await read($, runtime)),
+    result: clean(summarize(await read($, runtime))),
   }))
 
   on('tool.call', { tool: 'mcp__boomi-runtime__logs' }, async ($, e) => {
     const lines = Number((e as { lines?: unknown }).lines) || 40
-    return { result: await logs($, lines) }
+    return { result: clean(await logs($, lines)) }
   })
 
   on('tool.call', { tool: 'mcp__boomi-runtime__down' }, async $ => ({
-    result: await teardown($, settings),
+    result: clean(await teardown($, settings)),
   }))
 
   on('tool.call', { tool: 'mcp__boomi-runtime__doctor' }, async $ => ({
-    result: await doctor($, settings),
+    result: clean(await doctor($, settings)),
   }))
 
   on('session.end', async ($, e, next) => {

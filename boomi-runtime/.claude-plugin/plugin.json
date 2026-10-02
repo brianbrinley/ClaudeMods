@@ -39,6 +39,12 @@
       "title": "Delete at session end",
       "description": "Stop the runtime, delete it from the platform and remove its files when the session ends",
       "default": true
+    },
+    "guard": {
+      "type": "boolean",
+      "title": "Guard the API token",
+      "description": "Refuse tool calls that would show the Boomi API token (reading .env, printing the environment) and withhold any output that contains it",
+      "default": true
     }
   }
 }

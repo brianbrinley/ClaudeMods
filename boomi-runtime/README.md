@@ -59,6 +59,8 @@ Runtimes are named `<prefix>-<date>-<session>`, for example `cc-20261002-dwmaray
 | `/boomi down` | `down` | Tear everything down. |
 | `/boomi reap` | | Delete offline runtimes left by earlier sessions. |
 | `/boomi doctor` | `doctor` | Check the host, credentials and network. |
+| `/boomi env` | | Companion's `.env`, with the API token masked. |
+| `/boomi set KEY=VALUE` | | Set one non-secret value in `.env`, such as `BOOMI_TARGET_FOLDER`. The token can't be set this way. |
 
 The tools are listed to Claude as `mcp__boomi-runtime__<name>`. A status line shows the runtime's state with an icon and a label (✓ online, ◐ installing, ⚠ offline, ✗ error). Where the surface supports panes, a **Boomi runtime** pane shows progress, the smoke test, recent executions and the install log.
 
@@ -110,6 +112,18 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-runtime"].
 | `installerUrl` | `https://platform.boomi.com/atom/atom_install64.sh` | The Linux installer. |
 | `installerArgs` | | Extra quiet-install arguments, such as proxy settings. |
 | `ephemeral` | `true` | Tear down when the session ends. |
+| `guard` | `true` | Guard the API token: see [Protecting the API token](#protecting-the-api-token). |
+
+## Protecting the API token
+
+The mod keeps the Platform API token out of what Claude reads, in two layers:
+
+1. **A guard on tool calls.** Before a tool runs, the mod refuses calls that would show the token: reading or searching a `.env` file, shell commands that print the environment (`env`, `printenv`, `set`, `export -p`, `/proc/*/environ`), and anything that names `BOOMI_API_TOKEN`. Templates such as `.env.example` stay readable, and ordinary commands, including Companion's scripts, run as usual.
+2. **Redaction of output.** After any tool runs, if its output contains the token, or the Basic auth value built from it, the mod withholds the output and tells Claude why. Everything the mod itself logs, shows or returns has the token replaced with `‹redacted›`.
+
+To see or change `.env` without exposing the token, use `/boomi env` (token masked) and `/boomi set KEY=VALUE`.
+
+The guard protects the conversation, not the machine: a process in the container can still read the environment. Turn it off with the `guard` setting if it gets in the way.
 
 ## How it works
 
@@ -179,8 +193,8 @@ Ideas to work through:
 
 - [ ] Store `BOOMI_API_TOKEN` in the environment's protected credentials, where the cloud environment offers that, instead of a plain variable.
 - [ ] Declare the token as a `sensitive` setting in `plugin.json`, which Claude Code keeps in secure storage, and stop reading it from the environment or `.env`.
-- [ ] Add a guard to the mod (a `tool.call` hook) that refuses tool calls that would show the token: reading or searching `.env`, and shell commands such as `env`, `printenv` or `cat .env`.
-- [ ] Redact the token from everything the mod logs or returns (the pane's log, tool results, process output), with a test that proves it.
+- [x] Add a guard to the mod (a `tool.call` hook) that refuses tool calls that would show the token: reading or searching `.env`, and shell commands such as `env`, `printenv` or `cat .env`.
+- [x] Redact the token from everything the mod logs or returns (the pane's log, tool results, process output), with a test that proves it.
 - [ ] Use a dedicated API user with only the permissions the mod needs, and document rotating its token.
 
 **Windows.** A native Windows runtime, with WSL2 and a container as fallbacks.
