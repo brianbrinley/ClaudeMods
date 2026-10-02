@@ -1,0 +1,10 @@
+{
+  "extraKnownMarketplaces": {
+    "boomi-companion": {
+      "source": { "source": "github", "repo": "OfficialBoomi/boomi-companion" }
+    }
+  },
+  "enabledPlugins": {
+    "bc-integration@boomi-companion": true
+  }
+}
