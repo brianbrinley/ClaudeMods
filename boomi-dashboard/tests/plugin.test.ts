@@ -574,3 +574,67 @@ test('/bc-dashboard report prints the session as Markdown, saves it, and Claude 
   const tool = await $.tool.call({ tool: 'mcp__boomi-dashboard__report' } as never)
   expect(JSON.stringify(tool)).toContain('Boomi Companion session report')
 })
+
+test('Run again repeats a failed test the way Claude ran it, and a pass clears it', async ($, on) => {
+  world(on, { [FILE]: ORDERS, 'scripts/boomi-execution-query.sh': '' })
+  mock.store(on)
+  shell(on, 'Execution completed: status=ERROR, executionId=execution-0490202b-2e2f')
+  const ran: string[][] = []
+  on('process.run', async (_$, e) => {
+    ran.push([...e.argv])
+    return { value: { exitCode: 0, stdout: 'Execution completed: status=COMPLETE, executionId=execution-77aa', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect((await pane.find({ type: 'Button', key: 'rerun-0' }))?.props.label).toBe('Run again')
+  const again = await $.command.run(dashboard('rerun 1'))
+  expect(ran).toHaveLength(1)
+  expect(ran[0]![1]).toMatch(/scripts\/boomi-test-execute\.sh$/)
+  expect(ran[0]!.slice(2)).toEqual(['--process-id', ID])
+  expect(again.text).toContain('✓')
+  const text = await $.command.run(dashboard('text'))
+  expect(text.text).toContain('✓ Nothing needs attention.')
+  expect((await $.command.run(dashboard('rerun 1'))).text).toContain('Usage: /bc-dashboard rerun')
+})
+
+test('the spend budget shows in the summary and toasts once as it nears', { options: { budgetUsd: 1.5 } }, async ($, on) => {
+  const toasts = world(on, { [FILE]: ORDERS })
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  const text = await $.command.run(dashboard('text'))
+  expect(text.text).toContain('Session: $1.25 so far · ◐ 83% of the $1.50 budget')
+  expect(toasts.filter(t => t.includes('83% of the $1.50 budget'))).toHaveLength(1)
+})
+
+test('after Claude\'s turn, the prompt box suggests the step a process still needs, once', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  const suggestions: string[] = []
+  on('prompt.suggest', async (_$, e) => {
+    suggestions.push(e.text)
+    return { isShown: true }
+  })
+  on('turn.complete', async () => ({ text: '' }))
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  await $.turn.complete({ reason: 'answer', turnId: 't1', answer: '' } as never)
+  await $.command.run(dashboard('text'))
+  await $.turn.complete({ reason: 'answer', turnId: 't2', answer: '' } as never)
+  await $.command.run(dashboard('text'))
+  expect(suggestions).toEqual(['Deploy Orders Sync and test it'])
+})
+
+test('no suggestion when turned off', { options: { suggestions: false } }, async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  const suggestions: string[] = []
+  on('prompt.suggest', async (_$, e) => {
+    suggestions.push(e.text)
+    return { isShown: true }
+  })
+  on('turn.complete', async () => ({ text: '' }))
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  await $.turn.complete({ reason: 'answer', turnId: 't1', answer: '' } as never)
+  await $.command.run(dashboard('text'))
+  expect(suggestions).toEqual([])
+})

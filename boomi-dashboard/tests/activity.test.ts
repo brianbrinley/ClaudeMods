@@ -6,6 +6,8 @@ import {
   diagnose,
   fixPrompt,
   report,
+  budgetOf,
+  nextStep,
   closedCount,
   reopenAll,
   compareWatched,
@@ -75,7 +77,7 @@ const act = (kind: Activity['kind'], outcome: Activity['outcome'], subject: stri
 const FILE = 'active-development/processes/Orders.xml'
 
 /** The script runs in a command, without the folder each ran from (its own test checks that). */
-const runsIn = (command: string) => scriptRuns(command).map(({ scriptsDir: _dir, ...run }) => run)
+const runsIn = (command: string) => scriptRuns(command).map(({ scriptsDir: _dir, args: _args, ...run }) => run)
 
 test('scriptRuns finds the Companion scripts a command runs and what they name', () => {
   expect(
@@ -557,4 +559,31 @@ test('the session report has each section, and a pipe in a name keeps the table 
   expect(text).toContain('## Needs attention')
   expect(text).toContain('- Cost: $0.42')
   expect(text).toContain('- Tokens: 12k new (…) · 80k cache reads')
+})
+
+test('a test keeps its arguments so it can be run again', () => {
+  expect(scriptRuns(`bash scripts/boomi-test-execute.sh --process-id ${ID} --atom-id a1`)[0]!.args).toEqual(['--process-id', ID, '--atom-id', 'a1'])
+  expect(scriptRuns(`bash scripts/boomi-component-push.sh ${FILE}`)[0]!.args).toBeUndefined()
+})
+
+test('the budget warns from 80% and says when it is spent, and stays quiet without one', () => {
+  expect(budgetOf(1, 5)).toEqual({ level: 'healthy', percent: 20, text: '20% of the $5.00 budget' })
+  expect(budgetOf(4.2, 5)?.level).toBe('warning')
+  expect(budgetOf(5.5, 5)).toMatchObject({ level: 'critical', text: 'budget spent: $5.50 of the $5.00 budget' })
+  expect(budgetOf(4, 0)).toBeUndefined()
+  expect(budgetOf(undefined, 5)).toBeUndefined()
+  expect(statusLine(dashboard(), NOW, 24 * HOUR, { usd: 4.2, budgetUsd: 5 })).toContain('◐ 84% of the $5.00 budget')
+  expect(statusLine(dashboard(), NOW, 24 * HOUR, { usd: 1, budgetUsd: 5 })).not.toContain('budget')
+})
+
+test('the next step is to deploy what was saved, then to test what was deployed', () => {
+  const saved = act('push', 'ok', 'Orders Sync', NOW - 60_000, { file: FILE, type: 'process' })
+  expect(nextStep([saved])).toBe('Deploy Orders Sync and test it')
+  const deployed = act('deploy', 'ok', 'Orders Sync', NOW - 50_000, { file: FILE, type: 'process' })
+  expect(nextStep([saved, deployed])).toBe('Test Orders Sync')
+  expect(nextStep([saved, deployed, act('test', 'ok', 'Orders Sync', NOW - 40_000, { file: FILE, type: 'process' })])).toBeUndefined()
+  expect(nextStep([saved, deployed, act('test', 'failed', 'Orders Sync', NOW - 40_000, { file: FILE, type: 'process' })])).toBeUndefined()
+  expect(nextStep([saved, act('deploy', 'running', 'Orders Sync', NOW - 50_000, { file: FILE, type: 'process' })])).toBeUndefined()
+  expect(nextStep([act('push', 'ok', 'Order Profile', NOW, { file: 'active-development/profiles/P.xml', type: 'profile.json' })])).toBeUndefined()
+  expect(nextStep([{ ...saved, isRestored: true }])).toBeUndefined()
 })

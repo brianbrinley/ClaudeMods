@@ -6,6 +6,7 @@ Ideas for mods we could build next, starting with Boomi and integration work. Th
 - The Companion guardrail, now the [boomi-standards](boomi-standards/README.md) mod.
 - The deployment watcher, folded into the [boomi-dashboard](boomi-dashboard/README.md) mod: a live summary of a Companion session that also polls the environment's runs and watches components for changes.
 - The first half of the execution debugger, in the dashboard: **Why?** reads a failed run's process log and **Ask Claude to fix** drafts the request. A session report (`/bc-dashboard report`) came with it.
+- Dashboard follow-ups: **Run again** for a failed test, a spend budget (`budgetUsd`), and the next step (deploy, then test) suggested in the prompt box.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
 
@@ -127,10 +128,7 @@ quadrantChart
 
 Smaller additions to the [boomi-dashboard](boomi-dashboard/README.md) mod that build on what it already tracks:
 
-- **Reminders.** Before Claude finishes a turn, nudge it about what's half done: a component saved but not deployed, or deployed but not tested.
-- **Spend budget.** A `budgetUsd` setting: warn in the status line as the session nears it, and show spend per component against it.
 - **Guardrails at a glance.** Show what [boomi-standards](boomi-standards/README.md) blocked or flagged and the state of the [boomi-runtime](boomi-runtime/README.md) in the pane, so one place shows the whole session.
-- **Run it again.** A **Re-run** button on a failed test that repeats the same `boomi-test-execute.sh` call after Claude's fix, a first step toward the [process test harness](#process-test-harness).
 - **Promotion diff and mock endpoints** would each show up as a section in the pane once they exist.
 
 ## Add an idea or claim one

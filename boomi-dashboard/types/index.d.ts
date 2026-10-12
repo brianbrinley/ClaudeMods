@@ -40,6 +40,8 @@ export type Activity = {
   model?: string
   /** Brought back from an earlier session in the same folder. */
   isRestored?: boolean
+  /** A test's arguments to its script, so Run again can repeat it. */
+  args?: string[]
 }
 
 /** Tokens by kind, as the API reports them. */
@@ -125,6 +127,6 @@ export type PaneTheme = 'day' | 'night' | 'terminal'
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean; diagnoses: Record<string, DiagnosisState> }
+    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; suggested: string }
   }
 }

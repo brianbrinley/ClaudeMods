@@ -81,6 +81,8 @@ export type ScriptRun = {
   script?: string
   /** The folder the script ran from, when the command names it: where Companion's scripts are. */
   scriptsDir?: string
+  /** A test's arguments, so it can be run again. */
+  args?: string[]
 }
 
 const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefined => {
@@ -159,6 +161,7 @@ export const scriptRuns = (command: string): ScriptRun[] => {
     const run: ScriptRun = { kind: found.kind }
     if (token.includes('/')) run.scriptsDir = joinPath(dir, token).replace(/\/[^/]+$/, '')
     if (found.script) run.script = found.script
+    if (found.kind === 'test') run.args = args
     for (let j = 0; j < args.length; j++) {
       const arg = args[j]!
       const value = args[j + 1]
@@ -604,7 +607,16 @@ export const stages = (row: ComponentRow, runs: readonly Run[] = []): Stage[] =>
  * a failed step, `run:<execution id>` a failed run, `watch:<component id>` a
  * watched component someone else changed.
  */
-export type Attention = { key: string; level: Level; title: string; hint: string; at: number; executionId?: string }
+export type Attention = {
+  key: string
+  level: Level
+  title: string
+  hint: string
+  at: number
+  executionId?: string
+  /** A failed test's step, when it can be run again. */
+  rerunId?: number
+}
 
 /** Runs in the window, newest first: a run from last month isn't news. */
 export const recentRuns = (runs: readonly Run[], now: number, windowMs: number): Run[] =>
@@ -626,7 +638,15 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
           : a.kind === 'test'
             ? `Execution ${a.executionId ? `${a.executionId.replace(/^execution-/, '').slice(0, 8)}…` : 'log'}: press Why? to read what failed.`
             : a.detail
-      items.push({ key: `step:${a.id}`, level: levelOf(a), title: describe(a), hint, at: when(a), executionId: a.kind === 'test' ? a.executionId : undefined })
+      items.push({
+        key: `step:${a.id}`,
+        level: levelOf(a),
+        title: describe(a),
+        hint,
+        at: when(a),
+        executionId: a.kind === 'test' ? a.executionId : undefined,
+        rerunId: a.kind === 'test' && a.args ? a.id : undefined,
+      })
     }
   }
   const seenRuns = new Set(dashboard.seenRuns ?? [])
@@ -836,11 +856,43 @@ export const statusLine = (dashboard: Dashboard, now: number, windowMs: number, 
   if (parts.length === 0) parts.push('waiting for Companion')
   const spent = [usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined, formatCost(usage.usd)].filter(Boolean)
   if (spent.length > 0) parts.push(`${spent.join(' · ')} this session`)
+  const left = budgetOf(usage.usd, usage.budgetUsd)
+  if (left && left.level !== 'healthy') parts.push(`${STATUS[left.level].icon} ${left.text}`)
   return parts.join(' · ')
+}
+
+/**
+ * Where the session's spend stands against its budget: warning from 80%,
+ * critical once it's spent. Undefined without a budget or a cost.
+ */
+export const budgetOf = (usd: number | undefined, budgetUsd: number | undefined): { level: Level; percent: number; text: string } | undefined => {
+  if (!budgetUsd || budgetUsd <= 0 || usd === undefined) return undefined
+  const percent = (usd / budgetUsd) * 100
+  const level: Level = percent >= 100 ? 'critical' : percent >= 80 ? 'warning' : 'healthy'
+  const of = `of the ${formatCost(budgetUsd)} budget`
+  return { level, percent, text: percent >= 100 ? `budget spent: ${formatCost(usd)} ${of}` : `${Math.round(percent)}% ${of}` }
+}
+
+/**
+ * The step a process still needs after this session's work: deploy what was
+ * saved, test what was deployed. Undefined while a step runs, or when the
+ * latest process is saved, deployed and tested, or failed (Why? covers that).
+ */
+export const nextStep = (activity: readonly Activity[]): string | undefined => {
+  const fresh = activity.filter(a => !a.isRestored)
+  if (fresh.some(a => a.outcome === 'running')) return undefined
+  const row = components(fresh).find(r => r.type === 'process' && (r.saved || r.deployed))
+  if (!row) return undefined
+  const after = (a: Activity | undefined, b: Activity | undefined) => !!a && (!b || a.startedAt > b.startedAt)
+  if (row.saved?.outcome === 'ok' && row.saved.kind !== 'pull' && after(row.saved, row.deployed)) return `Deploy ${row.name} and test it`
+  if (row.deployed?.outcome === 'ok' && row.deployed.kind === 'deploy' && after(row.deployed, row.tested)) return `Test ${row.name}`
+  return undefined
 }
 
 export type Usage = {
   usd?: number
+  /** The session's spend budget, from the budgetUsd setting. */
+  budgetUsd?: number
   contextPercent?: number
   /** New tokens: input, output and cache writes (newTokens). */
   tokens?: number
@@ -907,7 +959,9 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
 
   const cost = formatCost(usage.usd)
   const context = usage.contextPercent === undefined ? undefined : `context ${Math.round(usage.contextPercent)}% full`
-  if (cost || context) lines.push('', `Session: ${[cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
+  const budget = budgetOf(usage.usd, usage.budgetUsd)
+  const spentOf = budget ? `${STATUS[budget.level].icon} ${budget.text}` : undefined
+  if (cost || context) lines.push('', `Session: ${[cost && `${cost} so far`, spentOf, context].filter(Boolean).join(' · ')}`)
   if (usage.split) lines.push(`Tokens: ${usage.split}`)
   for (const line of usage.modelSplits ?? []) lines.push(`  ${line}`)
   if (usage.model && !usage.modelSplits?.length) lines.push(`Model: ${usage.model}`)

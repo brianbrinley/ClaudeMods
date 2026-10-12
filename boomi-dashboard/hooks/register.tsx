@@ -22,6 +22,8 @@ import {
   diagnose,
   fixPrompt,
   report,
+  budgetOf,
+  nextStep,
   compareWatched,
   componentOf,
   componentPath,
@@ -100,6 +102,12 @@ const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const,
 /** The flamingo's animation frame, moved on while Claude works. */
 const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
 
+/** The budget's last warning, as a percent (0, 80 or 100), so each is toasted once. */
+const budgetAlert = atom({ plugin: 'boomi-dashboard', key: 'budgetAlert' } as const, 0)
+
+/** The next step last suggested in the prompt box, so it isn't suggested after every turn. */
+const suggested = atom({ plugin: 'boomi-dashboard', key: 'suggested' } as const, '')
+
 type Settings = {
   envFile: string
   componentsDir: string
@@ -109,6 +117,8 @@ type Settings = {
   isToasting: boolean
   isBanded: boolean
   hasFlamingo: boolean
+  budgetUsd: number
+  isSuggesting: boolean
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -120,6 +130,8 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   isToasting: options.toasts !== false,
   isBanded: options.banner !== false,
   hasFlamingo: options.flamingo !== false,
+  budgetUsd: Math.max(0, Number(options.budgetUsd ?? 0) || 0),
+  isSuggesting: options.suggestions !== false,
 })
 
 const PANE = 'boomi-dashboard'
@@ -173,7 +185,19 @@ const snapshot = async ($: Engine) => {
 
 const refreshStatus = async ($: Engine, settings: Settings) => {
   const now = await $.clock.now()
-  $.ui.status(statusLine(await read($, dashboard), now, settings.windowMs, await usageOf($)))
+  const usage = { ...(await usageOf($)), budgetUsd: settings.budgetUsd }
+  $.ui.status(statusLine(await read($, dashboard), now, settings.windowMs, usage))
+  await warnBudget($, settings, usage.usd)
+}
+
+/** Toasts once when the session passes 80% of its budget, and once when it's spent. */
+const warnBudget = async ($: Engine, settings: Settings, usd: number | undefined) => {
+  const left = budgetOf(usd, settings.budgetUsd)
+  if (!left) return
+  const mark = left.percent >= 100 ? 100 : left.percent >= 80 ? 80 : 0
+  if (mark <= (await read($, budgetAlert))) return
+  await update($, budgetAlert, () => mark)
+  toast($, settings, `${STATUS[left.level].icon} Boomi session ${left.text}`)
 }
 
 const record = ($: Engine, change: (list: Activity[]) => Activity[]) =>
@@ -261,7 +285,8 @@ const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun
   const started: Activity[] = []
   for (const run of runs) {
     const found = await subjectOf($, settings, run, current)
-    started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found })
+    const args = run.kind === 'test' && run.args ? { args: run.args } : {}
+    started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found, ...args })
   }
   if (!current.activity.some(a => a.kind !== 'other')) openPane($)
   void rememberScripts($, runs)
@@ -606,6 +631,55 @@ const whyByNumber = async ($: Engine, settings: Settings, target: string): Promi
   return [`${item.title} (execution ${item.executionId}):`, ...(state.lines ?? []).map(line => `  ${line}`)].join('\n')
 }
 
+/**
+ * Runs a failed test again with the same arguments, through Companion's own
+ * script, and records it as a new step: a pass clears the failure.
+ */
+const rerun = async ($: Engine, settings: Settings, stepId: number): Promise<string> => {
+  const current = await read($, dashboard)
+  const step = current.activity.find(a => a.id === stepId)
+  if (!step?.args) return 'That test has no command to repeat.'
+  if (current.activity.some(a => a.kind === 'test' && a.outcome === 'running' && a.componentId === step.componentId)) {
+    return `A test of ${step.subject} is already running.`
+  }
+  const scripts = await findScripts($)
+  if (!scripts) return "Couldn't find Boomi Companion's scripts. Run any Companion script once, then try again."
+  const run: ScriptRun = { kind: 'test', args: step.args }
+  if (step.componentId) run.processId = step.componentId
+  const started = await noteStart($, settings, [run])
+  let ran: Ran
+  try {
+    const result = await $.process.run(['bash', `${scripts}/boomi-test-execute.sh`, ...step.args], {
+      cwd: await $.session.cwd(),
+      timeoutMs: 600_000,
+    })
+    ran = { text: `${result.stdout}\n${result.stderr}`, isError: result.exitCode !== 0 }
+  } catch (error) {
+    ran = { text: `ERROR: ${messageOf(error)}`, isError: true }
+  }
+  await noteEnd($, settings, started, ran)
+  const done = (await read($, dashboard)).activity.find(a => a.id === started[0]?.id)
+  return done ? `${STATUS[levelOf(done)].icon} ${describe(done)}` : 'Ran the test again.'
+}
+
+/** /bc-dashboard rerun <number>: runs a failed test in Needs attention again. */
+const rerunByNumber = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const needs = attention(await read($, dashboard), await $.clock.now(), settings.windowMs)
+  const item = needs[Number(target) - 1]
+  if (!item) return `Usage: /bc-dashboard rerun <1-${needs.length}>, a number from /bc-dashboard text.`
+  if (item.rerunId === undefined) return `${item.title} isn't a test Claude ran, so there's nothing to run again.`
+  return rerun($, settings, item.rerunId)
+}
+
+/** After Claude's turn, suggests the step a process still needs, once for each step. */
+const suggestNext = async ($: Engine, settings: Settings) => {
+  if (!settings.isSuggesting) return
+  const text = nextStep((await read($, dashboard)).activity)
+  if (!text || text === (await read($, suggested))) return
+  await update($, suggested, () => text)
+  await $.prompt.suggest({ text }).catch(() => undefined)
+}
+
 // --- The session report ------------------------------------------------------------
 
 const reportNow = async ($: Engine, settings: Settings) => {
@@ -682,6 +756,7 @@ const USAGE = [
   '/bc-dashboard close <n|all>   close a Needs attention item by its number, or all of them',
   '/bc-dashboard reopen          bring closed items back',
   '/bc-dashboard why <n>         read the log of a failed run or test and show what failed',
+  '/bc-dashboard rerun <n>       run a failed test again, the same way Claude ran it',
   '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
   '/bc-dashboard seen            mark failed runs and watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
@@ -689,7 +764,7 @@ const USAGE = [
 ].join('\n')
 
 const summaryNow = async ($: Engine, settings: Settings) =>
-  summary(await read($, dashboard), await usageOf($), await $.clock.now(), settings.windowMs)
+  summary(await read($, dashboard), { ...(await usageOf($)), budgetUsd: settings.budgetUsd }, await $.clock.now(), settings.windowMs)
 
 const runCommand = async ($: Engine, settings: Settings, args: string): Promise<string> => {
   const [action = 'status', ...rest] = args.trim().split(/\s+/).filter(Boolean)
@@ -720,6 +795,8 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return closeByNumber($, settings, target)
     case 'why':
       return whyByNumber($, settings, target)
+    case 'rerun':
+      return rerunByNumber($, settings, target)
     case 'report':
       return reportCommand($, settings, target)
     case 'reopen':
@@ -936,6 +1013,7 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     await update($, isWorking, () => false).catch(() => undefined)
     void refreshStatus($, settings)
+    if (e.reason === 'answer') void suggestNext($, settings)
     return done
   })
 
@@ -1014,6 +1092,7 @@ export const register: Register = (on, options) => {
       .map(a => all.get(a.id)?.tokens ?? 0)
     const last = feed[0] && all.get(feed[0].id)
 
+    const budget = budgetOf(usage.usd, settings.budgetUsd)
     // Every Text carries the pane's colors, so it reads the same on any terminal.
     const t = (text: string, style: { color?: string; bold?: boolean; bg?: string } = {}) => (
       <Text color={style.color ?? p.text} backgroundColor={style.bg ?? p.bg} bold={style.bold}>
@@ -1087,7 +1166,12 @@ export const register: Register = (on, options) => {
                 last?.tokens ? `last step ${formatTokens(last.tokens)}` : undefined,
                 usage.cached ? `+${formatTokens(usage.cached)} cached` : undefined,
               )}
-              {gauge('SPEND', formatCost(usage.usd) ?? '—', last?.usd ? `last step ${formatCost(last.usd)}` : undefined)}
+              {gauge(
+                'SPEND',
+                formatCost(usage.usd) ?? '—',
+                last?.usd ? `last step ${formatCost(last.usd)}` : undefined,
+                budget ? `${STATUS[budget.level].icon} ${budget.percent >= 100 ? 'budget spent' : `${Math.round(budget.percent)}% of ${formatCost(settings.budgetUsd)}`}` : undefined,
+              )}
               {gauge(
                 'CONTEXT',
                 usage.contextPercent === undefined ? '—' : `${meter(usage.contextPercent, 8)} ${Math.round(usage.contextPercent)}%`,
@@ -1141,13 +1225,14 @@ export const register: Register = (on, options) => {
               {why?.phase === 'error' && t(`      ${why.error}`, { color: p.muted })}
               {why?.phase === 'ready' && t(`      The log (${why.severe ?? 0} severe, ${why.warnings ?? 0} warnings):`, { color: p.muted })}
               {why?.phase === 'ready' && (why.lines ?? []).map(text => t(`        ${text}`))}
-              {n.executionId && (
+              {(n.executionId || n.rerunId !== undefined) && (
                 <Box>
                   {t('      ')}
-                  {why?.phase !== 'ready' && why?.phase !== 'loading' && (
+                  {n.executionId && why?.phase !== 'ready' && why?.phase !== 'loading' && (
                     <Button key={`why-${i}`} label="Why?" onPress={() => void explain($, settings, n.executionId!)} />
                   )}
                   {why?.phase === 'ready' && <Button key={`fix-${i}`} label="Ask Claude to fix" onPress={() => askToFix($, n.title, n.executionId!)} />}
+                  {n.rerunId !== undefined && <Button key={`rerun-${i}`} label="Run again" onPress={() => void rerun($, settings, n.rerunId!)} />}
                 </Box>
               )}
             </Box>

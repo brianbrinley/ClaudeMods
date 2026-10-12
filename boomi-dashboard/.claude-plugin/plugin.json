@@ -56,6 +56,18 @@
       "title": "Banner above the prompt",
       "description": "Show the latest Companion step and what needs attention above the prompt",
       "default": true
+    },
+    "budgetUsd": {
+      "type": "number",
+      "title": "Spend budget (USD)",
+      "description": "The session's spend budget: the status line and pane warn at 80% and when it's spent; 0 turns it off",
+      "default": 0
+    },
+    "suggestions": {
+      "type": "boolean",
+      "title": "Suggest the next step",
+      "description": "When Claude finishes a turn with a component saved but not deployed, or deployed but not tested, suggest that step in the prompt box (Tab takes it)",
+      "default": true
     }
   }
 }

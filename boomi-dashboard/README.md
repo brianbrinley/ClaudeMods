@@ -74,6 +74,10 @@ A later success clears an earlier failure, so **Needs attention** lists only wha
 
 **Why did it fail?** A failed test or run in **Needs attention** has a **Why?** button. It runs Companion's own `boomi-execution-query.sh --execution-id <id> --logs`, which downloads the execution's process log, and shows the `SEVERE` lines under the item, with how many severe lines and warnings the log has. Then **Ask Claude to fix** puts a fix request in the prompt box, quoting those lines and the execution ID, after anything you've already typed. Nothing is sent until you press Enter. Without a pane, `/bc-dashboard why <number>` prints the same lines.
 
+**Run again.** A failed test Claude ran has a **Run again** button. It runs the same `boomi-test-execute.sh` command with the same arguments, through Companion's own script, without a turn of Claude's, and adds the result as a new step: a pass clears the failure. Without a pane, `/bc-dashboard rerun <number>` does the same.
+
+**The next step.** When Claude finishes a turn with a process saved but not deployed, or deployed but not tested, the prompt box suggests that step, such as "Deploy Orders Sync and test it". Tab takes it; typing anything else ignores it. Each suggestion is made once. The `suggestions` setting turns this off.
+
 ### Session report
 
 `/bc-dashboard report` prints the session as Markdown: each component and where it stands, with its tokens and cost, the deployments and tests, what still needs attention, the process runs in Boomi and the spend. `/bc-dashboard report save` also writes it to `boomi-session-report-<date and time>.md` in the working folder, ready for a pull request, a ticket or a hand-off. Claude can ask for it too, through the `report` tool.
@@ -90,6 +94,8 @@ Status is shown with an icon and a label, never color alone:
 | ✗ | Failed |
 
 ## Tokens and spend
+
+**A budget.** Set `budgetUsd` and the dashboard keeps the session's spend against it. From 80% the status line, the summary and the pane's **SPEND** gauge show `◐ 84% of the $5.00 budget`, and once it's spent, `✗ budget spent`. A toast says so once at each mark. It's a warning only: nothing stops.
 
 - **Running token count.** Every model call reports its tokens, and the dashboard adds them up, once per call. That covers Claude's own calls and those of the agents it starts. The headline counts **new tokens**: fresh input, output, and what's written to the prompt cache.
 - **Cache reads, apart.** On every call, Claude sends the conversation so far again, and the prompt cache serves most of it. Those cache reads are real, and they're billed at a fraction of the price of new input. But they grow with every call: a session with 60k tokens of context that has made 55 calls has read about 3.3M tokens from the cache. Counted in the headline, they'd dwarf the work actually done. So the gauge shows them as `+3.3M cached`.
@@ -178,6 +184,7 @@ The token is used only in the requests' `Authorization` header. The dashboard ne
 | `/bc-dashboard unwatch <id\|name>` | | Stops watching it. |
 | `/bc-dashboard close <number\|all>` | | Closes a **Needs attention** item by its number in `/bc-dashboard text`, or all of them. |
 | `/bc-dashboard reopen` | | Brings closed items back. |
+| `/bc-dashboard rerun <number>` | | Runs a failed test in **Needs attention** again, the way Claude ran it. |
 | `/bc-dashboard why <number>` | | Reads the process log of a failed test or run in **Needs attention** and prints its `SEVERE` lines. |
 | `/bc-dashboard report [save]` | `report` | The session report as Markdown; `save` also writes it to a file in the working folder. |
 | `/bc-dashboard seen` | | Marks the current failed runs and watched changes as seen: they leave **Needs attention**. |
@@ -208,6 +215,8 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 | `pollSeconds` | `60` | How often to check Boomi. `0` turns it off. |
 | `toasts` | `true` | Pop up toasts for failures, finished deploys and tests, and watched changes. |
 | `banner` | `true` | Show the banner above the prompt. |
+| `budgetUsd` | `0` | The session's spend budget in US dollars. The dashboard warns at 80% and when it's spent. `0` turns it off. |
+| `suggestions` | `true` | Suggest the next step (deploy, then test) in the prompt box when Claude finishes a turn. |
 
 ## Limits
 
@@ -220,6 +229,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 - A call another mod refuses shows as blocked only when that mod's refusal reaches the dashboard, which depends on the order in which the mods' hooks run.
 - **Process runs in Boomi** includes runs from schedules and other people, not only this session's.
 - The dashboard counts a Companion script as run only when the command runs it (`bash`, `sh`, `./`, `source`). Reading or searching a script, as with `cat` or `grep`, doesn't count.
+- **Run again** repeats only tests Claude ran with `boomi-test-execute.sh` in this session or a restored one, not runs from the environment.
 - **Why?** needs Companion's scripts, which the dashboard finds where the last Companion script ran, or else in Claude Code's plugin cache. It runs them through the mod's process access, so it works where the Claude Code CLI runs and can take up to 4 minutes for a large log. Any API token in the log's output is masked before it's shown.
 - The cost is the session's total so far, as `/cost` reports it, not just Companion's share.
 - Tokens are counted from when the mod loads, so in a session started without it, the count misses what came before. The first step's share includes everything before it.
@@ -231,8 +241,8 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 | Tool-call hooks | `tool.call` on `Bash`, `Write`, `Edit` | Notes each Companion script and how it went, and each edit to component XML. |
 | Session usage | `$.session.usage` | The session's cost, how full the context is and how long the session has run. |
 | Turn hooks | `turn.step`, `turn.start`, `turn.complete` | Every model call's tokens, and whether Claude is working. |
-| Processes | `$.process.run` | Runs Companion's log script for **Why?**. |
-| Prompt box | `$.prompt.read`, `$.prompt.fill` | **Ask Claude to fix** drafts its request after what's typed. |
+| Processes | `$.process.run` | Runs Companion's log script for **Why?**, and its test script for **Run again**. |
+| Prompt box | `$.prompt.read`, `$.prompt.fill`, `$.prompt.suggest` | **Ask Claude to fix** drafts its request after what's typed; the next step is suggested after a turn. |
 | Network | `$.http.fetch` | Read-only Platform API queries: `EnvironmentAtomAttachment`, `ExecutionRecord` and `ComponentMetadata`. |
 | Timers | `$.clock.every` | Refreshes the status line every 5 seconds and checks Boomi every `pollSeconds`. |
 | Files | `$.fs` | Reads component XML for names, IDs and types, and Companion's `.env` for the credentials. Writes the saved session report. |
