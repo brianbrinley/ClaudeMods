@@ -2,7 +2,9 @@
 
 Ideas for mods we could build next, starting with Boomi and integration work. The ideas below aren't built yet. Treat it as a brainstorm: add ideas, argue with the rankings, and claim one to build.
 
-**Built from this page so far:** the Companion guardrail, now the [boomi-standards](boomi-standards/README.md) mod.
+**Built from this page so far:**
+- The Companion guardrail, now the [boomi-standards](boomi-standards/README.md) mod.
+- The deployment watcher, folded into the [boomi-cockpit](boomi-cockpit/README.md) mod: a live summary of a Companion session that also polls the environment's runs and watches components for changes.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
 
@@ -43,7 +45,6 @@ quadrantChart
     Secret guard: [0.30, 0.40]
     Promotion diff: [0.58, 0.48]
     Env extensions: [0.52, 0.40]
-    Deployment watcher: [0.56, 0.32]
     Full broker: [0.88, 0.42]
 ```
 
@@ -56,8 +57,7 @@ quadrantChart
 | 5 | [General secret guard](#general-secret-guard) | Medium | Small to medium | Idea |
 | 6 | [Promotion diff](#promotion-diff) | Medium | Medium | Idea |
 | 7 | [Environment extensions manager](#environment-extensions-manager) | Medium | Medium | Idea |
-| 8 | [Deployment watcher](#deployment-watcher) | Medium | Medium | Idea |
-| 9 | [Credential broker: full](#credential-broker) | Medium | Large | Idea |
+| 8 | [Credential broker: full](#credential-broker) | Medium | Large | Idea |
 
 ## The ideas
 
@@ -120,13 +120,6 @@ quadrantChart
 
 - **Idea:** `/boomi ext show <environment>` and `/boomi ext set` use the same masking as `/boomi env`, so Claude can configure an environment without seeing its passwords.
 - **Open question:** How much Companion already covers.
-
-### Deployment watcher
-
-**Show recent executions and errors for an environment, polled in the background.**
-
-- **Idea:** A status line such as `✓ 42 runs · ⚠ 2 errors` and a pane listing recent executions, polled through the Platform API. It raises a toast when a new error appears.
-- **Why it ranks low for now:** The web app doesn't show status lines or panes yet, so on the web it reduces to a status command. It moves up when panes reach the web.
 
 ## Add an idea or claim one
 

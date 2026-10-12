@@ -1,0 +1,32 @@
+{
+  "name": "boomi-cockpit",
+  "version": "0.1.0",
+  "description": "A live summary of a Boomi Companion session: builds, tests, deploys, the environment's runs, watched components and the session's cost",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "envFile": {
+      "type": "string",
+      "title": "Companion .env file",
+      "description": "Path of Boomi Companion's .env, relative to the session's working directory; the cockpit reads the Platform API credentials and BOOMI_ENVIRONMENT_ID from it",
+      "default": ".env"
+    },
+    "pollSeconds": {
+      "type": "number",
+      "title": "Platform poll interval (seconds)",
+      "description": "How often to poll the Platform API for the environment's runs and the watched components; 0 turns polling off",
+      "default": 60
+    },
+    "toasts": {
+      "type": "boolean",
+      "title": "Toasts",
+      "description": "Pop up a toast when a test, deploy or platform run fails, a deploy finishes, or a watched component changes",
+      "default": true
+    },
+    "banner": {
+      "type": "boolean",
+      "title": "Banner above the prompt",
+      "description": "Show a one-row summary above the prompt once there is Companion activity",
+      "default": true
+    }
+  }
+}

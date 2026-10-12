@@ -15,6 +15,7 @@ Mods for [Claude Code](https://claude.com/claude-code): plugins of function hook
 |---|---|
 | [boomi-runtime](boomi-runtime/) | A temporary Boomi runtime for the session, handed to Boomi Companion: provision, smoke test, tear down. |
 | [boomi-standards](boomi-standards/) | Checks Boomi Companion's components against your team's standards before they're created, pushed or deployed. |
+| [boomi-cockpit](boomi-cockpit/) | A live summary of a Boomi Companion session: builds, tests, deploys, the environment's runs, watched components and the session's cost. |
 
 **Ideas for what to build next** are on the [Ideas](IDEAS.md) page, ranked by business value and effort. Add your own, or claim one to build.
 

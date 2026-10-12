@@ -26,11 +26,12 @@ PAGES = [
     ("README.md", "", "Home"),
     ("boomi-runtime/README.md", "boomi-runtime", "Boomi Runtime"),
     ("boomi-standards/README.md", "boomi-standards", "Boomi Standards"),
+    ("boomi-cockpit/README.md", "boomi-cockpit", "Boomi Cockpit"),
     ("IDEAS.md", "ideas", "Ideas"),
     ("site/style.md", "style", None),
 ]
 # Copied verbatim to the same path on the site (only what the pages use)
-COPY_PATHS = ["brand/valence.css", "brand/assets", "boomi-runtime/assets", "boomi-standards/assets"]
+COPY_PATHS = ["brand/valence.css", "brand/assets", "boomi-runtime/assets", "boomi-standards/assets", "boomi-cockpit/assets"]
 # Built files offered as downloads on a page: {page dir: [(source directory, filename regex)]}
 DOWNLOADS = {}
 
