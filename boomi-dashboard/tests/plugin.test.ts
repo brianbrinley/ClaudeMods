@@ -548,7 +548,7 @@ test('/bc-dashboard why <n> reads the log in text, and says why when it can\'t',
   await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
   const why = await $.command.run(dashboard('why 1'))
   expect(why.text).toContain('(execution execution-0490202b-2e2f):')
-  expect(why.text).toContain('SEVERE\tx\ty')
+  expect(why.text).toContain('SEVERE · x · y')
   expect((await $.command.run(dashboard('why 5'))).text).toContain('Usage: /bc-dashboard why <1-1>')
 })
 
@@ -671,7 +671,7 @@ test('/bc-dashboard history scans the transcripts with the bundled script, and t
   expect(ran[0]![4]).toMatch(/\/scripts\/scan-sessions\.pl$/)
   expect(ran[0]!.slice(5)).toEqual(['--since', String(NOW - 90 * 86_400_000)])
   expect(text.text).toContain('This week: 1 session · $3.50')
-  expect(text.text).toContain('orders · 1 push · Orders')
+  expect(text.text).toContain('orders · $3.50 · 2.0k tokens · 1 push · Orders')
   expect(await pane.find({ text: /This week \$3\.50 · 1 session/ })).toBeDefined()
   expect((await pane.find({ type: 'Button', key: 'history-scan' }))?.props.label).toBe('Rescan')
   const tool = await $.tool.call({ tool: 'mcp__boomi-dashboard__history' } as never)

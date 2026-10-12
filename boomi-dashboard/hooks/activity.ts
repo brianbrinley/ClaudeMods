@@ -650,9 +650,12 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
     }
   }
   const seenRuns = new Set(dashboard.seenRuns ?? [])
+  const testRuns = new Set(dashboard.activity.filter(a => a.kind === 'test' && a.executionId).map(a => a.executionId!))
   const rows = components(dashboard.activity)
   for (const run of recentRuns(dashboard.platform.runs, now, windowMs)) {
     if (!isFailedStatus(run.status) || seenRuns.has(run.executionId)) continue
+    // A failed test Claude ran is the same execution: its step says so, or was closed.
+    if (testRuns.has(run.executionId)) continue
     const at = Date.parse(run.at)
     const row = rows.find(r => runsOf(r, [run]).length > 0)
     const noun = run.executionType === 'exec_listener' ? 'Listener run' : 'Run'
@@ -1170,7 +1173,8 @@ export const diagnose = (log: string): Diagnosis => {
   const lines = log.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
   const strip = (line: string) => {
     const at = line.search(LEVEL)
-    const text = at >= 0 ? line.slice(at).trim() : line
+    // A log's fields are tab-separated; a tab draws unevenly in a pane, so they're joined with a dot.
+    const text = (at >= 0 ? line.slice(at).trim() : line).replace(/\s*\t+\s*/g, ' · ')
     return text.length > 200 ? `${text.slice(0, 199)}…` : text
   }
   const severe = lines.filter(line => LEVEL.exec(line)?.[1] === 'SEVERE')
@@ -1284,13 +1288,14 @@ export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession
   const found: PastSession[] = []
   for (const s of scan.sessions ?? []) {
     const runs: Partial<Record<ActivityKind, number>> = {}
-    const named = new Set<string>()
+    const files = new Set<string>()
+    const ids = new Set<string>()
     for (const command of s.commands ?? []) {
       for (const run of scriptRuns(command)) {
         if (run.kind === 'other') continue
         runs[run.kind] = (runs[run.kind] ?? 0) + 1
-        const name = run.file ? fileName(run.file) : (run.processId ?? run.componentId)
-        if (name) named.add(name)
+        if (run.file) files.add(fileName(run.file))
+        else if (run.processId ?? run.componentId) ids.add((run.processId ?? run.componentId)!)
       }
     }
     if (Object.keys(runs).length === 0) continue
@@ -1307,7 +1312,8 @@ export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession
       cached: sum(m => m.cacheRead ?? 0),
       models: models.map(([id]) => modelName(id) ?? id),
       runs,
-      components: [...named],
+      // A file names a component; an ID only when the session named no file.
+      components: files.size > 0 ? [...files] : [...ids].map(id => (id.length > 12 ? `${id.slice(0, 8)}…` : id)),
     })
   }
   return found.sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
@@ -1356,12 +1362,8 @@ export const pastLine = (s: PastSession, currentId?: string): string => {
   const where = s.project ? (s.project.split('/').filter(Boolean).pop() ?? s.project) : undefined
   const cost = s.costUsd === undefined ? `${formatTokens(s.tokens)} tokens, no recorded cost` : `${formatCost(s.costUsd)} · ${formatTokens(s.tokens)} tokens`
   const names = s.components.length > 3 ? `${s.components.slice(0, 3).join(', ')} +${s.components.length - 3}` : s.components.join(', ')
-  return [
-    `${when}${s.id === currentId ? ' (this session)' : ''}${where ? ` · ${where}` : ''}`,
-    runWords(s.runs),
-    names || undefined,
-    cost,
-  ]
+  // The cost goes first: a long line is cut at its end.
+  return [`${when}${s.id === currentId ? ' (this session)' : ''}${where ? ` · ${where}` : ''}`, cost, runWords(s.runs), names || undefined]
     .filter(Boolean)
     .join(' · ')
 }

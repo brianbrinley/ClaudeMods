@@ -535,7 +535,7 @@ const LOG = [
 
 test('diagnose picks the SEVERE lines out of a process log, without their timestamps', () => {
   expect(diagnose(LOG)).toEqual({
-    lines: ["SEVERE\tParse Order\tUnexpected character ('}' (code 125)) at line 1, column 18", 'SEVERE\tException\tOrder JSON is not valid'],
+    lines: ["SEVERE · Parse Order · Unexpected character ('}' (code 125)) at line 1, column 18", 'SEVERE · Exception · Order JSON is not valid'],
     severe: 2,
     warnings: 1,
   })
@@ -623,7 +623,7 @@ const SCAN: { sessions: ScannedSession[] } = {
 test('past sessions are the ones that ran a Companion script, with their work, components and cost', () => {
   const past = pastSessions(SCAN)
   expect(past.map(s => s.id)).toEqual(['aaaaaaaa-1111', 'bbbbbbbb-2222'])
-  expect(past[0]).toMatchObject({ costUsd: 3.5, tokens: 2000, cached: 50_000, runs: { push: 1, deploy: 1, test: 2 }, components: ['Orders', ID] })
+  expect(past[0]).toMatchObject({ costUsd: 3.5, tokens: 2000, cached: 50_000, runs: { push: 1, deploy: 1, test: 2 }, components: ['Orders'] })
   expect(past[0]!.models).toEqual(['Opus 5.5'])
   expect(past[1]!.costUsd).toBeUndefined()
   expect(runWords(past[0]!.runs)).toBe('1 push · 1 deploy · 2 tests')
@@ -636,7 +636,15 @@ test('history adds up the week, the month and everything, and says what has no r
   const text = historySummary(past, NOW, 90, 'aaaaaaaa-1111')
   expect(text).toContain('This week: 1 session · $3.50 · 2.0k tokens')
   expect(text).toContain('All 90 days: 2 sessions · $3.50 (+1 without a recorded cost)')
-  expect(text).toContain('2026-10-10 (this session) · orders · 1 push · 1 deploy · 2 tests · Orders, 1a2b3c4d')
-  expect(text).toContain('2026-09-01 · old · 1 create · P · 20 tokens, no recorded cost')
+  expect(text).toContain('2026-10-10 (this session) · orders · $3.50 · 2.0k tokens · 1 push · 1 deploy · 2 tests · Orders')
+  expect(text).toContain('2026-09-01 · old · 20 tokens, no recorded cost · 1 create · P')
   expect(historySummary([], NOW, 90)).toContain('No Boomi Companion sessions')
+})
+
+test("a failed test's execution is one item, not a second one for its run in Boomi, even once it's closed", () => {
+  const tested = act('test', 'failed', 'Orders Sync', NOW - 30, { componentId: ID, executionStatus: 'ERROR', executionId: 'execution-77' })
+  const runs = [{ executionId: 'execution-77', processName: 'Orders Sync', processId: ID, status: 'ERROR', at: '2026-10-12T11:59:00Z' }]
+  const state = dashboard([tested], { platform: { phase: 'ok', message: '', runs } })
+  expect(attention(state, NOW, 24 * HOUR).map(item => item.key)).toEqual([`step:${tested.id}`])
+  expect(attention(closeItem(state, `step:${tested.id}`), NOW, 24 * HOUR)).toEqual([])
 })
