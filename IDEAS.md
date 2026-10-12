@@ -8,7 +8,6 @@ Ideas for mods we could build next, starting with Boomi and integration work. Th
 - The first half of the execution debugger, in the dashboard: **Why?** reads a failed run's process log and **Ask Claude to fix** drafts the request. A session report (`/bc-dashboard report`) came with it.
 - Dashboard follow-ups: **Run again** for a failed test, a spend budget (`budgetUsd`), and the next step (deploy, then test) suggested in the prompt box.
 - Guardrails at a glance: the dashboard's **Guardrails** section shows what boomi-standards blocked and the runtime's state.
-- The credential broker's quick wins, in [boomi-runtime](boomi-runtime/README.md#secure-the-api-token): the API token in Claude Code's secure storage, given to Companion's scripts only while one runs, and a dedicated API user.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
 
@@ -55,7 +54,7 @@ quadrantChart
 | Rank | Idea | Business value | Effort | Status |
 |---|---|---|---|---|
 | 1 | [Execution debugger](#execution-debugger) | High | Small to medium | Log reading built into the dashboard; per-step documents next |
-| 2 | [Credential broker: quick wins](#credential-broker) | High | Small | **Built** (network secrets still to try) |
+| 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Secure-storage token tried and removed; API-user guide kept |
 | 3 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
 | 4 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
 | 5 | [General secret guard](#general-secret-guard) | Medium | Small to medium | Idea |
@@ -79,10 +78,10 @@ quadrantChart
 
 **Let mods and skills call the Platform API without the token ever being visible in the session.**
 
-- **Quick wins (built):** the token in Claude Code's secure storage, handed to Companion's scripts only while one runs, and a dedicated API user, in the [boomi-runtime README](boomi-runtime/README.md#secure-the-api-token). Network secrets are still to try. What was planned:
-  - Declare the token as a `sensitive` setting in `plugin.json`, which Claude Code keeps in secure storage.
-  - Use the cloud environment's protected credentials where available.
-  - Document a dedicated API user with only the permissions the mod needs, and how to rotate its token.
+- **Quick wins:**
+  - **Tried and removed:** the token in Claude Code's secure storage, handed to Companion's scripts only while one ran. Tests and a fake-token probe passed, but in real use it broke Companion, so it came out (boomi-runtime 0.3.0). Don't retry it without a live Companion session to test against.
+  - **Kept:** a dedicated API user with only the permissions the work needs, and how to rotate its token, in the [boomi-runtime README](boomi-runtime/README.md#a-dedicated-api-user).
+  - Still to try: the cloud environment's network secrets, which add credentials in the proxy.
 - **Full broker:** The mod holds the token and offers a `boomi_api` tool that makes allow-listed Platform API calls for other mods and skills, so none of them needs the token.
 - **Limit:** Companion's scripts read the token from `.env`, and the broker can't change that. It protects everything except Companion's own calls, which is why the full version ranks lower than the quick wins.
 

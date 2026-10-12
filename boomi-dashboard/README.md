@@ -76,7 +76,7 @@ With Companion's credentials, the dashboard reads (never writes) the runs on the
 - A run is matched to this session's components by process ID, so a component's row shows its runs, and a failed run names its component. `/bc-dashboard seen` moves an expected failure out of **Needs attention**.
 - `/bc-dashboard watch <component ID or XML file>` watches a component across sessions. When someone other than Companion's API user changes it, it shows under **Needs attention**: pull before you push.
 
-Credentials come from Companion's `.env`, falling back to environment variables: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID`, `BOOMI_ENVIRONMENT_ID`. Better, keep the token in Claude Code's secure storage with the `apiToken` setting: see [Secure the API token](../boomi-runtime/README.md#secure-the-api-token). The token goes only into requests' `Authorization` header; the dashboard never stores, shows or logs it, and its errors carry only the HTTP status. Without credentials, everything else still works.
+Credentials come from Companion's `.env`, falling back to environment variables: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID`, `BOOMI_ENVIRONMENT_ID`. The token goes only into requests' `Authorization` header; the dashboard never stores, shows or logs it, and its errors carry only the HTTP status. Without credentials, everything else still works.
 
 ## Past Companion sessions
 
@@ -138,7 +138,6 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `budgetUsd` | `0` | The session's spend budget in US dollars; `0` turns it off. |
 | `suggestions` | `true` | Suggest the next step after a turn. |
 | `historyDays` | `90` | How far back **Past Companion sessions** reads. |
-| `apiToken` | | The API token in secure storage. Set it from a terminal, not `/config`: see [Secure the API token](../boomi-runtime/README.md#secure-the-api-token). |
 
 ## Limits
 

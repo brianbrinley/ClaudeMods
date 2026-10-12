@@ -22,7 +22,6 @@ import { platformClient } from './platform'
 import type { PlatformClient } from './platform'
 import { containsSecret, guardReason, maskEnv, redact, secretValues } from './secrets'
 import { SMOKE_PROCESS, helloWorldProcess } from './smoke'
-import { TOKEN_LINE_ADVICE, hasTokenLine, runsCompanionScript, tokenSource } from './tokens'
 
 type Engine = EngineInterface
 
@@ -41,8 +40,6 @@ type Settings = {
   installerArgs: string[]
   isEphemeral: boolean
   isGuarded: boolean
-  /** The API token from Claude Code's secure storage, or '' when it isn't set there. */
-  apiToken: string
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -55,7 +52,6 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   installerArgs: splitArgs(String(options.installerArgs || '')),
   isEphemeral: options.ephemeral !== false,
   isGuarded: options.guard !== false,
-  apiToken: String(options.apiToken ?? '').trim(),
 })
 
 const ONLINE_TIMEOUT_MS = 10 * 60_000
@@ -125,17 +121,11 @@ const processEnv = async ($: Engine): Promise<Record<string, string>> => {
 const loadEnv = async ($: Engine, settings: Settings): Promise<Loaded> => {
   const path = await envPath($, settings)
   const fallback = await processEnv($)
-  // A token in secure storage never goes into a file: a .env seeded here leaves it out.
-  const seeded = Object.entries(fallback).filter(([key]) => !(settings.apiToken && key === 'BOOMI_API_TOKEN'))
   const text = (await $.fs.exists(path))
     ? await $.fs.read(path)
-    : seeded.reduce((seed, [key, value]) => setEnvValue(seed, key, value), '')
+    : Object.entries(fallback).reduce((seed, [key, value]) => setEnvValue(seed, key, value), '')
   const values = { ...fallback, ...parseEnv(text) }
   rememberSecrets(values.BOOMI_API_TOKEN, fallback.BOOMI_API_TOKEN, values.BOOMI_USERNAME)
-  if (settings.apiToken) {
-    rememberSecrets(settings.apiToken, undefined, values.BOOMI_USERNAME)
-    values.BOOMI_API_TOKEN = settings.apiToken
-  }
   const found = credentialsFrom(values)
   if ('missing' in found) {
     throw new Error(
@@ -145,37 +135,10 @@ const loadEnv = async ($: Engine, settings: Settings): Promise<Loaded> => {
   return { credentials: found.credentials, path, text }
 }
 
-/**
- * Runs one tool call with the token from secure storage in the environment,
- * when the call is a Bash command that runs a Companion script, and takes it
- * out again as soon as the call ends. Anything else runs as it is: the token
- * is in the environment only while a Companion script needs it.
- */
-const withToken = async <T,>($: Engine, settings: Settings, tool: string, input: Record<string, unknown>, run: () => Promise<T>): Promise<T> => {
-  if (!settings.apiToken || tool !== 'Bash' || !runsCompanionScript(String(input.command ?? ''))) return run()
-  const before = await $.env.get('BOOMI_API_TOKEN')
-  await $.env.set('BOOMI_API_TOKEN', settings.apiToken)
-  try {
-    return await run()
-  } finally {
-    await $.env.set('BOOMI_API_TOKEN', before)
-  }
-}
-
-/** Where the token comes from now, and whether .env still has a line that would override the secure one. */
-const tokenStatus = async ($: Engine, settings: Settings) => {
-  const path = await envPath($, settings)
-  const text = (await $.fs.exists(path)) ? await $.fs.read(path) : ''
-  return {
-    source: tokenSource(settings.apiToken, parseEnv(text), await $.env.get('BOOMI_API_TOKEN')),
-    isOverridden: Boolean(settings.apiToken) && hasTokenLine(text),
-  }
-}
-
 /** The token's known forms, refreshed from .env and the environment. */
 const currentSecrets = async ($: Engine, settings: Settings) => {
   const fallback = await processEnv($)
-  rememberSecrets(settings.apiToken || undefined, fallback.BOOMI_API_TOKEN, fallback.BOOMI_USERNAME)
+  rememberSecrets(undefined, fallback.BOOMI_API_TOKEN, fallback.BOOMI_USERNAME)
   try {
     await loadEnv($, settings)
   } catch {}
@@ -667,15 +630,6 @@ const doctor = async ($: Engine, settings: Settings): Promise<string> => {
   try {
     credentials = (await loadEnv($, settings)).credentials
     check(true, `credentials found (${await envPath($, settings)} or environment variables)`)
-    const token = await tokenStatus($, settings)
-    check(
-      token.source === 'secure setting' && !token.isOverridden,
-      token.source === 'secure setting'
-        ? token.isOverridden
-          ? `API token in secure storage, but ${TOKEN_LINE_ADVICE}`
-          : "API token in Claude Code's secure storage; Companion's scripts get it only while they run"
-        : `API token from ${token.source === '.env' ? 'the .env file' : 'an environment variable'}: keep it in secure storage instead (see the README's "Secure the API token")`,
-    )
     check(
       true,
       credentials.environmentId
@@ -820,10 +774,6 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    // A token line left in .env would quietly win over the secure one: say so once.
-    try {
-      if ((await tokenStatus($, settings)).isOverridden) $.ui.toast(`boomi-runtime: ${TOKEN_LINE_ADVICE}`)
-    } catch {}
     await $.command.register({
       name: 'boomi',
       description: 'Temporary Boomi runtime for this session',
@@ -871,11 +821,10 @@ export const register: Register = (on, options) => {
   // output that contains it. The mod's own tools answer below and never do.
   on('tool.call', async ($, e, next) => {
     const tool = String(e.tool)
-    if (tool.startsWith('mcp__boomi-runtime__')) return next(e)
-    const reason = settings.isGuarded ? guardReason(tool, e as unknown as Record<string, unknown>) : undefined
+    if (!settings.isGuarded || tool.startsWith('mcp__boomi-runtime__')) return next(e)
+    const reason = guardReason(tool, e as unknown as Record<string, unknown>)
     if (reason) return { deny: `boomi-runtime: ${reason}` }
-    const ran = await withToken($, settings, tool, e as unknown as Record<string, unknown>, () => next(e))
-    if (!settings.isGuarded) return ran
+    const ran = await next(e)
     // The output as the model reads it, and the tool's record behind it.
     const shown = ran.deny === undefined ? `${ran.text ?? ''}\n${JSON.stringify(ran.result ?? '')}` : ''
     if (shown.trim() && containsSecret(shown, await currentSecrets($, settings))) {

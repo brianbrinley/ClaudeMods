@@ -74,12 +74,6 @@
       "title": "Past sessions window (days)",
       "description": "How far back Past Companion sessions reads Claude Code's transcripts on this machine",
       "default": 90
-    },
-    "apiToken": {
-      "type": "string",
-      "title": "Boomi API token",
-      "description": "The Platform API token, kept in Claude Code's secure storage instead of .env. Set it from a terminal with claude plugin configure (see the README), never in the chat",
-      "sensitive": true
     }
   }
 }

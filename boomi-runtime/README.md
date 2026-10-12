@@ -57,7 +57,7 @@ Runtimes are named `<prefix>-<date>-<session>`, such as `cc-20261002-dwmarays`. 
 | `/boomi logs [n]` | `logs` | The last *n* lines of the runtime's newest log. |
 | `/boomi down` | `down` | Tears everything down. |
 | `/boomi reap` | | Deletes offline runtimes left by earlier sessions. |
-| `/boomi doctor` | `doctor` | Checks the host, credentials, where the token comes from, and the network. |
+| `/boomi doctor` | `doctor` | Checks the host, credentials and network. |
 | `/boomi env` | | Companion's `.env`, token masked. |
 | `/boomi set KEY=VALUE` | | Sets one non-secret value in `.env`, such as `BOOMI_TARGET_FOLDER`. |
 
@@ -95,7 +95,6 @@ Under `/config`:
 | `installerArgs` | | Extra quiet-install arguments, such as proxy settings. |
 | `ephemeral` | `true` | Tear down when the session ends. |
 | `guard` | `true` | The token guard below. |
-| `apiToken` | | The API token in secure storage. Set it from a terminal, not `/config`: see [Secure the API token](#secure-the-api-token). |
 
 ## Protecting the API token
 
@@ -104,27 +103,11 @@ Under `/config`:
 
 Use `/boomi env` and `/boomi set` to see and change `.env` without exposing the token. The guard protects the conversation, not the machine: a process in the container can still read the environment.
 
-### Secure the API token
+### A dedicated API user
 
-A token in `.env` or an environment variable sits in plain text all session. Keep it in Claude Code's secure storage instead, and the mod hands it to Companion only while one of Companion's scripts runs.
+Give Companion and these mods their own Boomi user, with a role that has API access and only what the work needs: building and deploying components, executing processes, and for this mod, managing runtimes and environments. Privilege names vary by account (**Settings → User Management → Roles**). Generate its token under **Settings → Account Information and Setup → AtomSphere API Tokens**.
 
-This works because Companion's scripts (`boomi-common.sh` in [OfficialBoomi/bc-integration](https://github.com/OfficialBoomi/bc-integration)) `source ./.env` and then require the token: one `.env` doesn't set is taken from the environment the script started in. So for a Bash command that runs a Companion script (any `boomi-*.sh`, and `event-streams-setup.sh`), the mod puts the token in the environment, and takes it out when the command ends.
-
-1. **Use a dedicated API user** with a role that has API access and only what the work needs: building and deploying components, executing processes, and for this mod, managing runtimes and environments. Privilege names vary by account (**Settings → User Management → Roles**). Generate its token under **Settings → Account Information and Setup → AtomSphere API Tokens**.
-2. **Save the token from a terminal**, never in the chat, for each mod by the ID `claude plugin list` shows (`<name>@inline` for a mod loaded from a folder):
-   ```bash
-   read -rs -p 'Boomi API token: ' T; echo
-   for mod in boomi-runtime@inline boomi-dashboard@inline; do
-     printf '{"apiToken":"%s"}' "$T" | claude plugin configure "$mod" --values-stdin
-   done
-   unset T
-   ```
-3. **Delete the `BOOMI_API_TOKEN` line from `.env`** (or comment it out), and the environment variable if you set one. Keep the file: Companion's scripts need it. A token line left in `.env`, even an empty one, overrides the secure token; the mod warns you about it.
-4. Start a new session and run `/boomi doctor`: it should say *API token in Claude Code's secure storage*.
-
-**To rotate it:** generate a new token, repeat step 2, start a new session, then revoke the old token in Boomi.
-
-While a Companion script runs, its command has the token in its environment, as every command does today. The [dashboard](../boomi-dashboard/README.md)'s **Why?** and **Run again** pass it the same way, to that one process.
+**To rotate the token:** generate a new one for that user, put it in `.env` (or the environment variable), start a new session, then revoke the old token in Boomi.
 
 ## How it works
 
@@ -136,7 +119,7 @@ The mod is one folder of TypeScript that Claude Code loads into the session: no 
 | `$.http.fetch` | Every Platform API call |
 | `$.process.spawn`, `$.process.run` | The installer, `bin/atom`, cleanup |
 | `$.fs` | Companion's `.env` and the runtime's logs |
-| `$.env` | Credentials from the environment, and the token while a Companion script runs |
+| `$.env` | Credentials from the environment |
 | `$.clock`, `$.state` | Polling, and what exists to clean up |
 | `session.start`, `session.end` | Registering, and teardown |
 | `$.ui.status`, `$.ui.open`, `$.ui.toast` | Status line, pane and toasts (not on the web yet: use `/boomi status`) |
