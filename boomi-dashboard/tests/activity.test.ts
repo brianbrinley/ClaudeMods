@@ -13,7 +13,10 @@ import {
   flamingoView,
   mirror,
   pace,
+  cachedTokens,
   formatTokens,
+  newTokens,
+  totalTokens,
   friendlyType,
   meter,
   modelMix,
@@ -333,4 +336,11 @@ test('facing left, the flamingo is drawn mirrored', () => {
   expect(left.facing).toBe('left')
   expect(left.pixels).toEqual(mirror(flamingo(true, 7)))
   expect(right.pixels).toEqual([...flamingo(true, 1)])
+})
+
+test('new tokens leave out cache reads, which are counted apart', () => {
+  const l = { input: 1_000, output: 2_000, cacheRead: 300_000, cacheWrite: 5_000, calls: 3 }
+  expect(newTokens(l)).toBe(8_000)
+  expect(cachedTokens(l)).toBe(300_000)
+  expect(totalTokens(l)).toBe(308_000)
 })

@@ -547,7 +547,19 @@ export const modelMix = (l: Ledger): string =>
     .join(' · ')
 
 /** Every token the session's model calls used: input, output and the prompt cache's. */
-export const totalTokens = (l: Ledger): number => l.input + l.output + l.cacheRead + l.cacheWrite
+/**
+ * The session's new tokens: fresh input, output and what was written to the
+ * prompt cache. Cache reads are left out: each call re-reads the conversation
+ * so far from the cache, so in a long session they grow with every call and
+ * would dwarf the work done; they're reported beside this, by cachedTokens.
+ */
+export const newTokens = (l: Ledger): number => l.input + l.output + l.cacheWrite
+
+/** Tokens the prompt cache served: the conversation re-read on every call, billed at a fraction of new input. */
+export const cachedTokens = (l: Ledger): number => l.cacheRead
+
+/** Every token the API counted, cache reads included. */
+export const totalTokens = (l: Ledger): number => newTokens(l) + cachedTokens(l)
 
 /** A token count at a glance: 950, 4.2k, 312k, 1.24M. */
 export const formatTokens = (n: number): string => {
@@ -645,7 +657,10 @@ export const statusLine = (dashboard: Dashboard, now: number, windowMs: number, 
 export type Usage = {
   usd?: number
   contextPercent?: number
+  /** New tokens: input, output and cache writes (newTokens). */
   tokens?: number
+  /** Tokens read from the prompt cache (cachedTokens). */
+  cached?: number
   startedAt?: number
   /** The model that answered the latest call, and each model's tokens in words. */
   model?: string
@@ -699,7 +714,9 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   }
 
   const cost = formatCost(usage.usd)
-  const tokens = usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined
+  const tokens = usage.tokens
+    ? `${formatTokens(usage.tokens)} tokens${usage.cached ? ` (plus ${formatTokens(usage.cached)} read from the prompt cache)` : ''}`
+    : undefined
   const context = usage.contextPercent === undefined ? undefined : `context ${Math.round(usage.contextPercent)}% full`
   if (cost || tokens || context) lines.push('', `Session: ${[tokens, cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
   if (usage.models) lines.push(`Models: ${usage.models}`)
