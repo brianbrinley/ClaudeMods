@@ -27,7 +27,6 @@ PAGES = [
     ("boomi-runtime/README.md", "boomi-runtime", "Boomi Runtime"),
     ("boomi-standards/README.md", "boomi-standards", "Boomi Standards"),
     ("boomi-dashboard/README.md", "boomi-dashboard", "Companion Dashboard"),
-    ("IDEAS.md", "ideas", "Ideas"),
     ("site/style.md", "style", None),
 ]
 # Copied verbatim to the same path on the site (only what the pages use)
