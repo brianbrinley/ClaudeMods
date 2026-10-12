@@ -665,9 +665,11 @@ test('/bc-dashboard history scans the transcripts with the bundled script, and t
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
   expect((await pane.find({ type: 'Button', key: 'history-scan' }))?.props.label).toBe('Scan')
   const text = await $.command.run(dashboard('history'))
-  expect(ran[0]![0]).toBe('perl')
-  expect(ran[0]![1]).toMatch(/\/scripts\/scan-sessions\.pl$/)
-  expect(ran[0]!.slice(2)).toEqual(['--since', String(NOW - 90 * 86_400_000)])
+  // Through bash first: on Windows, Git Bash is where Perl is.
+  expect(ran).toHaveLength(1)
+  expect(ran[0]!.slice(0, 4)).toEqual(['bash', '-c', 'exec perl "$@"', 'scan-sessions'])
+  expect(ran[0]![4]).toMatch(/\/scripts\/scan-sessions\.pl$/)
+  expect(ran[0]!.slice(5)).toEqual(['--since', String(NOW - 90 * 86_400_000)])
   expect(text.text).toContain('This week: 1 session · $3.50')
   expect(text.text).toContain('orders · 1 push · Orders')
   expect(await pane.find({ text: /This week \$3\.50 · 1 session/ })).toBeDefined()
@@ -676,18 +678,33 @@ test('/bc-dashboard history scans the transcripts with the bundled script, and t
   expect(JSON.stringify(tool)).toContain('$3.50')
 })
 
-test('without Perl, history says what it needs, and keeps the last good scan', async ($, on) => {
+test('without bash, history runs Perl on its own; without Perl, it says what it needs and keeps the last scan', async ($, on) => {
   world(on)
   mock.store(on)
-  let isMissing = false
-  on('process.run', async () => {
-    if (isMissing) return { deny: 'spawn perl ENOENT' }
+  let hasPerl = true
+  const ran: string[] = []
+  on('process.run', async (_$, e) => {
+    ran.push(e.argv[0]!)
+    if (e.argv[0] === 'bash') return { deny: 'spawn bash ENOENT' }
+    if (!hasPerl) return { deny: 'spawn perl ENOENT' }
     return { value: { exitCode: 0, stdout: SCANNED, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  await $.command.run(dashboard('history'))
-  isMissing = true
+  expect((await $.command.run(dashboard('history'))).text).toContain('$3.50')
+  expect(ran).toEqual(['bash', 'perl'])
+  hasPerl = false
   expect((await $.command.run(dashboard('history'))).text).toContain('History needs Perl')
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
   expect(await pane.find({ text: /History needs Perl/ })).toBeDefined()
   expect(await pane.find({ text: /This week \$3\.50/ })).toBeDefined()
+})
+
+test('bash without Perl (exit 127) falls through to Perl on its own', async ($, on) => {
+  world(on)
+  mock.store(on)
+  on('process.run', async (_$, e) =>
+    e.argv[0] === 'bash'
+      ? { value: { exitCode: 127, stdout: '', stderr: 'bash: perl: command not found', isStdoutTruncated: false, isStderrTruncated: false } }
+      : { value: { exitCode: 0, stdout: SCANNED, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } },
+  )
+  expect((await $.command.run(dashboard('history'))).text).toContain('$3.50')
 })

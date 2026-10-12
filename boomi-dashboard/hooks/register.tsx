@@ -697,16 +697,47 @@ const suggestNext = async ($: Engine, settings: Settings) => {
  * transcript can be far over the 4 MiB a mod may read at once, so a script
  * reads them a line at a time and prints only each session's totals.
  */
+const PERL_MISSING =
+  'History needs Perl. macOS and most Linux have it; on Windows it comes with Git for Windows, in Git Bash. Install it, then try again.'
+
+/**
+ * Runs the scan script with Perl: first through bash, where Git for Windows
+ * keeps its Perl on Windows (and where Companion's own scripts run), then
+ * Perl on its own. Undefined when neither has Perl.
+ */
+const runScan = async ($: Engine, args: string[]) => {
+  // Forward slashes: Git Bash's Perl reads C:/Users/... but not every backslash path.
+  const script = `${$.plugin.root}/scripts/scan-sessions.pl`.replace(/\\/g, '/')
+  const attempts = [
+    ['bash', '-c', 'exec perl "$@"', 'scan-sessions', script, ...args],
+    ['perl', script, ...args],
+  ]
+  for (const argv of attempts) {
+    try {
+      const ran = await $.process.run(argv, { timeoutMs: 300_000 })
+      // 127: bash is there, Perl isn't.
+      if (ran.exitCode !== 127) return ran
+    } catch (error) {
+      if (!/ENOENT|not found/i.test(messageOf(error))) throw error
+    }
+  }
+  return undefined
+}
+
+/**
+ * Reads the transcripts on this machine for past Companion sessions. A
+ * transcript can be far over the 4 MiB a mod may read at once, so a script
+ * reads them a line at a time and prints only each session's totals.
+ */
 const scanHistory = async ($: Engine, settings: Settings): Promise<HistoryState> => {
   await update($, history, (h): HistoryState => ({ ...h, phase: 'loading', error: undefined }))
   const now = await $.clock.now()
   let state: HistoryState
   try {
-    const ran = await $.process.run(
-      ['perl', `${$.plugin.root}/scripts/scan-sessions.pl`, '--since', String(now - settings.historyDays * 86_400_000)],
-      { timeoutMs: 300_000 },
-    )
-    if (ran.exitCode !== 0) {
+    const ran = await runScan($, ['--since', String(now - settings.historyDays * 86_400_000)])
+    if (!ran) {
+      state = { phase: 'error', error: PERL_MISSING }
+    } else if (ran.exitCode !== 0) {
       const why = ran.stderr.split(/\r?\n/).find(line => line.trim()) ?? `exit ${ran.exitCode}`
       state = { phase: 'error', error: `The transcript scan failed: ${why.slice(0, 200)}` }
     } else if (ran.isStdoutTruncated) {
@@ -717,11 +748,7 @@ const scanHistory = async ($: Engine, settings: Settings): Promise<HistoryState>
       await $.store.set(HISTORY_KEY, { sessions: state.sessions, scannedAt: now, scanned: scan.scanned }).catch(() => undefined)
     }
   } catch (error) {
-    const message = messageOf(error)
-    state = {
-      phase: 'error',
-      error: /ENOENT|not found/i.test(message) ? 'History needs Perl, which macOS and most Linux have. Install it, then try again.' : message,
-    }
+    state = { phase: 'error', error: messageOf(error) }
   }
   // A failed scan keeps the sessions from the last one that worked.
   await update($, history, h => (state.phase === 'error' ? { ...h, ...state } : state))

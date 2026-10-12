@@ -187,7 +187,7 @@ Boomi Companion sessions on this machine, last 90 days:
 
 - **The cost is Claude Code's own**, the figure `/cost` showed in that session, which Claude Code writes into the transcript as it goes. A transcript from a Claude Code version that didn't write it shows its tokens and "no recorded cost".
 - **A session counts** only when a Bash command in it ran a Companion script, read the same way as live steps. A session that only looked at a script, with `cat` or `find`, doesn't. A subagent's transcript counts toward its session.
-- **Transcripts can be large**, often tens of MB, and a mod may read only 4 MiB of a file at a time. So `scripts/scan-sessions.pl` reads them one line at a time and hands back only each session's totals and the Bash commands that name a Companion script. Nothing else of the conversations leaves the script. It needs Perl, which macOS and most Linux have, and nothing else.
+- **Transcripts can be large**, often tens of MB, and a mod may read only 4 MiB of a file at a time. So `scripts/scan-sessions.pl` reads them one line at a time and hands back only each session's totals and the Bash commands that name a Companion script. Nothing else of the conversations leaves the script. It needs Perl and nothing else. macOS and most Linux have it. On Windows, Git for Windows includes it in Git Bash, which Companion's bash scripts already need; the dashboard runs the script through `bash` so it finds that Perl, then tries `perl` on its own. Windows hasn't been tried yet.
 - The last scan is kept, so the pane shows it in later sessions until you **Rescan**.
 
 
