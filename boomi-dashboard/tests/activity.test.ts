@@ -26,6 +26,12 @@ import {
   pixelCells,
   newFailures,
   readOutput,
+  readResults,
+  assignResults,
+  githubUrl,
+  parseResults,
+  runsOf,
+  runsSummary,
   recentRuns,
   scriptRuns,
   sparkline,
@@ -363,4 +369,107 @@ test('the token split names each kind, and each model gets its own line when the
     'Opus 5.5: 412k new (18k in · 44k out · 350k cache writes) · 3.30M cache reads',
     'Haiku 5.5: 12k new (2.0k in · 1.0k out · 9.0k cache writes) · 40k cache reads',
   ])
+})
+
+// --- Regression: a live OrderValidator build that left "Components this session" empty ---
+
+const SKILL = '/Users/me/.claude/plugins/cache/boomi-companion/bc-integration/1.0.76/skills/boomi-integration'
+
+test('a multi-line command runs each script, each with its own file', () => {
+  const command = [
+    `bash ${SKILL}/scripts/boomi-component-create.sh active-development/profiles/OrderRequest.xml`,
+    `bash ${SKILL}/scripts/boomi-component-create.sh active-development/processes/Listener.xml`,
+  ].join('\n')
+  expect(scriptRuns(command)).toEqual([
+    { kind: 'create', file: 'active-development/profiles/OrderRequest.xml' },
+    { kind: 'create', file: 'active-development/processes/Listener.xml' },
+  ])
+})
+
+test('a script run in a loop is a run', () => {
+  const command = `for f in active-development/profiles/*.xml; do bash ${SKILL}/scripts/boomi-component-create.sh "$f"; done`
+  expect(scriptRuns(command).map(run => run.kind)).toEqual(['create'])
+  expect(scriptRuns(`if true; then bash ${SKILL}/scripts/boomi-deploy.sh ${FILE}; fi`)).toEqual([{ kind: 'deploy', file: FILE }])
+})
+
+test('each result in the output is read on its own, so a loop of creates is several components', () => {
+  const output = [
+    "Creating component 'OrderValidator - Order Request Profile' on the account default branch",
+    `SUCCESS: Component 'OrderValidator - Order Request Profile' created with ID: 11111111-1111-1111-1111-111111111111`,
+    "Creating component 'OrderValidator - Order Response Profile' on the account default branch",
+    'ERROR: Create failed (HTTP 400): bad profile',
+    "Creating component 'OrderValidator - Listener Validate Order' on the account default branch",
+    `SUCCESS: Component 'OrderValidator - Listener Validate Order' created with ID: 33333333-1111-1111-1111-111111111111`,
+  ].join('\n')
+  expect(readResults('create', output, true).map(r => [r.name, r.outcome, r.componentId])).toEqual([
+    ['OrderValidator - Order Request Profile', 'ok', '11111111-1111-1111-1111-111111111111'],
+    ['OrderValidator - Order Response Profile', 'failed', undefined],
+    ['OrderValidator - Listener Validate Order', 'ok', '33333333-1111-1111-1111-111111111111'],
+  ])
+})
+
+test('a loop that ran one script six times is six steps; each run keeps its own result', () => {
+  const results = parseResults(
+    Array.from({ length: 3 }, (_, i) => `Creating component 'P${i}' on the account default branch\nSUCCESS: Component 'P${i}' created with ID: ${i}1111111-1111-1111-1111-111111111111`).join('\n'),
+  )
+  const { first, extras } = assignResults([{ id: 7, kind: 'create' }], results)
+  expect(first.get(7)?.name).toBe('P0')
+  expect(extras.get(7)?.map(r => r.name)).toEqual(['P1', 'P2'])
+})
+
+test('a push and a deploy in one command each take their own result, named from the lines before', () => {
+  const output = [
+    `Pushing component 'OrderValidator - Listener Validate Order' (${ID}) to the account default branch`,
+    "SUCCESS: Pushed component 'OrderValidator - Listener Validate Order' — now version 3",
+    `Packaging 'OrderValidator - Listener Validate Order' (${ID}) from the account default branch`,
+    'ERROR: Deployment failed (HTTP 400): no runtime',
+  ].join('\n')
+  const { first } = assignResults([{ id: 1, kind: 'push' }, { id: 2, kind: 'deploy' }], parseResults(output))
+  expect(first.get(1)).toMatchObject({ outcome: 'ok', version: '3', componentId: ID })
+  expect(first.get(2)).toMatchObject({ outcome: 'failed', name: 'OrderValidator - Listener Validate Order', componentId: ID })
+})
+
+const LISTENER = 'OrderValidator - Listener Validate Order'
+const listenerRuns = [
+  ...['a', 'b', 'c', 'd'].map(x => ({ executionId: `execution-${x}`, processName: LISTENER, processId: ID, status: 'COMPLETE', at: '2026-10-12T11:00:00Z', executionType: 'exec_listener' })),
+  { executionId: 'execution-81f61084-fd93-4565-9bda-9bf0d4b4f102', processName: LISTENER, processId: ID, status: 'ERROR', at: '2026-10-12T11:05:00Z', executionType: 'exec_listener' },
+]
+
+test("a component's runs in Boomi show on its row, matched by its ID", () => {
+  const [row] = components([act('deploy', 'ok', LISTENER, NOW - 60_000, { componentId: ID, file: 'active-development/processes/Listener.xml' })])
+  expect(runsOf(row!, listenerRuns).length).toBe(5)
+  expect(stages(row!, listenerRuns).map(s => s.text)).toEqual(['deployed', '1 of 5 listener runs failed'])
+  expect(runsOf({ name: 'Something else' }, listenerRuns)).toEqual([])
+})
+
+test('a failed run of a session component needs attention with that context, until marked seen', () => {
+  const state = dashboard([act('deploy', 'ok', LISTENER, NOW - 60_000, { componentId: ID })], {
+    platform: { phase: 'ok', message: '', runs: listenerRuns },
+  })
+  const [item] = attention(state, NOW, 24 * HOUR)
+  expect(item!.title).toBe(`Listener run of ${LISTENER} ended ERROR`)
+  expect(item!.hint).toContain('Execution 81f61084…, a component from this session')
+  expect(attention({ ...state, seenRuns: ['execution-81f61084-fd93-4565-9bda-9bf0d4b4f102'] }, NOW, 24 * HOUR)).toEqual([])
+})
+
+test('a collapsed runs section reads as one line', () => {
+  expect(runsSummary(listenerRuns, 24)).toEqual({ level: 'critical', text: '5 in 24h, 1 failed' })
+  expect(runsSummary(listenerRuns.slice(0, 4), 24)).toEqual({ level: 'healthy', text: '4 in 24h, none failed' })
+})
+
+test("the footer's link is the origin's GitHub page, in any remote form, and nothing for other hosts", () => {
+  expect(githubUrl('git@github.com:brianbrinley/ClaudeMods.git')).toBe('https://github.com/brianbrinley/ClaudeMods')
+  expect(githubUrl('https://github.com/brianbrinley/ClaudeMods')).toBe('https://github.com/brianbrinley/ClaudeMods')
+  expect(githubUrl('https://x-access-token:abc@github.com/o/r.git')).toBe('https://github.com/o/r')
+  expect(githubUrl('ssh://git@github.com/o/r.git')).toBe('https://github.com/o/r')
+  expect(githubUrl('https://gitlab.com/o/r.git')).toBeUndefined()
+  expect(githubUrl(null)).toBeUndefined()
+})
+
+test("steps from an earlier session don't skew the first new step's spend", () => {
+  const list = [
+    act('push', 'ok', 'A', NOW - 50, { file: FILE, tokensAt: 400_000, isRestored: true }),
+    act('push', 'ok', 'A', NOW - 10, { file: FILE, tokensAt: 5_000 }),
+  ]
+  expect(spends(list).get(list[1]!.id)?.tokens).toBe(5_000)
 })

@@ -7,7 +7,7 @@
 
 A Claude Code mod that shows where your [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) build stands while Claude works. It tracks each component Claude edits, saves to Boomi, deploys and tests, and shows what failed with what to do next. It also shows what the session has cost so far. With Companion's credentials, it adds the live environment's recent runs, and warns when someone else changes a component you're working on.
 
-You see it as a banner above the prompt, a pane, a status line and toasts. `/bc-dashboard` shows the same thing as text wherever those aren't available, including Claude Code on the web.
+You see it as a banner above the prompt, a pane, a status line and toasts. `/bc-dashboard` opens the pane, and Esc closes it. Where no pane can be shown, including Claude Code on the web, it prints the same thing as text.
 
 > **Prototype.** Built and tested against Companion's scripts and their output. Not yet run against a live Boomi account.
 
@@ -33,7 +33,8 @@ You see it as a banner above the prompt, a pane, a status line and toasts. `/bc-
 - **Needs attention:** what's still broken, each with a next step.
 - **Components this session:** each component's stages, and the tokens and spend it took across all its steps.
 - **Claude's latest steps:** what Claude just did with Companion, newest first, each with the tokens it took.
-- **Process runs in Boomi:** every execution in your Boomi environment in the last 24 hours: this session's tests, schedules and other people's runs. If it isn't connected yet, it says what's missing.
+- **Process runs in Boomi:** every execution in your Boomi environment in the last 24 hours: this session's tests, schedules and other people's runs. If it isn't connected yet, it says what's missing. **Hide** folds it to one line.
+- **Footer:** the session's short ID and a link to the repository's GitHub page.
 
 ### Themes
 
@@ -63,6 +64,7 @@ The pane redraws straight away, and the choice is kept for later sessions. Until
 | ✓ deployed | Companion deployed it to the environment. |
 | ◐ redeploy needed | It was saved again after it was deployed, so the environment runs an older version. |
 | ✓ test passed, ✗ test ERROR | The latest test execution's result. |
+| ✓ 4 listener runs ok, ✗ 1 of 5 listener runs failed | Its runs in Boomi over the last 24 hours, matched by component ID: listener calls, tests and schedules. |
 | ⚠ save blocked | Another mod, such as [boomi-standards](../boomi-standards/README.md), refused the push. |
 | ✗ save failed, ✗ deploy failed | Companion's script reported an error. |
 
@@ -148,8 +150,10 @@ The scripts run as usual: the dashboard never stops one.
 
 With Companion's credentials, the dashboard also checks Boomi. It only reads. It checks every 60 seconds, plus about 5 seconds after Claude deploys or tests something, and every 10 seconds while a run is still in progress, so new runs show up quickly.
 
+- **Folding.** **Hide** in the section's heading folds it to one line, such as `10 in 24h, 1 failed`, and **Show** opens it again. It stays as you left it for the rest of the session. Failures still show under **Needs attention**.
+- **Runs of this session's components.** Each run is matched to a component by its process ID. A component's row then shows its runs, and a failed run under **Needs attention** names the component. Listener calls are labeled "listener runs". If a failure was expected, such as a deliberate bad-input test, `/bc-dashboard seen` moves it out of **Needs attention**. It stays listed under **Process runs in Boomi**.
 - **Process runs.** It shows the newest executions on the runtimes attached to `BOOMI_ENVIRONMENT_ID`, but only those from the last 24 hours (set with `recentHours`). Failures older than that aren't shown or flagged. A new failure gets a toast. Failures already there at the first check don't.
-- **Watched components.** `/bc-dashboard watch <component ID or XML file>` adds a component to the watch list, which carries over to later sessions. When its version changes and Companion's API user (`BOOMI_USERNAME`) didn't make the change, it shows under **Needs attention**: pull it before you push, or you overwrite their change. `/bc-dashboard seen` clears the warning.
+- **Watched components.** `/bc-dashboard watch <component ID or XML file>` adds a component to the watch list, which carries over to later sessions. When its version changes and Companion's API user (`BOOMI_USERNAME`) didn't make the change, it shows under **Needs attention**: pull it before you push, or you overwrite their change. `/bc-dashboard seen` clears the warning, along with any failed runs you expected.
 
 The dashboard reads the credentials from Companion's `.env`, falling back to environment variables for any that are missing: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID` and `BOOMI_ENVIRONMENT_ID`.
 
@@ -159,11 +163,12 @@ The token is used only in the requests' `Authorization` header. The dashboard ne
 
 | Command | Tool Claude calls | Does |
 |---|---|---|
-| `/bc-dashboard` | `summary` | Everything above as text; opens the pane where the surface has one. |
+| `/bc-dashboard` | | Opens the dashboard pane with the keyboard; Esc closes it. The conversation, its scrollback and the prompt stay as they were. Where no pane can be shown, it prints the dashboard as text instead. |
+| `/bc-dashboard text` | `summary` | Everything above as text, in the conversation. |
 | `/bc-dashboard poll` | | Checks Boomi now, then shows the summary. |
 | `/bc-dashboard watch <id\|file>` | `watch` | Watches a component, given its ID or the XML file Companion created. |
 | `/bc-dashboard unwatch <id\|name>` | | Stops watching it. |
-| `/bc-dashboard seen` | | Clears the warnings about watched changes. |
+| `/bc-dashboard seen` | | Marks the current failed runs and watched changes as seen: they leave **Needs attention**. |
 | `/bc-dashboard banner` | | Shows the banner again after **Hide**. |
 | `/bc-dashboard theme [day\|night\|terminal]` | | Picks the pane's theme, or lists the themes. |
 
@@ -196,7 +201,10 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 
 - **The Claude Code web app doesn't show banners, panes, status lines or toasts yet.** On the web, use `/bc-dashboard`, or ask Claude, which calls the `summary` tool.
 - The dashboard recognizes Companion's scripts by name in Bash commands and reads their `SUCCESS:` and `ERROR:` lines. A component sent to Boomi another way, such as `curl` straight to the Platform API, doesn't show up. A change to the scripts' output could need a change here.
-- When one command runs several scripts, each is judged from the command's whole output.
+- Each `SUCCESS:` or `ERROR:` line is its own step. That covers a script run in a loop or across several lines, and a line names its component from the line before it, such as "Creating component 'X'" or "Pushing component 'X' (id)". A script that prints neither line is judged by the command's exit code.
+- Companion's work is seen through its scripts in Bash commands. Components built another way, such as through another MCP server, don't show up.
+- **Between sessions.** Steps are saved per working folder. After a restart (the one that loads this mod, for one), the last 24 hours come back, marked as from an earlier session. Tokens and spend start over with each session.
+- **The footer** shows the session's short ID: the mod API gives a mod the session's ID, not its name. Its link is the GitHub page of the working copy's `origin` remote, read when the pane first draws. There's no link when `origin` isn't on GitHub.
 - A call another mod refuses shows as blocked only when that mod's refusal reaches the dashboard, which depends on the order in which the mods' hooks run.
 - **Process runs in Boomi** includes runs from schedules and other people, not only this session's.
 - The dashboard counts a Companion script as run only when the command runs it (`bash`, `sh`, `./`, `source`). Reading or searching a script, as with `cat` or `grep`, doesn't count.

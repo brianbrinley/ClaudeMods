@@ -38,6 +38,8 @@ export type Activity = {
   usdAt?: number
   /** The model that answered the latest call before this step. */
   model?: string
+  /** Brought back from an earlier session in the same folder. */
+  isRestored?: boolean
 }
 
 /** Tokens by kind, as the API reports them. */
@@ -69,6 +71,10 @@ export type Run = {
   processName: string
   status: string
   at: string
+  /** The process's component ID, to match the run to a component. */
+  processId?: string
+  /** How it started: exec_listener for a listener, exec_manual, schedule, ... */
+  executionType?: string
 }
 
 /** A component someone asked the dashboard to watch for changes on the platform. */
@@ -96,6 +102,10 @@ export type Dashboard = {
   activity: Activity[]
   platform: Platform
   watched: Watched[]
+  /** How many steps came back from an earlier session in this folder. */
+  restored?: number
+  /** Failed runs marked as seen (expected), by execution ID: they leave Needs attention. */
+  seenRuns?: string[]
 }
 
 /** The pane's colors: Valence Day, Valence Night, or the terminal's own theme. */
@@ -103,6 +113,6 @@ export type PaneTheme = 'day' | 'night' | 'terminal'
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number }
+    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean }
   }
 }
