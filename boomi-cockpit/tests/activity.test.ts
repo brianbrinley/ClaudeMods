@@ -7,11 +7,16 @@ import {
   componentPath,
   components,
   describe,
+  formatTokens,
   friendlyType,
+  meter,
   newFailures,
   readOutput,
   recentRuns,
   scriptRuns,
+  sparkline,
+  spendOf,
+  spends,
   stages,
   statusLine,
   summary,
@@ -158,7 +163,9 @@ test('the status line leads with the latest step, then what needs attention, the
     act('test', 'failed', 'Orders Sync', NOW - 10, { executionStatus: 'ERROR' }),
     act('push', 'ok', 'Weather API', NOW, { file: 'active-development/c/W.xml', version: '2' }),
   ])
-  expect(statusLine(state, NOW, 24 * HOUR, 1.837)).toBe('✓ Saved Weather API to Boomi (v2) · ✗ 1 needs attention · $1.84 this session')
+  expect(statusLine(state, NOW, 24 * HOUR, { usd: 1.837, tokens: 1_240_000 })).toBe(
+    '✓ Saved Weather API to Boomi (v2) · ✗ 1 needs attention · 1.24M tokens · $1.84 this session',
+  )
   expect(statusLine(cockpit(), NOW, 24 * HOUR)).toBe('waiting for Companion')
 })
 
@@ -203,4 +210,28 @@ test('componentOf reads the root element; friendlyType names types in plain word
   expect(componentOf('<bns:Component componentId="" name="New">').componentId).toBeUndefined()
   expect(friendlyType('connector-settings')).toBe('connection')
   expect(friendlyType('profile.json')).toBe('JSON profile')
+})
+
+test('formatTokens reads at a glance', () => {
+  expect([950, 4_210, 312_400, 1_240_000].map(formatTokens)).toEqual(['950', '4.2k', '312k', '1.24M'])
+})
+
+test("each step's spend is the difference from the step before; a component's is its steps summed", () => {
+  const list = [
+    act('edit', 'ok', 'Orders Sync', NOW - 30, { file: FILE, tokensAt: 10_000, usdAt: 0.1 }),
+    act('push', 'ok', 'Orders Sync', NOW - 20, { file: FILE, tokensAt: 25_000, usdAt: 0.3 }),
+    act('other', 'ok', 'Companion', NOW - 10, { script: 'component-search', tokensAt: 26_000, usdAt: 0.31 }),
+  ]
+  const all = spends(list)
+  expect(all.get(list[0]!.id)).toEqual({ tokens: 10_000, usd: 0.1 })
+  expect(all.get(list[1]!.id)?.tokens).toBe(15_000)
+  expect(Math.round((all.get(list[1]!.id)?.usd ?? 0) * 100)).toBe(20)
+  const [row] = components(list)
+  expect(spendOf(row!.ids, all).tokens).toBe(25_000)
+})
+
+test('sparkline and meter draw at a glance', () => {
+  expect(sparkline([1, 4, 8])).toBe('▂▅█')
+  expect(sparkline([0, 0])).toBe('')
+  expect(meter(31, 10)).toBe('▰▰▰▱▱▱▱▱▱▱')
 })

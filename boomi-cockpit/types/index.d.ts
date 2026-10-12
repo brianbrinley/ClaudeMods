@@ -30,6 +30,22 @@ export type Activity = {
   /** A test's execution status (COMPLETE, ERROR, ...) and ID. */
   executionStatus?: string
   executionId?: string
+  /**
+   * The session's tokens and cost when this step began. The difference from
+   * the step before is what Claude spent getting to this one.
+   */
+  tokensAt?: number
+  usdAt?: number
+}
+
+/** Every token the session's model calls used, summed as the API reported them. */
+export type Ledger = {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  /** How many model calls the sums cover. */
+  calls: number
 }
 
 export type Run = {
@@ -68,6 +84,6 @@ export type Cockpit = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-cockpit': { cockpit: Cockpit; isBandHidden: boolean }
+    'boomi-cockpit': { cockpit: Cockpit; isBandHidden: boolean; ledger: Ledger; isWorking: boolean }
   }
 }

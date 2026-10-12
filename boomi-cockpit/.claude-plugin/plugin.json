@@ -1,6 +1,6 @@
 {
   "name": "boomi-cockpit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Boomi Companion at a glance while you build: each component's stage, what needs attention, the live environment and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {

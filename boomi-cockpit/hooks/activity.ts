@@ -3,7 +3,7 @@
 // attention, the recent feed and the live environment. Plain functions:
 // nothing here touches the engine, so the tests call them directly.
 
-import type { Activity, ActivityKind, Cockpit, Outcome, Run, Watched } from '../types'
+import type { Activity, ActivityKind, Cockpit, Ledger, Outcome, Run, Watched } from '../types'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
@@ -352,6 +352,8 @@ export type ComponentRow = {
   deployed?: Activity
   tested?: Activity
   lastAt: number
+  /** Every activity of this component, for its total spend. */
+  ids: number[]
 }
 
 /** Each component Claude edited, saved, deployed or tested, most recent first. */
@@ -361,7 +363,8 @@ export const components = (activity: readonly Activity[]): ComponentRow[] => {
   for (const a of activity) {
     if (a.kind === 'other') continue
     const key = a.file ?? (a.componentId && byId.get(a.componentId)?.key) ?? a.componentId ?? a.subject
-    const row: ComponentRow = rows.get(key) ?? { key, name: a.subject, lastAt: a.startedAt }
+    const row: ComponentRow = rows.get(key) ?? { key, name: a.subject, lastAt: a.startedAt, ids: [] }
+    row.ids.push(a.id)
     if (!/\.xml$/.test(a.subject) || row.name === key || /\.xml$/.test(row.name)) row.name = a.subject
     row.type = a.type ?? row.type
     row.componentId = a.componentId ?? row.componentId
@@ -462,6 +465,81 @@ export const attention = (cockpit: Cockpit, now: number, windowMs: number): Atte
   return items.sort((a, b) => b.at - a.at)
 }
 
+// --- Tokens and spend --------------------------------------------------------------
+
+export const EMPTY_LEDGER: Ledger = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 }
+
+/** Every token the session's model calls used: input, output and the prompt cache's. */
+export const totalTokens = (l: Ledger): number => l.input + l.output + l.cacheRead + l.cacheWrite
+
+/** A token count at a glance: 950, 4.2k, 312k, 1.24M. */
+export const formatTokens = (n: number): string => {
+  if (n < 1000) return String(Math.round(n))
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
+  return `${(n / 1_000_000).toFixed(2)}M`
+}
+
+export type Spend = { tokens?: number; usd?: number }
+
+/**
+ * What Claude spent getting to each step: the session's tokens and cost when
+ * the step began, less those when the step before it began.
+ */
+export const spends = (activity: readonly Activity[]): Map<number, Spend> => {
+  const out = new Map<number, Spend>()
+  let tokens = 0
+  let usd: number | undefined
+  for (const a of activity) {
+    const spend: Spend = {}
+    if (a.tokensAt !== undefined) {
+      spend.tokens = Math.max(0, a.tokensAt - tokens)
+      tokens = a.tokensAt
+    }
+    if (a.usdAt !== undefined) {
+      if (usd !== undefined) spend.usd = Math.max(0, a.usdAt - usd)
+      else spend.usd = a.usdAt
+      usd = a.usdAt
+    }
+    out.set(a.id, spend)
+  }
+  return out
+}
+
+/** A component's spend: every step it went through, summed. */
+export const spendOf = (ids: readonly number[], all: Map<number, Spend>): Spend => {
+  let tokens: number | undefined
+  let usd: number | undefined
+  for (const id of ids) {
+    const s = all.get(id)
+    if (s?.tokens !== undefined) tokens = (tokens ?? 0) + s.tokens
+    if (s?.usd !== undefined) usd = (usd ?? 0) + s.usd
+  }
+  return { tokens, usd }
+}
+
+export const formatSpend = (s: Spend | undefined): string | undefined => {
+  if (!s) return undefined
+  const parts = [s.tokens ? `${formatTokens(s.tokens)} tokens` : undefined, s.usd ? formatCost(s.usd) : undefined]
+  const text = parts.filter(Boolean).join(' · ')
+  return text || undefined
+}
+
+const BARS = '▁▂▃▄▅▆▇█'
+
+/** A sparkline of the values: one bar each, tallest for the biggest. */
+export const sparkline = (values: readonly number[]): string => {
+  const max = Math.max(...values, 0)
+  if (max <= 0) return ''
+  return values.map(v => BARS[Math.min(BARS.length - 1, Math.floor((v / max) * (BARS.length - 1) + 0.5))] ?? BARS[0]).join('')
+}
+
+/** A meter for a percentage: ▰▰▰▱▱▱▱▱▱▱. */
+export const meter = (percent: number, width = 10): string => {
+  const filled = Math.max(0, Math.min(width, Math.round((percent / 100) * width)))
+  return '▰'.repeat(filled) + '▱'.repeat(width - filled)
+}
+
 // --- The summary lines ------------------------------------------------------------
 
 export const formatCost = (usd: number | undefined): string | undefined =>
@@ -473,21 +551,29 @@ export const headline = (activity: readonly Activity[]): Activity | undefined =>
 
 /**
  * The status line: the latest thing Companion did, then what needs attention,
- * then the cost. The engine prefixes it with the mod's name.
+ * then the session's tokens and cost. The engine prefixes it with the mod's name.
  */
-export const statusLine = (cockpit: Cockpit, now: number, windowMs: number, usd?: number): string => {
+export const statusLine = (cockpit: Cockpit, now: number, windowMs: number, usage: Usage = {}): string => {
   const parts: string[] = []
   const latest = headline(cockpit.activity)
   if (latest) parts.push(`${STATUS[levelOf(latest)].icon} ${describe(latest)}`)
   const needs = attention(cockpit, now, windowMs)
   if (needs.length > 0) parts.push(`${STATUS[worst(needs.map(n => n.level))].icon} ${needs.length} need${needs.length === 1 ? 's' : ''} attention`)
   if (parts.length === 0) parts.push('waiting for Companion')
-  const cost = formatCost(usd)
-  if (cost) parts.push(`${cost} this session`)
+  const spent = [usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined, formatCost(usage.usd)].filter(Boolean)
+  if (spent.length > 0) parts.push(`${spent.join(' · ')} this session`)
   return parts.join(' · ')
 }
 
-export type Usage = { usd?: number; contextPercent?: number }
+export type Usage = { usd?: number; contextPercent?: number; tokens?: number; startedAt?: number }
+
+/** How long something has run: 45s, 12m, 1h 12m. */
+export const duration = (ms: number): string => {
+  const minutes = Math.floor(ms / 60_000)
+  if (minutes < 1) return `${Math.max(0, Math.round(ms / 1000))}s`
+  if (minutes < 60) return `${minutes}m`
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
 
 /** The whole cockpit as text: what /cockpit and Claude's summary tool show. */
 export const summary = (cockpit: Cockpit, usage: Usage, now: number, windowMs: number): string => {
@@ -497,17 +583,22 @@ export const summary = (cockpit: Cockpit, usage: Usage, now: number, windowMs: n
   lines.push(needs.length > 0 ? `Needs attention (${needs.length}):` : '✓ Nothing needs attention.')
   for (const n of needs) lines.push(`  ${STATUS[n.level].icon} ${n.title}`, `      ${n.hint}`)
 
+  const all = spends(cockpit.activity)
   const rows = components(cockpit.activity)
   lines.push('', rows.length > 0 ? 'Components this session:' : 'Components this session: none yet. They show up as Claude edits, saves, deploys and tests them.')
   for (const row of rows) {
     const type = friendlyType(row.type)
-    lines.push(`  ${row.name}${type ? ` (${type})` : ''}: ${stages(row).map(s => `${STATUS[s.level].icon} ${s.text}`).join('  ')}`)
+    const spent = formatSpend(spendOf(row.ids, all))
+    lines.push(`  ${row.name}${type ? ` (${type})` : ''}: ${stages(row).map(s => `${STATUS[s.level].icon} ${s.text}`).join('  ')}${spent ? `  [${spent}]` : ''}`)
   }
 
   const feed = cockpit.activity.slice(-8).reverse()
   if (feed.length > 0) {
     lines.push('', 'Recently:')
-    for (const a of feed) lines.push(`  ${STATUS[levelOf(a)].icon} ${describe(a)}, ${ago(when(a), now)}`)
+    for (const a of feed) {
+      const spent = formatSpend(all.get(a.id))
+      lines.push(`  ${STATUS[levelOf(a)].icon} ${describe(a)}, ${ago(when(a), now)}${spent ? `  [${spent}]` : ''}`)
+    }
   }
 
   lines.push('', `Live environment, last ${hours}h:`)
@@ -523,8 +614,9 @@ export const summary = (cockpit: Cockpit, usage: Usage, now: number, windowMs: n
   }
 
   const cost = formatCost(usage.usd)
+  const tokens = usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined
   const context = usage.contextPercent === undefined ? undefined : `context ${Math.round(usage.contextPercent)}% full`
-  if (cost || context) lines.push('', `Session: ${[cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
+  if (cost || tokens || context) lines.push('', `Session: ${[tokens, cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
   return lines.join('\n')
 }
 

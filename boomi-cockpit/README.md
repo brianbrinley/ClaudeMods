@@ -18,36 +18,23 @@ You see it as a banner above the prompt, a pane, a status line and toasts. `/coc
 **The banner** above the prompt shows the latest step and what needs attention. It stays hidden until Companion does something.
 
 ```text
-Boomi ✓ Saved Orders Sync to Boomi (v4) 2m ago  │  ✗ 1 needs attention  │  3 components  │  $0.54   [ Open ]  [ Hide ]
+◆ Boomi ✓ Saved Orders Sync to Boomi (v4) 2m ago │ ✗ 1 needs attention │ 3 components │ 338k tokens · $0.54   [ Open ]  [ Hide ]
 ```
 
-**The pane** has the whole picture. It opens the first time Claude edits or saves a component, and draws in the Valence Day colors with its own background, so it reads the same on any terminal theme:
+**The pane** has the whole picture. It opens the first time Claude edits or saves a component:
 
-```text
-Boomi cockpit                                        $0.54 this session · context 11%
+<img alt="The cockpit pane: a Flamingo title band reading BOOMI COCKPIT with an IN FLIGHT light, gauges for tokens, spend and context, a tokens-per-step sparkline, then Needs attention, Components this session with each one's stages and tokens, Recently, and Live environment" src="assets/pane-day.png" width="560">
 
-NEEDS ATTENTION
-✗ Test of Orders Sync ended ERROR                    2m ago
-  Ask Claude to read the execution log (0490202b…) and fix the process.
+- **Title band:** shows **● IN FLIGHT** while Claude works on a turn and **◇ STANDING BY** between turns, plus how long the session has been on deck and how many components are in flight.
+- **Gauges:** the session's tokens and spend, with the last step's share, and how full the context window is. Under them, a sparkline of the tokens each step took.
+- **Needs attention:** what's still broken, each with a next step.
+- **Components this session:** each component's stages, and the tokens and spend it took across all its steps.
+- **Recently:** the latest steps, each with its tokens.
+- **Live environment:** the environment's recent runs.
 
-COMPONENTS THIS SESSION
-Orders Sync  process
-  ✓ saved v4   ◐ redeploy needed   ✗ test ERROR
-Weather API  connection
-  ✓ saved v1
-Weather Map  map
-  ◐ edited, not in Boomi yet
+The pane draws in the Valence Day colors with its own background, so it reads the same on any terminal theme. **Pane colors** under `/config` switches it to Valence Night or to your terminal's theme.
 
-RECENTLY
-✗ Test of Orders Sync ended ERROR                    2m ago
-✓ Saved Orders Sync to Boomi (v4)                    3m ago
-✓ Searched components                                5m ago
-
-LIVE ENVIRONMENT  last 24h
-✓ Orders Sync completed, 2h ago
-```
-
-**The status line** shows the latest step, what needs attention and the cost: `✓ Saved Orders Sync to Boomi (v4) · ✗ 1 needs attention · $0.54 this session`.
+**The status line** shows the latest step, what needs attention and the session's spend: `✓ Saved Orders Sync to Boomi (v4) · ✗ 1 needs attention · 338k tokens · $0.54 this session`.
 
 **Toasts** pop up when a step fails, a deploy or test finishes, a run fails in the environment, or someone else changes a watched component.
 
@@ -76,6 +63,14 @@ Status is shown with an icon and a label, never color alone:
 | ◐ | In progress, or a step still to take |
 | ⚠ | Blocked by another mod, or Boomi couldn't be reached |
 | ✗ | Failed |
+
+## Tokens and spend
+
+- **Running token count.** Every model call reports its tokens, and the cockpit adds them up. That covers Claude's own calls and those of the agents it starts. The total includes the prompt cache's reads and writes, which make up most of a long session's tokens.
+- **Spend** is the session's cost, as `/cost` reports it.
+- **Each step's share** is what Claude used between the previous step and this one: the thinking, reading and writing that led to it. A component's share is all its steps added up.
+
+/cockpit and the `summary` tool show the same figures in brackets, for example `[61k tokens · $0.21]`.
 
 ## How it works
 
@@ -173,13 +168,15 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-cockpit"].
 - A call another mod refuses shows as blocked only when that mod's refusal reaches the cockpit, which depends on the order in which the mods' hooks run.
 - The live environment's runs include runs from schedules and other people, not only this session's.
 - The cost is the session's total so far, as `/cost` reports it, not just Companion's share.
+- Tokens are counted from when the mod loads, so in a session started without it, the count misses what came before. The first step's share includes everything before it.
 
 ## Under the hood
 
 | Capability | Engine call | What it does in this mod |
 |---|---|---|
 | Tool-call hooks | `tool.call` on `Bash`, `Write`, `Edit` | Notes each Companion script and how it went, and each edit to component XML. |
-| Session usage | `$.session.usage` | The session's cost and how full the context is. |
+| Session usage | `$.session.usage` | The session's cost, how full the context is and how long the session has run. |
+| Turn hooks | `turn.step`, `turn.start`, `turn.complete` | Every model call's tokens, and whether Claude is in flight. |
 | Network | `$.http.fetch` | Read-only Platform API queries: `EnvironmentAtomAttachment`, `ExecutionRecord` and `ComponentMetadata`. |
 | Timers | `$.clock.every` | Refreshes the status line every 5 seconds and checks Boomi every `pollSeconds`. |
 | Files | `$.fs` | Reads component XML for names, IDs and types, and Companion's `.env` for the credentials. |
@@ -211,3 +208,5 @@ Two files hold plain functions:
 - `hooks/platform.ts` is the Platform API client. The engine tests cover it.
 
 Everything that touches the engine is in `hooks/register.tsx`, because the engine only follows `$` within one file. The engine tests also draw the banner and the pane on the terminal and desktop surfaces, and check the pane's colors.
+
+`assets/pane-day.png` is the pane as the engine's test kit draws it for a sample session, rendered with its colors.
