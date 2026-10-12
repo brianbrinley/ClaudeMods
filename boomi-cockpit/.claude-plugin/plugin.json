@@ -1,31 +1,50 @@
 {
   "name": "boomi-cockpit",
-  "version": "0.1.0",
-  "description": "A live summary of a Boomi Companion session: builds, tests, deploys, the environment's runs, watched components and the session's cost",
+  "version": "0.2.0",
+  "description": "Boomi Companion at a glance while you build: each component's stage, what needs attention, the live environment and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
+    "paneTheme": {
+      "type": "string",
+      "title": "Pane colors",
+      "description": "day: Valence Day, light, with its own background; night: Valence Night, dark; terminal: your terminal's theme",
+      "options": ["day", "night", "terminal"],
+      "default": "day"
+    },
+    "recentHours": {
+      "type": "number",
+      "title": "Live environment window (hours)",
+      "description": "How far back the live environment's runs count; older failures are not shown or flagged",
+      "default": 24
+    },
     "envFile": {
       "type": "string",
       "title": "Companion .env file",
       "description": "Path of Boomi Companion's .env, relative to the session's working directory; the cockpit reads the Platform API credentials and BOOMI_ENVIRONMENT_ID from it",
       "default": ".env"
     },
+    "componentsDir": {
+      "type": "string",
+      "title": "Components folder",
+      "description": "Where Boomi Companion keeps component XML; edits to files under it show up as edited components",
+      "default": "active-development"
+    },
     "pollSeconds": {
       "type": "number",
       "title": "Platform poll interval (seconds)",
-      "description": "How often to poll the Platform API for the environment's runs and the watched components; 0 turns polling off",
+      "description": "How often to check Boomi for the environment's runs and the watched components; 0 turns polling off",
       "default": 60
     },
     "toasts": {
       "type": "boolean",
       "title": "Toasts",
-      "description": "Pop up a toast when a test, deploy or platform run fails, a deploy finishes, or a watched component changes",
+      "description": "Pop up a toast when a step fails, a deploy or test finishes, a run fails in the environment, or a watched component changes",
       "default": true
     },
     "banner": {
       "type": "boolean",
       "title": "Banner above the prompt",
-      "description": "Show a one-row summary above the prompt once there is Companion activity",
+      "description": "Show the latest Companion step and what needs attention above the prompt",
       "default": true
     }
   }

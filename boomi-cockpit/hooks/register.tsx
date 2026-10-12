@@ -1,10 +1,11 @@
-// A live summary of a Boomi Companion session: what Companion built, tested and
-// deployed, what the session has cost, and, with Companion's credentials, the
+// A live view of a Boomi Companion session while you build: each component
+// Claude edits, saves, deploys and tests, what needs attention and what to do
+// about it, the session's cost, and, with Companion's credentials, the live
 // environment's recent runs and the components someone asked to watch.
-// Companion's script runs are read from Claude's shell commands and their
-// output, so the session's own activity needs no Platform API calls.
+// Companion's work is read from Claude's tool calls and their output, so the
+// session's own activity needs no Platform API calls.
 // Everything that touches the engine lives in this file because the engine
-// follows $ only within it; parsing and formatting are in ./activity.
+// follows $ only within it; parsing and wording are in ./activity.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
@@ -12,30 +13,38 @@ import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 import type { Activity, Cockpit, Platform, Watched } from '../types'
 import {
   STATUS,
-  VERB,
+  ago,
+  attention,
   compareWatched,
   componentOf,
+  componentPath,
+  components,
+  describe,
   formatCost,
-  isFailedStatus,
+  friendlyType,
+  headline,
   levelOf,
   newFailures,
   readOutput,
+  recentRuns,
   runLevel,
-  runLine,
+  runText,
   scriptRuns,
+  stages,
   statusLine,
   summary,
-  tiles,
   watchedLevel,
   watchedLine,
+  watchedText,
+  worst,
 } from './activity'
-import type { ScriptRun, Usage } from './activity'
+import type { Level, ScriptRun, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import type { Credentials } from './platform'
 
 type Engine = EngineInterface
 
-const OFF: Platform = { phase: 'off', message: 'not polled yet', runs: [] }
+const OFF: Platform = { phase: 'off', message: 'Not checked yet.', runs: [] }
 
 const cockpit = atom({ plugin: 'boomi-cockpit', key: 'cockpit' } as const, {
   activity: [],
@@ -45,17 +54,31 @@ const cockpit = atom({ plugin: 'boomi-cockpit', key: 'cockpit' } as const, {
 
 const isBandHidden = atom({ plugin: 'boomi-cockpit', key: 'isBandHidden' } as const, false)
 
-type Settings = { envFile: string; pollSeconds: number; isToasting: boolean; isBanded: boolean }
+type PaneTheme = 'day' | 'night' | 'terminal'
+
+type Settings = {
+  envFile: string
+  componentsDir: string
+  pollSeconds: number
+  windowMs: number
+  paneTheme: PaneTheme
+  isToasting: boolean
+  isBanded: boolean
+}
 
 const settingsFrom = (options: PluginOptions): Settings => ({
   envFile: String(options.envFile || '.env'),
+  componentsDir: String(options.componentsDir || 'active-development'),
   pollSeconds: Math.max(0, Number(options.pollSeconds ?? 60) || 0),
+  windowMs: Math.max(1, Number(options.recentHours ?? 24) || 24) * 3_600_000,
+  paneTheme: options.paneTheme === 'night' || options.paneTheme === 'terminal' ? options.paneTheme : 'day',
   isToasting: options.toasts !== false,
   isBanded: options.banner !== false,
 })
 
 const PANE = 'boomi-cockpit'
 const WATCH_KEY = 'watched'
+const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit'])
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
@@ -77,28 +100,43 @@ const usageOf = async ($: Engine): Promise<Usage> => {
   }
 }
 
-const refreshStatus = async ($: Engine) => {
-  $.ui.status(statusLine(await read($, cockpit), (await usageOf($)).usd))
+const refreshStatus = async ($: Engine, settings: Settings) => {
+  const now = await $.clock.now()
+  $.ui.status(statusLine(await read($, cockpit), now, settings.windowMs, (await usageOf($)).usd))
+}
+
+const record = ($: Engine, change: (list: Activity[]) => Activity[]) =>
+  update($, cockpit, current => ({ ...current, activity: change(current.activity).slice(-150) }))
+
+const nextId = (list: readonly Activity[]) => list.reduce((max, a) => Math.max(max, a.id), 0) + 1
+
+/** A component file's name, ID and type, when the file can be read. */
+const readComponent = async ($: Engine, path: string) => {
+  try {
+    return componentOf(String(await $.fs.read(path)))
+  } catch {
+    return {}
+  }
 }
 
 // --- Companion's script runs -----------------------------------------------
 
 /** What the cockpit calls a run before its output names the component. */
-const subjectOf = async ($: Engine, run: ScriptRun, current: Cockpit): Promise<{ subject: string; componentId?: string }> => {
+const subjectOf = async ($: Engine, settings: Settings, run: ScriptRun, current: Cockpit) => {
   if (run.file) {
-    try {
-      const found = componentOf(String(await $.fs.read(run.file)))
-      if (found.name) return { subject: found.name, componentId: found.componentId }
-    } catch {}
-    return { subject: run.file.split('/').pop() ?? run.file }
+    const found = await readComponent($, run.file)
+    const file = componentPath(run.file, settings.componentsDir) ?? run.file
+    return { subject: found.name ?? run.file.split('/').pop() ?? run.file, componentId: found.componentId, type: found.type, file }
   }
-  if (run.processId) {
+  const id = run.processId ?? run.componentId
+  if (id) {
     const known =
-      current.activity.find(a => a.componentId === run.processId)?.subject ??
-      current.watched.find(w => w.componentId === run.processId)?.name
-    return { subject: known ?? run.processId, componentId: run.processId }
+      current.activity.find(a => a.componentId === id && !/\.xml$/.test(a.subject)) ??
+      current.activity.find(a => a.componentId === id)
+    const watched = current.watched.find(w => w.componentId === id)
+    return { subject: known?.subject ?? watched?.name ?? id, componentId: id, type: known?.type, file: known?.file }
   }
-  return { subject: run.deploymentId ? `deployment ${run.deploymentId}` : 'unknown' }
+  return { subject: run.deploymentId ? `deployment ${run.deploymentId}` : (run.script ?? 'Companion') }
 }
 
 const outputOf = (ran: { text?: string; result?: unknown }): string => {
@@ -107,22 +145,19 @@ const outputOf = (ran: { text?: string; result?: unknown }): string => {
   return [ran.text ?? '', ...streams].join('\n')
 }
 
-const record = ($: Engine, change: (list: Activity[]) => Activity[]) =>
-  update($, cockpit, current => ({ ...current, activity: change(current.activity).slice(-100) }))
-
 /** Notes each script run as running, before it runs. */
-const noteStart = async ($: Engine, runs: readonly ScriptRun[]): Promise<Activity[]> => {
+const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun[]): Promise<Activity[]> => {
   const current = await read($, cockpit)
   const startedAt = await $.clock.now()
-  let id = current.activity.reduce((max, a) => Math.max(max, a.id), 0)
+  let id = nextId(current.activity)
   const started: Activity[] = []
   for (const run of runs) {
-    const { subject, componentId } = await subjectOf($, run, current)
-    started.push({ id: ++id, kind: run.kind, outcome: 'running', subject, detail: 'running', startedAt, file: run.file, componentId })
+    const found = await subjectOf($, settings, run, current)
+    started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...found })
   }
-  if (current.activity.length === 0) openPane($)
+  if (!current.activity.some(a => a.kind !== 'other')) openPane($)
   await record($, list => [...list, ...started])
-  void refreshStatus($)
+  void refreshStatus($, settings)
   return started
 }
 
@@ -133,34 +168,73 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
   if (started.length === 0) return
   const endedAt = await $.clock.now()
   const output = ran.deny === undefined ? outputOf(ran) : ''
-  const done = started.map((a): Activity => {
+  const done: Activity[] = []
+  for (const a of started) {
     if (ran.deny !== undefined) {
-      return { ...a, outcome: 'blocked', detail: ran.deny.split('\n')[0]!.slice(0, 160), endedAt }
+      done.push({ ...a, outcome: 'blocked', detail: ran.deny.split('\n')[0]!.slice(0, 160), endedAt })
+      continue
     }
     const reading = readOutput(a.kind, output, ran.isError === true)
-    return {
+    // A create or pull writes the component's ID and name into its file.
+    const fresh = a.file && (a.kind === 'create' || a.kind === 'pull') ? await readComponent($, a.file) : {}
+    done.push({
       ...a,
       outcome: reading.outcome,
       detail: reading.detail,
       endedAt,
-      subject: reading.name ?? a.subject,
-      componentId: reading.componentId ?? a.componentId,
+      subject: reading.name ?? fresh.name ?? a.subject,
+      componentId: reading.componentId ?? fresh.componentId ?? a.componentId,
+      type: fresh.type ?? a.type,
       version: reading.version,
       executionStatus: reading.executionStatus,
       executionId: reading.executionId,
-    }
-  })
+    })
+  }
   await record($, list => list.map(a => done.find(d => d.id === a.id) ?? a))
   for (const a of done) announce($, settings, a)
-  void refreshStatus($)
+  void refreshStatus($, settings)
 }
 
 /** A toast for what someone would want to hear about without looking. */
 const announce = ($: Engine, settings: Settings, a: Activity) => {
-  const icon = STATUS[levelOf(a)].icon
-  if (a.outcome === 'failed') toast($, settings, `${icon} ${a.kind} failed: ${a.subject}`)
-  else if (a.outcome === 'blocked') toast($, settings, `${icon} ${a.kind} blocked: ${a.subject}`)
-  else if (a.kind === 'deploy' || a.kind === 'test') toast($, settings, `${icon} ${a.subject} ${VERB[a.kind]}: ${a.detail}`)
+  if (a.kind === 'other' || a.kind === 'pull') {
+    if (a.outcome === 'failed' || a.outcome === 'blocked') toast($, settings, `${STATUS[levelOf(a)].icon} ${describe(a)}`)
+    return
+  }
+  if (a.outcome !== 'ok' || a.kind === 'deploy' || a.kind === 'test') {
+    toast($, settings, `${STATUS[levelOf(a)].icon} ${describe(a)}`)
+  }
+}
+
+/** Notes Claude editing a component's XML: the step before Companion saves it. */
+const noteEdit = async ($: Engine, settings: Settings, path: string) => {
+  const file = componentPath(path, settings.componentsDir)
+  if (!file) return
+  const found = await readComponent($, path)
+  const at = await $.clock.now()
+  const isFirst = !(await read($, cockpit)).activity.some(a => a.kind !== 'other')
+  await record($, list => {
+    // A run of edits to one file is one step.
+    const last = list[list.length - 1]
+    if (last?.kind === 'edit' && last.file === file) {
+      return [...list.slice(0, -1), { ...last, startedAt: at, endedAt: at, subject: found.name ?? last.subject, type: found.type ?? last.type }]
+    }
+    const edit: Activity = {
+      id: nextId(list),
+      kind: 'edit',
+      outcome: 'ok',
+      subject: found.name ?? file.split('/').pop() ?? file,
+      detail: 'edited',
+      startedAt: at,
+      endedAt: at,
+      file,
+      componentId: found.componentId,
+      type: found.type,
+    }
+    return [...list, edit]
+  })
+  if (isFirst) openPane($)
+  void refreshStatus($, settings)
 }
 
 // --- The Platform API --------------------------------------------------------
@@ -183,7 +257,7 @@ const loadCredentials = async ($: Engine, settings: Settings): Promise<Credentia
   for (const [key, value] of Object.entries(fromEnv)) if (value) values[key] = value
   Object.assign(values, Object.fromEntries(Object.entries(fromFile).filter(([, v]) => v)))
   const found = credentialsFrom(values)
-  return 'missing' in found ? `off: no Platform API credentials (${found.missing.join(', ')} not set)` : found.credentials
+  return 'missing' in found ? `Off: no Boomi credentials (${found.missing.join(', ')} not set).` : found.credentials
 }
 
 let isPolling = false
@@ -204,14 +278,14 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
 
     let platform: Platform
     if (!loaded.environmentId) {
-      platform = { phase: 'off', message: 'off: BOOMI_ENVIRONMENT_ID not set, so no environment to watch', runs: [], checkedAt }
+      platform = { phase: 'off', message: 'Off: BOOMI_ENVIRONMENT_ID is not set, so there is no environment to watch.', runs: [], checkedAt }
     } else {
       try {
         const atoms = await client.environmentAtoms(loaded.environmentId)
         const runs = await client.recentRuns(atoms)
         platform = {
           phase: 'ok',
-          message: atoms.length === 0 ? 'no runtimes attached to the environment' : `${atoms.length} runtime(s) watched`,
+          message: atoms.length === 0 ? 'No runtimes are attached to the environment.' : `Watching ${atoms.length} runtime${atoms.length === 1 ? '' : 's'}.`,
           environmentId: loaded.environmentId,
           checkedAt,
           runs,
@@ -219,11 +293,11 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
         // The first poll sets the baseline: only failures after it are news.
         if (before.platform.checkedAt !== undefined) {
           for (const run of newFailures(before.platform.runs, runs)) {
-            toast($, settings, `${STATUS.critical.icon} ${run.processName} ${run.status.toLowerCase()} in the environment`)
+            toast($, settings, `${STATUS.critical.icon} ${runText(run, checkedAt)} in the environment`)
           }
         }
       } catch (error) {
-        platform = { ...before.platform, phase: 'error', message: `error: ${messageOf(error)}`, checkedAt }
+        platform = { ...before.platform, phase: 'error', message: `Couldn't reach Boomi: ${messageOf(error)}`, checkedAt }
       }
     }
 
@@ -232,11 +306,11 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
       try {
         const now = await client.currentVersion(w.componentId)
         if (!now) {
-          watched.push({ ...w, error: 'not found on the platform' })
+          watched.push({ ...w, error: 'not found in Boomi' })
           continue
         }
         const { next, isNewChange } = compareWatched({ ...w, error: undefined }, now, loaded.username)
-        if (isNewChange) toast($, settings, `${STATUS.warning.icon} ${next.name ?? next.componentId} changed by ${next.changedBy}`)
+        if (isNewChange) toast($, settings, `${STATUS.warning.icon} ${next.name ?? next.componentId} was changed by ${next.changedBy}`)
         watched.push(next)
       } catch (error) {
         watched.push({ ...w, error: messageOf(error) })
@@ -285,7 +359,7 @@ const unwatch = async ($: Engine, target: string): Promise<string> => {
   const current = await read($, cockpit)
   const gone = current.watched.find(w => w.componentId === target || w.name === target)
   if (!gone) return `Not watching ${target}.`
-  await update($, cockpit, c => ({ ...c, watched: c.watched.filter(w => w !== gone && w.componentId !== gone.componentId) }))
+  await update($, cockpit, c => ({ ...c, watched: c.watched.filter(w => w.componentId !== gone.componentId) }))
   await saveWatchList($)
   return `Stopped watching ${gone.name ?? gone.componentId}.`
 }
@@ -299,13 +373,16 @@ const seen = async ($: Engine): Promise<string> => {
 // --- Commands and tools ------------------------------------------------------
 
 const USAGE = [
-  '/cockpit                 the session summary; opens the cockpit pane where the surface has one',
-  '/cockpit poll            poll the Platform API now',
+  '/cockpit                 what needs attention, each component, recent activity, the live environment',
+  '/cockpit poll            check Boomi now',
   '/cockpit watch <id|file> watch a component for changes someone else makes',
   '/cockpit unwatch <id>    stop watching it',
   '/cockpit seen            mark watched changes as seen',
   '/cockpit banner          show the banner above the prompt again',
 ].join('\n')
+
+const summaryNow = async ($: Engine, settings: Settings) =>
+  summary(await read($, cockpit), await usageOf($), await $.clock.now(), settings.windowMs)
 
 const runCommand = async ($: Engine, settings: Settings, args: string): Promise<string> => {
   const [action = 'status', ...rest] = args.trim().split(/\s+/).filter(Boolean)
@@ -313,10 +390,10 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
   switch (action) {
     case 'status':
       openPane($)
-      return summary(await read($, cockpit), await usageOf($))
+      return summaryNow($, settings)
     case 'poll':
       await poll($, settings)
-      return summary(await read($, cockpit), await usageOf($))
+      return summaryNow($, settings)
     case 'watch':
       return watch($, settings, target)
     case 'unwatch':
@@ -331,6 +408,17 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
   }
 }
 
+// --- Drawing -------------------------------------------------------------------
+
+/** The pane's colors: Valence Day or Night with a background of its own, or the terminal's theme. */
+type Palette = { bg?: string; text: string; muted: string; heading: string; rule: string }
+
+const PALETTES: Record<PaneTheme, Palette> = {
+  day: { bg: '#FBF6EE', text: '#0B0B0B', muted: '#52514E', heading: '#C2185B', rule: '#9A7B3F' },
+  night: { bg: '#161A2E', text: '#FFFFFF', muted: '#C9CBE0', heading: '#F48FB1', rule: '#D4B46A' },
+  terminal: { text: 'text', muted: 'inactive', heading: 'claude', rule: 'subtle' },
+}
+
 export const register: Register = (on, options) => {
   const settings = settingsFrom(options)
 
@@ -338,18 +426,18 @@ export const register: Register = (on, options) => {
     const started = await next(e)
     await $.command.register({
       name: 'cockpit',
-      description: 'Live summary of the Boomi Companion session: builds, tests, deploys, platform runs, cost',
+      description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
       argumentHint: 'poll | watch <id|file> | unwatch <id> | seen | banner',
     })
     await $.tool.register({
       name: 'summary',
       description:
-        "The Boomi Companion session at a glance: components created and pushed, test executions, deployments, the session's cost so far, the environment's recent runs and watched components. Use it to report progress or to find what failed.",
+        "The Boomi Companion session at a glance: what failed and needs attention (with what to do), each component's stage (edited, saved to Boomi with its version, deployed, tested), recent Companion activity, the live environment's recent runs, watched components and the session's cost. Use it to report progress or to find what to fix next.",
     })
     await $.tool.register({
       name: 'watch',
       description:
-        'Watch a Boomi component for changes someone else makes on the platform; the cockpit shows a toast when its version moves. Takes a component ID or a component XML file Companion created.',
+        'Watch a Boomi component for changes someone else makes in Boomi; the cockpit flags it when its version moves. Takes a component ID or a component XML file Companion created.',
       inputSchema: {
         type: 'object',
         properties: { target: { type: 'string', description: 'A component ID, or the path of its XML file' } },
@@ -365,7 +453,7 @@ export const register: Register = (on, options) => {
       )
     }
 
-    $.clock.every(5_000, () => refreshStatus($))
+    $.clock.every(5_000, () => refreshStatus($, settings))
     if (settings.pollSeconds > 0) {
       $.clock.after(2_000, () => poll($, settings))
       $.clock.every(settings.pollSeconds * 1000, () => poll($, settings))
@@ -378,18 +466,27 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const runs = scriptRuns(String(e.command ?? ''))
     if (runs.length === 0) return next(e)
-    const started = await noteStart($, runs).catch(() => [] as Activity[])
+    const started = await noteStart($, settings, runs).catch(() => [] as Activity[])
     const ran = await next(e)
     await noteEnd($, settings, started, ran).catch(() => undefined)
+    return ran
+  })
+
+  // Claude editing a component's XML: the first step of every change.
+  on('tool.call', async ($, e, next) => {
+    if (!EDIT_TOOLS.has(String(e.tool))) return next(e)
+    const ran = await next(e)
+    const path = (e as { file_path?: unknown }).file_path
+    if (ran.deny === undefined && ran.isError !== true && typeof path === 'string') {
+      await noteEdit($, settings, path).catch(() => undefined)
+    }
     return ran
   })
 
   on('command.run', { command: 'cockpit' }, async ($, e) => ({ text: await runCommand($, settings, e.args) }))
 
   on('tool.call', { tool: 'mcp__boomi-cockpit__summary' }, async $ => ({
-    result: await Promise.resolve()
-      .then(async () => summary(await read($, cockpit), await usageOf($)))
-      .catch(error => `The cockpit couldn't build its summary: ${messageOf(error)}`),
+    result: await summaryNow($, settings).catch(error => `The cockpit couldn't build its summary: ${messageOf(error)}`),
   }))
 
   on('tool.call', { tool: 'mcp__boomi-cockpit__watch' }, async ($, e) => ({
@@ -398,20 +495,38 @@ export const register: Register = (on, options) => {
     ),
   }))
 
-  // The banner above the prompt: the summary in one row, once there's something to show.
+  // The banner above the prompt: the latest thing Companion did and what needs
+  // attention. Hidden until there's something to say.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!settings.isBanded || e.props.hasSurvey || (await read($, isBandHidden))) return next(e)
     const current = await read($, cockpit)
-    const hasNews = current.activity.length > 0 || current.platform.runs.length > 0 || current.watched.length > 0
-    if (!settings.isBanded || e.props.hasSurvey || !hasNews || (await read($, isBandHidden))) return next(e)
+    const now = await $.clock.now()
+    const latest = headline(current.activity)
+    const needs = attention(current, now, settings.windowMs)
+    if (!latest && needs.length === 0) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
+    const count = components(current.activity).length
+    const cost = formatCost((await usageOf($)).usd)
+    const icon = (level: Level) => <Text color={STATUS[level].color}>{STATUS[level].icon}</Text>
+
     return (
       <Box>
-        <Text bold>Cockpit </Text>
-        {tiles(current).map(tile => (
+        <Text bold>Boomi </Text>
+        {latest && (
           <Text>
-            <Text color={STATUS[tile.level].color}>{STATUS[tile.level].icon}</Text> {tile.label}{'  '}
+            {icon(levelOf(latest))} {describe(latest)} <Text dimColor>{ago(latest.endedAt ?? latest.startedAt, now)}</Text>
           </Text>
-        ))}
+        )}
+        {needs.length > 0 && (
+          <Text>
+            <Text dimColor>{latest ? '  │  ' : ''}</Text>
+            {icon(worst(needs.map(n => n.level)))} {needs.length} need{needs.length === 1 ? 's' : ''} attention
+          </Text>
+        )}
+        <Text dimColor>
+          {count > 0 ? `  │  ${count} component${count === 1 ? '' : 's'}` : ''}
+          {cost ? `  │  ${cost}` : ''}{' '}
+        </Text>
         <Button key="open" label="Open" onPress={() => openPane($)} />
         <Text> </Text>
         <Button key="hide" label="Hide" onPress={() => update($, isBandHidden, () => true)} />
@@ -421,57 +536,93 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
+    const p = PALETTES[settings.paneTheme]
     const current = await read($, cockpit)
+    const now = await $.clock.now()
     const usage = await usageOf($)
     const cost = formatCost(usage.usd)
-    const room = Math.max(3, (e.viewport?.rows ?? 30) - 14 - current.platform.runs.length - current.watched.length)
+    const hours = Math.round(settings.windowMs / 3_600_000)
+    const needs = attention(current, now, settings.windowMs)
+    const rows = components(current.activity)
+    const runs = recentRuns(current.platform.runs, now, settings.windowMs)
+    const feed = current.activity.slice(-6).reverse()
+
+    // Every Text carries the pane's colors, so it reads the same on any terminal.
+    const t = (text: string, style: { color?: string; bold?: boolean } = {}) => (
+      <Text color={style.color ?? p.text} backgroundColor={p.bg} bold={style.bold}>
+        {text}
+      </Text>
+    )
+    const icon = (level: Level) => (
+      <Text color={STATUS[level].color} backgroundColor={p.bg} bold>
+        {STATUS[level].icon}
+      </Text>
+    )
+    const heading = (text: string, aside?: string) => (
+      <Box marginTop={1}>
+        {t(text.toUpperCase(), { color: p.heading, bold: true })}
+        {aside ? t(`  ${aside}`, { color: p.muted }) : undefined}
+      </Box>
+    )
+    const line = (level: Level, text: string, aside?: string) => (
+      <Text backgroundColor={p.bg}>
+        {icon(level)}
+        {t(` ${text}`)}
+        {aside ? t(`  ${aside}`, { color: p.muted }) : undefined}
+      </Text>
+    )
 
     return (
-      <Box flexDirection="column">
-        {tiles(current).map(tile => (
-          <Text>
-            <Text bold color={STATUS[tile.level].color}>
-              {STATUS[tile.level].icon} {tile.label.padEnd(9)}
-            </Text>{' '}
-            {tile.text}
-          </Text>
-        ))}
-        {(cost || usage.contextPercent !== undefined) && (
-          <Text dimColor>
-            {'  Session   '}
-            {[cost && `${cost} so far`, usage.contextPercent !== undefined && `context ${Math.round(usage.contextPercent)}% full`]
+      <Box flexDirection="column" backgroundColor={p.bg} paddingX={1} minHeight={e.viewport?.rows} width="100%">
+        <Box justifyContent="space-between">
+          {t('Boomi cockpit', { color: p.heading, bold: true })}
+          {t(
+            [cost && `${cost} this session`, usage.contextPercent !== undefined && `context ${Math.round(usage.contextPercent)}%`]
               .filter(Boolean)
-              .join(' · ')}
-          </Text>
-        )}
+              .join(' · '),
+            { color: p.muted },
+          )}
+        </Box>
 
-        <Text bold>Companion activity</Text>
-        {current.activity.length === 0 && <Text dimColor>No create, push, deploy or test yet.</Text>}
-        {current.activity
-          .slice(-room)
-          .reverse()
-          .map(a => (
-            <Text>
-              <Text color={STATUS[levelOf(a)].color}>{STATUS[levelOf(a)].icon}</Text> {a.kind.padEnd(8)} {a.subject}
-              {a.version ? ` v${a.version}` : ''} <Text dimColor>{a.detail}</Text>
+        {heading('Needs attention')}
+        {needs.length === 0 && line('healthy', 'Nothing right now.')}
+        {needs.map(n => (
+          <Box flexDirection="column">
+            {line(n.level, n.title, ago(n.at, now))}
+            {t(`  ${n.hint}`, { color: p.muted })}
+          </Box>
+        ))}
+
+        {heading('Components this session')}
+        {rows.length === 0 && t('Components show up here as Claude edits, saves, deploys and tests them.', { color: p.muted })}
+        {rows.slice(0, 8).map(row => (
+          <Box flexDirection="column">
+            <Text backgroundColor={p.bg}>
+              {t(row.name, { bold: true })}
+              {friendlyType(row.type) ? t(`  ${friendlyType(row.type)}`, { color: p.muted }) : undefined}
             </Text>
-          ))}
-
-        {current.platform.runs.length > 0 && <Text bold>Environment runs</Text>}
-        {current.platform.runs.map(run => (
-          <Text>
-            <Text color={STATUS[runLevel(run)].color}>{STATUS[runLevel(run)].icon}</Text>{' '}
-            <Text dimColor={!isFailedStatus(run.status)}>{runLine(run).slice(2)}</Text>
-          </Text>
+            <Text backgroundColor={p.bg}>
+              {t('  ')}
+              {stages(row).map(s => (
+                <Text backgroundColor={p.bg}>
+                  {icon(s.level)}
+                  {t(` ${s.text}   `)}
+                </Text>
+              ))}
+            </Text>
+          </Box>
         ))}
 
-        {current.watched.length > 0 && <Text bold>Watched components</Text>}
-        {current.watched.map(w => (
-          <Text>
-            <Text color={STATUS[watchedLevel(w)].color}>{STATUS[watchedLevel(w)].icon}</Text> {watchedLine(w).slice(2)}
-          </Text>
-        ))}
-        <Text dimColor>Platform: {current.platform.message}</Text>
+        {feed.length > 0 && heading('Recently')}
+        {feed.map(a => line(levelOf(a), describe(a), ago(a.endedAt ?? a.startedAt, now)))}
+
+        {heading('Live environment', `last ${hours}h`)}
+        {current.platform.phase !== 'ok' && t(current.platform.message, { color: p.muted })}
+        {current.platform.phase === 'ok' && runs.length === 0 && t(`No runs in the last ${hours}h.`, { color: p.muted })}
+        {current.platform.phase === 'ok' && runs.slice(0, 6).map(run => line(runLevel(run), runText(run, now)))}
+
+        {current.watched.length > 0 && heading('Watched')}
+        {current.watched.map(w => line(watchedLevel(w), watchedText(w)))}
       </Box>
     )
   })

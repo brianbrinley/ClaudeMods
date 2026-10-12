@@ -5,29 +5,94 @@
 
 # Boomi Cockpit Mod
 
-A Claude Code mod that keeps a live summary of a [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) session: which components Companion created and pushed, which tests passed or failed, what it deployed, and what the session has cost so far. With Companion's credentials, it also shows how the environment's processes are running and whether someone else changed a component you're watching.
+A Claude Code mod that shows where your [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) build stands while Claude works. It tracks each component Claude edits, saves to Boomi, deploys and tests, and shows what failed with what to do next. It also shows what the session has cost so far. With Companion's credentials, it adds the live environment's recent runs, and warns when someone else changes a component you're working on.
 
-You see it as a status line, a banner above the prompt, a pane and toasts. `/cockpit` shows the same summary as text wherever those aren't available, including Claude Code on the web.
+You see it as a banner above the prompt, a pane, a status line and toasts. `/cockpit` shows the same thing as text wherever those aren't available, including Claude Code on the web.
 
 > **Prototype.** Built and tested against Companion's scripts and their output. Not yet run against a live Boomi account.
 
-## What it does
+**Install it on your own computer:** paste the prompt in [INSTALL.md](INSTALL.md) into Claude Code.
+
+## What you see
+
+**The banner** above the prompt shows the latest step and what needs attention. It stays hidden until Companion does something.
+
+```text
+Boomi ✓ Saved Orders Sync to Boomi (v4) 2m ago  │  ✗ 1 needs attention  │  3 components  │  $0.54   [ Open ]  [ Hide ]
+```
+
+**The pane** has the whole picture. It opens the first time Claude edits or saves a component, and draws in the Valence Day colors with its own background, so it reads the same on any terminal theme:
+
+```text
+Boomi cockpit                                        $0.54 this session · context 11%
+
+NEEDS ATTENTION
+✗ Test of Orders Sync ended ERROR                    2m ago
+  Ask Claude to read the execution log (0490202b…) and fix the process.
+
+COMPONENTS THIS SESSION
+Orders Sync  process
+  ✓ saved v4   ◐ redeploy needed   ✗ test ERROR
+Weather API  connection
+  ✓ saved v1
+Weather Map  map
+  ◐ edited, not in Boomi yet
+
+RECENTLY
+✗ Test of Orders Sync ended ERROR                    2m ago
+✓ Saved Orders Sync to Boomi (v4)                    3m ago
+✓ Searched components                                5m ago
+
+LIVE ENVIRONMENT  last 24h
+✓ Orders Sync completed, 2h ago
+```
+
+**The status line** shows the latest step, what needs attention and the cost: `✓ Saved Orders Sync to Boomi (v4) · ✗ 1 needs attention · $0.54 this session`.
+
+**Toasts** pop up when a step fails, a deploy or test finishes, a run fails in the environment, or someone else changes a watched component.
+
+### Each component's stages
+
+| Stage | Means |
+|---|---|
+| ◐ edited, not in Boomi yet | Claude changed the XML; Companion hasn't created it in Boomi. |
+| ◐ edited since last save | Claude changed the XML after Companion last pushed it. |
+| ✓ saved v4 | Companion pushed it, and Boomi now has version 4. |
+| ✓ deployed | Companion deployed it to the environment. |
+| ◐ redeploy needed | It was saved again after it was deployed, so the environment runs an older version. |
+| ✓ test passed, ✗ test ERROR | The latest test execution's result. |
+| ⚠ save blocked | Another mod, such as [boomi-standards](../boomi-standards/README.md), refused the push. |
+| ✗ save failed, ✗ deploy failed | Companion's script reported an error. |
+
+A later success clears an earlier failure, so **Needs attention** lists only what's still broken.
+
+### Status icons
+
+Status is shown with an icon and a label, never color alone:
+
+| Icon | Means |
+|---|---|
+| ✓ | Done or passing |
+| ◐ | In progress, or a step still to take |
+| ⚠ | Blocked by another mod, or Boomi couldn't be reached |
+| ✗ | Failed |
+
+## How it works
 
 ```mermaid
 %%{init: {"theme": "base", "fontFamily": "Josefin Sans, trebuchet ms, verdana, arial, sans-serif", "themeVariables": {"fontSize": "15px", "background": "#FBF6EE", "primaryColor": "#FBF6EE", "primaryTextColor": "#0B0B0B", "primaryBorderColor": "#9A7B3F", "lineColor": "#9A7B3F", "textColor": "#0B0B0B", "secondaryColor": "#9FDED6", "tertiaryColor": "#FBE7A1", "edgeLabelBackground": "#FBF6EE", "clusterBkg": "#FBF6EE", "clusterBorder": "#9A7B3F", "actorBkg": "#F7A8C4", "actorBorder": "#C2185B", "actorTextColor": "#0B0B0B", "actorLineColor": "#9A7B3F", "signalColor": "#0B0B0B", "signalTextColor": "#0B0B0B", "labelBoxBkgColor": "#FBE7A1", "labelBoxBorderColor": "#9A7B3F", "labelTextColor": "#0B0B0B", "loopTextColor": "#0B0B0B", "noteBkgColor": "#FBE7A1", "noteBorderColor": "#9A7B3F", "noteTextColor": "#0B0B0B", "activationBkgColor": "#9FDED6", "activationBorderColor": "#0F766E", "sequenceNumberColor": "#FBF6EE"}}}%%
 flowchart LR
-    A["Claude runs a Companion script<br/>create, push, deploy, undeploy, test"] --> B["Note the run<br/>as running"]
-    B --> C["Script runs"]
-    C --> D{"SUCCESS or ERROR?<br/>test status?"}
-    D -- ok --> E["Record the result:<br/>version, status, execution ID"]
-    D -- failed --> X["error: recorded as failed,<br/>toast"]
-    E --> S["Status line, banner,<br/>pane, /cockpit"]
+    W["Claude edits<br/>component XML"] --> R["Component's stages"]
+    A["Claude runs a Companion script<br/>create, push, deploy, test, ..."] --> D{"SUCCESS or ERROR?<br/>test status?"}
+    D -- ok --> R
+    D -- failed --> X["error: needs attention,<br/>with a next step"]
+    R --> S["Banner, pane,<br/>status line, /cockpit"]
     X --> S
-    P[("Boomi Platform API")] -. "every 60 s: environment runs,<br/>watched components" .-> S
+    P[("Boomi Platform API")] -. "every 60 s: recent runs,<br/>watched components" .-> S
     U["Session cost<br/>and context"] -.-> S
-    class B,E focus
+    class R focus
     class D decision
-    class A,S highlight
+    class W,A,S highlight
     class P external
     class X error
     classDef focus fill:#F7A8C4,stroke:#C2185B,stroke-width:2px,color:#0B0B0B
@@ -37,77 +102,54 @@ flowchart LR
     classDef error fill:#FFFFFF,stroke:#D03B3B,stroke-width:2px,color:#0B0B0B
 ```
 
-The cockpit gets the session's own activity from Claude's shell commands, so it makes no Platform API calls for it. When Claude runs one of Companion's scripts, the cockpit records it as running, lets it run, then reads the result from the script's output:
+The cockpit follows Companion's work through Claude's tool calls, so the session's own activity costs no Platform API calls:
+
+- **Edits.** When Claude writes or edits an XML file under `active-development/`, the component shows as edited. Inventory files are ignored.
+- **Companion's scripts.** When Claude runs one, the cockpit notes it as running, lets it run, then reads the result from its output:
 
 | Companion script | What the cockpit records |
 |---|---|
-| `boomi-component-create.sh <file>` | The component's name and its new ID |
-| `boomi-component-push.sh <file>` | The component's name and its new version, or that nothing changed |
-| `boomi-deploy.sh <file>` | The deployed process and its package, or the error |
-| `boomi-undeploy.sh` | The deployment removed, or the error |
-| `boomi-test-execute.sh --process-id <id>` | The execution's status (`COMPLETE`, `ERROR`, ...) and ID. An `ERROR` or `ABORTED` run is a failed test. |
+| `boomi-component-create.sh <file>` | Created in Boomi, with the new ID |
+| `boomi-component-push.sh <file>` | Saved, with the new version, or already up to date |
+| `boomi-component-pull.sh` | Pulled from Boomi |
+| `boomi-deploy.sh <file>` | Deployed, or the error |
+| `boomi-undeploy.sh` | Undeployed, or the error |
+| `boomi-test-execute.sh --process-id <id>` | The execution's status. `ERROR`, `ABORTED` or `DISCARDED` is a failed test. |
+| Companion's other scripts | A line under **Recently**, such as "Searched components" |
 
-The script still runs as usual. If another mod, such as [boomi-standards](../boomi-standards/README.md), refuses the call first, the cockpit records it as **blocked**, with the refusal's first line.
+The scripts run as usual: the cockpit never stops one.
 
-When something is fixed, the cockpit shows the fix: in the counts, a later run of the same component or process replaces the earlier failure. The full history stays in the pane and in `/cockpit`.
+## The live environment
 
-## What you see
+With Companion's credentials, the cockpit also checks Boomi every 60 seconds. It only reads.
 
-**Status line**, one entry per area, each with an icon and a label:
+- **Recent runs.** It shows the newest executions on the runtimes attached to `BOOMI_ENVIRONMENT_ID`, but only those from the last 24 hours (set with `recentHours`). Failures older than that aren't shown or flagged. A new failure gets a toast. Failures already there at the first check don't.
+- **Watched components.** `/cockpit watch <component ID or XML file>` adds a component to the watch list, which carries over to later sessions. When its version changes and Companion's API user (`BOOMI_USERNAME`) didn't make the change, it shows under **Needs attention**: pull it before you push, or you overwrite their change. `/cockpit seen` clears the warning.
 
-```text
-Cockpit ✓ 4 built · ✗ 1 test failed · ✓ 1 deployed · ⚠ 2 platform errors · $1.84
-```
+The cockpit reads the credentials from Companion's `.env`, falling back to environment variables for any that are missing: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID` and `BOOMI_ENVIRONMENT_ID`.
 
-**Banner above the prompt**: once there's Companion activity, one row with the state of each area (Builds, Tests, Deploys, Platform), plus **Open** to open the pane and **Hide** to dismiss the banner. `/cockpit banner` brings it back.
-
-**Pane**: each area with its counts; the session's cost and how full the context is; recent Companion activity, newest first; the environment's recent runs; and the watched components. The pane opens with the session's first Companion script.
-
-**Toasts** for what you'd want to know without looking:
-- a failed or blocked create, push, deploy or test
-- a finished deploy or test
-- a new failed run in the environment
-- a change to a watched component made by someone else
-
-| Status | Icon | Means |
-|---|---|---|
-| Healthy | ✓ | Passed, deployed, unchanged |
-| Warning | ◐ | Running, completed with warnings, a watched component changed |
-| Serious | ⚠ | Blocked by another mod, a platform error |
-| Critical | ✗ | Failed |
-
-## The Platform API side
-
-With Companion's credentials, the cockpit also polls the Platform API every 60 seconds by default. It only reads.
-
-- **Environment runs.** The newest executions on the runtimes attached to `BOOMI_ENVIRONMENT_ID`, with a toast for each new failure. The first poll is the baseline, so failures from before the session don't raise toasts.
-- **Watched components.** `/cockpit watch <component ID or XML file>` adds a component to the watch list. Each poll reads the component's current version. When the version changes and Companion's API user (`BOOMI_USERNAME`) didn't make the change, the cockpit flags it and shows a toast, so you know someone else edited a process you're working on. `/cockpit seen` clears the flags. The watch list is kept across sessions.
-
-The cockpit reads the credentials from Companion's `.env`, falling back to environment variables for any that are missing. They're the same ones Companion and [boomi-runtime](../boomi-runtime/README.md) use: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID` and `BOOMI_ENVIRONMENT_ID`.
-
-The token is used only in the requests' `Authorization` header. The cockpit never stores, shows or logs it, and its error messages carry only the HTTP status, never the platform's reply. Without credentials, everything else still works and the Platform line explains what's missing.
+The token is used only in the requests' `Authorization` header. The cockpit never stores, shows or logs it, and its error messages carry only the HTTP status, never Boomi's reply. Without credentials, everything else still works, and the Live environment section says what's missing.
 
 ## Commands and tools
 
 | Command | Tool Claude calls | Does |
 |---|---|---|
-| `/cockpit` | `summary` | The whole summary as text; opens the pane where the surface has one. |
-| `/cockpit poll` | | Polls the Platform API now, then shows the summary. |
+| `/cockpit` | `summary` | Everything above as text; opens the pane where the surface has one. |
+| `/cockpit poll` | | Checks Boomi now, then shows the summary. |
 | `/cockpit watch <id\|file>` | `watch` | Watches a component, given its ID or the XML file Companion created. |
 | `/cockpit unwatch <id\|name>` | | Stops watching it. |
-| `/cockpit seen` | | Marks watched changes as seen. |
+| `/cockpit seen` | | Clears the warnings about watched changes. |
 | `/cockpit banner` | | Shows the banner again after **Hide**. |
 
-The tools are listed to Claude as `mcp__boomi-cockpit__summary` and `mcp__boomi-cockpit__watch`. With them, Claude can report progress or find what failed without reading back through the conversation.
+The tools are listed to Claude as `mcp__boomi-cockpit__summary` and `mcp__boomi-cockpit__watch`. Ask Claude "what's left to fix?" and it can answer from the summary.
 
 ## Setup
 
-Load it alongside the [boomi-runtime](../boomi-runtime/README.md) and [boomi-standards](../boomi-standards/README.md) mods, or on its own with Companion:
-
+- **Your own computer:** the prompt in [INSTALL.md](INSTALL.md) clones this repository and adds the mod to your user settings.
 - **Claude Code on the web:** add the folder to the environment's `CLAUDE_CODE_PLUGIN_DIRS`, separating mods with `:`, for example `CLAUDE_CODE_PLUGIN_DIRS=/home/user/ClaudeMods/boomi-runtime:/home/user/ClaudeMods/boomi-standards:/home/user/ClaudeMods/boomi-cockpit`.
-- **Terminal:** `claude --plugin-dir boomi-cockpit`.
+- **One terminal session:** `claude --plugin-dir boomi-cockpit`.
 
-The session's own activity needs nothing extra. The Platform API side needs Companion's credentials and network access to `BOOMI_API_URL` (`api.boomi.com`). Set `pollSeconds` to `0` to turn polling off.
+The session's own activity needs nothing extra. The live environment needs Companion's credentials and network access to `BOOMI_API_URL` (`api.boomi.com`).
 
 ## Settings
 
@@ -115,34 +157,37 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-cockpit"].
 
 | Setting | Default | |
 |---|---|---|
+| `paneTheme` | `day` | The pane's colors: `day` (Valence Day, light), `night` (Valence Night, dark), or `terminal` (your terminal's theme). |
+| `recentHours` | `24` | How far back the live environment's runs count. |
 | `envFile` | `.env` | Companion's `.env`, relative to the session's working directory. |
-| `pollSeconds` | `60` | How often to poll the Platform API. `0` turns polling off. |
-| `toasts` | `true` | Show a toast for failures, finished deploys and tests, and watched changes. |
-| `banner` | `true` | Show the one-row summary above the prompt. |
+| `componentsDir` | `active-development` | Where Companion keeps component XML. |
+| `pollSeconds` | `60` | How often to check Boomi. `0` turns it off. |
+| `toasts` | `true` | Pop up toasts for failures, finished deploys and tests, and watched changes. |
+| `banner` | `true` | Show the banner above the prompt. |
 
 ## Limits
 
-- **The Claude Code web app doesn't show status lines, panes, banners or toasts yet.** On the web, use `/cockpit`, or ask Claude, which calls the `summary` tool.
-- The cockpit recognizes Companion's scripts by name in Bash commands and reads their `SUCCESS:` and `ERROR:` lines. A component sent to the platform another way, such as `curl` straight to the Platform API, doesn't show up. A change to the scripts' output could need a change here.
+- **The Claude Code web app doesn't show banners, panes, status lines or toasts yet.** On the web, use `/cockpit`, or ask Claude, which calls the `summary` tool.
+- The cockpit recognizes Companion's scripts by name in Bash commands and reads their `SUCCESS:` and `ERROR:` lines. A component sent to Boomi another way, such as `curl` straight to the Platform API, doesn't show up. A change to the scripts' output could need a change here.
 - When one command runs several scripts, each is judged from the command's whole output.
-- A call another mod refuses shows as blocked only when that mod's refusal reaches the cockpit, which depends on the order the mods' hooks run in.
-- Environment runs are the newest executions on the environment's runtimes. They include runs from schedules and other people, not only this session's.
+- A call another mod refuses shows as blocked only when that mod's refusal reaches the cockpit, which depends on the order in which the mods' hooks run.
+- The live environment's runs include runs from schedules and other people, not only this session's.
 - The cost is the session's total so far, as `/cost` reports it, not just Companion's share.
 
-## How it works
+## Under the hood
 
 | Capability | Engine call | What it does in this mod |
 |---|---|---|
-| Tool-call hook | `tool.call` on `Bash` | Notes each Companion script run, lets it run, then reads how it went. |
-| Session usage | `$.session.usage` | The session's cost and how full the context is, as the status line has them. |
+| Tool-call hooks | `tool.call` on `Bash`, `Write`, `Edit` | Notes each Companion script and how it went, and each edit to component XML. |
+| Session usage | `$.session.usage` | The session's cost and how full the context is. |
 | Network | `$.http.fetch` | Read-only Platform API queries: `EnvironmentAtomAttachment`, `ExecutionRecord` and `ComponentMetadata`. |
-| Timers | `$.clock.every` | Refreshes the status line every 5 seconds and polls the platform every `pollSeconds`. |
-| Files | `$.fs` | Reads component XML for names and IDs, and Companion's `.env` for the credentials. |
-| Session state | `$.state` | The activity, the platform results and the watch list that the banner and pane read. |
+| Timers | `$.clock.every` | Refreshes the status line every 5 seconds and checks Boomi every `pollSeconds`. |
+| Files | `$.fs` | Reads component XML for names, IDs and types, and Companion's `.env` for the credentials. |
+| Session state | `$.state` | The activity, Boomi's results and the watch list that the banner and pane read. |
 | Store | `$.store` | Keeps the watch list across sessions. |
 | Slash command | `$.command.register` | `/cockpit` and its actions. |
 | Tools for Claude | `$.tool.register` | `summary` and `watch`. |
-| Display | `$.ui.status`, `ui.render` (`AbovePrompt`, `Pane`), `$.ui.toast` | The status line, the banner, the pane and the toasts. |
+| Display | `ui.render` (`AbovePrompt`, `Pane`), `$.ui.status`, `$.ui.toast` | The banner, the pane, the status line and the toasts. |
 
 ## To do
 
@@ -162,7 +207,7 @@ claude plugin test .
 ```
 
 Two files hold plain functions:
-- `hooks/activity.ts` reads Companion's commands and output and builds the counts, the status line and the summary. It has unit tests.
+- `hooks/activity.ts` reads Companion's commands and output and works out each component's stages, what needs attention and how each step is worded. It has unit tests.
 - `hooks/platform.ts` is the Platform API client. The engine tests cover it.
 
-Everything that touches the engine is in `hooks/register.tsx`, because the engine only follows `$` within one file. The engine tests also draw the banner and the pane on the terminal and desktop surfaces.
+Everything that touches the engine is in `hooks/register.tsx`, because the engine only follows `$` within one file. The engine tests also draw the banner and the pane on the terminal and desktop surfaces, and check the pane's colors.

@@ -1,120 +1,181 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
+  attention,
   compareWatched,
   componentOf,
+  componentPath,
+  components,
+  describe,
+  friendlyType,
   newFailures,
   readOutput,
+  recentRuns,
   scriptRuns,
+  stages,
   statusLine,
   summary,
-  tiles,
 } from '../hooks/activity'
 import type { Activity, Cockpit } from '../types'
 
 const ID = '1a2b3c4d-1111-2222-3333-444455556666'
+const HOUR = 3_600_000
+const NOW = Date.parse('2026-10-12T12:00:00Z')
 
 const cockpit = (activity: Activity[] = [], extra: Partial<Cockpit> = {}): Cockpit => ({
   activity,
-  platform: { phase: 'off', message: 'off: no credentials', runs: [] },
+  platform: { phase: 'off', message: 'Off: no Boomi credentials.', runs: [] },
   watched: [],
   ...extra,
 })
 
 let nextId = 0
-const act = (kind: Activity['kind'], outcome: Activity['outcome'], subject: string, more: Partial<Activity> = {}): Activity => ({
+const act = (kind: Activity['kind'], outcome: Activity['outcome'], subject: string, at: number, more: Partial<Activity> = {}): Activity => ({
   id: ++nextId,
   kind,
   outcome,
   subject,
   detail: outcome,
-  startedAt: 0,
+  startedAt: at,
+  endedAt: at,
   ...more,
 })
+
+const FILE = 'active-development/processes/Orders.xml'
 
 test('scriptRuns finds the Companion scripts a command runs and what they name', () => {
   expect(
     scriptRuns(
-      'cd work && bash scripts/boomi-component-push.sh active-development/processes/Orders.xml --branch dev && bash scripts/boomi-deploy.sh active-development/processes/Orders.xml --deployment-notes "first cut"',
+      `cd work && bash scripts/boomi-component-push.sh ${FILE} --branch dev && bash scripts/boomi-deploy.sh ${FILE} --deployment-notes "first cut"`,
     ),
   ).toEqual([
-    { kind: 'push', file: 'active-development/processes/Orders.xml' },
-    { kind: 'deploy', file: 'active-development/processes/Orders.xml' },
+    { kind: 'push', file: FILE },
+    { kind: 'deploy', file: FILE },
   ])
-  expect(scriptRuns(`bash scripts/boomi-test-execute.sh --process-id ${ID} --test-data in.json`)).toEqual([
-    { kind: 'test', processId: ID },
-  ])
+  expect(scriptRuns(`bash scripts/boomi-test-execute.sh --process-id ${ID} --test-data in.json`)).toEqual([{ kind: 'test', processId: ID }])
   expect(scriptRuns('bash scripts/boomi-undeploy.sh dep-123')).toEqual([{ kind: 'undeploy', deploymentId: 'dep-123' }])
-  expect(scriptRuns('bash scripts/boomi-undeploy.sh --by-component a/b.xml')).toEqual([{ kind: 'undeploy', file: 'a/b.xml' }])
+  expect(scriptRuns(`bash scripts/boomi-component-pull.sh --component-id ${ID}`)).toEqual([{ kind: 'pull', componentId: ID }])
 })
 
-test('scriptRuns leaves out help, connection tests and other commands', () => {
+test("scriptRuns notes Companion's other scripts, and finds scripts inside bash -c", () => {
+  expect(scriptRuns('bash scripts/boomi-component-search.sh --name Orders')).toEqual([{ kind: 'other', script: 'component-search' }])
+  expect(scriptRuns(`bash -c 'cd x && bash scripts/boomi-deploy.sh ${FILE}'`)).toEqual([{ kind: 'deploy', file: FILE }])
+})
+
+test('scriptRuns leaves out help, connection tests, the shared library and other commands', () => {
   expect(scriptRuns('bash scripts/boomi-component-push.sh --test-connection')).toEqual([])
   expect(scriptRuns('bash scripts/boomi-deploy.sh --list-environments')).toEqual([])
-  expect(scriptRuns('bash scripts/boomi-component-pull.sh --component-id x')).toEqual([])
+  expect(scriptRuns('source scripts/boomi-common.sh')).toEqual([])
   expect(scriptRuns('git status')).toEqual([])
 })
 
-test('readOutput reads a push with its new version', () => {
-  const reading = readOutput(
-    'push',
-    "Pushing component 'Orders Sync' (x) to the account default branch\nSUCCESS: Pushed component 'Orders Sync' — now version 7",
-    false,
-  )
-  expect(reading).toMatchObject({ outcome: 'ok', name: 'Orders Sync', version: '7' })
+test('componentPath names a component file the same way from a script and from an edit', () => {
+  expect(componentPath(`/Users/me/work/${FILE}`)).toBe(FILE)
+  expect(componentPath(FILE)).toBe(FILE)
+  expect(componentPath('/Users/me/work/active-development/inventories/search.xml')).toBeUndefined()
+  expect(componentPath('/Users/me/work/notes.md')).toBeUndefined()
+  expect(componentPath('/w/src/components/a.xml', 'src/components')).toBeUndefined()
+  expect(componentPath('/w/components/a.xml', 'components')).toBe('components/a.xml')
 })
 
-test('readOutput reads a create and its new ID', () => {
-  const reading = readOutput('create', `SUCCESS: Component 'Orders API' created with ID: ${ID}`, false)
-  expect(reading).toMatchObject({ outcome: 'ok', name: 'Orders API', componentId: ID })
+test('readOutput reads a push with its new version, a create with its ID, an unchanged push', () => {
+  expect(readOutput('push', "SUCCESS: Pushed component 'Orders Sync' — now version 7", false)).toMatchObject({
+    outcome: 'ok',
+    name: 'Orders Sync',
+    version: '7',
+  })
+  expect(readOutput('create', `SUCCESS: Component 'Orders API' created with ID: ${ID}`, false)).toMatchObject({
+    outcome: 'ok',
+    componentId: ID,
+  })
+  expect(readOutput('push', "Component 'Orders' matches the last push — nothing sent to the platform.", false).outcome).toBe('ok')
 })
 
-test('readOutput counts an unchanged push as fine', () => {
-  const reading = readOutput('push', "Component 'Orders' matches the last push to dev — nothing sent to the platform.", false)
-  expect(reading.outcome).toBe('ok')
-})
-
-test('readOutput reads an error line and an exit code', () => {
-  const failed = readOutput('deploy', 'ERROR: Deployment failed (HTTP 400): bad package', true)
-  expect(failed).toMatchObject({ outcome: 'failed', detail: 'ERROR: Deployment failed (HTTP 400): bad package' })
+test('readOutput reads errors, and scripts that only read succeed without a SUCCESS line', () => {
+  expect(readOutput('deploy', 'ERROR: Deployment failed (HTTP 400): bad package', true)).toMatchObject({
+    outcome: 'failed',
+    detail: 'ERROR: Deployment failed (HTTP 400): bad package',
+  })
   expect(readOutput('push', 'something went wrong', true).outcome).toBe('failed')
+  expect(readOutput('other', 'Found 3 components', false).outcome).toBe('ok')
+  expect(readOutput('other', 'ERROR: HTTP 401', true).outcome).toBe('failed')
 })
 
 test("readOutput reads a test's execution status, and an ERROR status fails it", () => {
-  const passed = readOutput('test', 'Execution completed: status=COMPLETE, executionId=execution-abc-123', false)
-  expect(passed).toMatchObject({ outcome: 'ok', executionStatus: 'COMPLETE', executionId: 'execution-abc-123' })
-  const failed = readOutput('test', 'Execution completed: status=ERROR, executionId=execution-abc-124', false)
-  expect(failed).toMatchObject({ outcome: 'failed', executionStatus: 'ERROR', detail: 'status ERROR' })
-})
-
-test('a later success supersedes an earlier failure of the same component', () => {
-  const state = cockpit([
-    act('push', 'failed', 'Orders', { file: 'p/Orders.xml' }),
-    act('push', 'ok', 'Orders', { file: 'p/Orders.xml' }),
-  ])
-  expect(statusLine(state)).toBe('Cockpit ✓ 1 built')
-  expect(tiles(state)[0]).toMatchObject({ label: 'Builds', level: 'healthy' })
-})
-
-test('the status line puts failures first-class and adds the cost', () => {
-  const state = cockpit([
-    act('create', 'ok', 'A'),
-    act('push', 'blocked', 'B'),
-    act('test', 'failed', 'Orders Sync', { executionStatus: 'ERROR' }),
-    act('deploy', 'ok', 'Orders Sync'),
-  ])
-  expect(statusLine(state, 1.837)).toBe('Cockpit ✓ 1 built · ✗ 1 build failed · ✗ 1 test failed · ✓ 1 deployed · $1.84')
-  expect(statusLine(cockpit())).toBe('Cockpit no Companion activity yet')
-})
-
-test('the summary shows each area, the cost and the recent activity', () => {
-  const text = summary(cockpit([act('deploy', 'failed', 'Orders Sync', { detail: 'ERROR: Deployment failed (HTTP 400)' })]), {
-    usd: 0.5,
-    contextPercent: 41.6,
+  expect(readOutput('test', 'Execution completed: status=COMPLETE, executionId=execution-abc-123', false)).toMatchObject({
+    outcome: 'ok',
+    executionStatus: 'COMPLETE',
+    executionId: 'execution-abc-123',
   })
-  expect(text).toContain('✗ Deploys')
-  expect(text).toContain('$0.50 so far · context 42% full')
-  expect(text).toContain('Orders Sync: ERROR: Deployment failed (HTTP 400)')
+  expect(readOutput('test', 'Execution completed: status=ERROR, executionId=execution-abc-124', false).outcome).toBe('failed')
+})
+
+test("a component's stages read as its journey: edited, saved, deployed, tested", () => {
+  const [row] = components([
+    act('edit', 'ok', 'Orders Sync', NOW - 50, { file: FILE, type: 'process' }),
+    act('push', 'ok', 'Orders Sync', NOW - 40, { file: FILE, version: '4' }),
+    act('deploy', 'ok', 'Orders Sync', NOW - 30, { file: FILE, componentId: ID }),
+    act('test', 'failed', 'Orders Sync', NOW - 20, { componentId: ID, executionStatus: 'ERROR' }),
+  ])
+  expect(row!.name).toBe('Orders Sync')
+  expect(stages(row!).map(s => s.text)).toEqual(['saved v4', 'deployed', 'test ERROR'])
+})
+
+test('an edit after the last save, and a save after the last deploy, say so', () => {
+  const [row] = components([
+    act('push', 'ok', 'Orders Sync', NOW - 50, { file: FILE, version: '4' }),
+    act('deploy', 'ok', 'Orders Sync', NOW - 40, { file: FILE }),
+    act('push', 'ok', 'Orders Sync', NOW - 30, { file: FILE, version: '5' }),
+    act('edit', 'ok', 'Orders Sync', NOW - 20, { file: FILE }),
+  ])
+  expect(stages(row!).map(s => s.text)).toEqual(['edited since last save', 'saved v5', 'redeploy needed'])
+  const [fresh] = components([act('edit', 'ok', 'New Map', NOW, { file: 'active-development/maps/New.xml' })])
+  expect(stages(fresh!).map(s => s.text)).toEqual(['edited, not in Boomi yet'])
+})
+
+test('needs attention lists current failures with a next step, and a later fix clears them', () => {
+  const failing = cockpit([act('test', 'failed', 'Orders Sync', NOW, { componentId: ID, executionStatus: 'ERROR', executionId: 'execution-0490202b-2e2f' })])
+  const [item] = attention(failing, NOW, 24 * HOUR)
+  expect(item!.title).toBe('Test of Orders Sync ended ERROR')
+  expect(item!.hint).toContain('execution log (0490202b…)')
+
+  const fixed = cockpit([...failing.activity, act('test', 'ok', 'Orders Sync', NOW + 1, { componentId: ID, executionStatus: 'COMPLETE' })])
+  expect(attention(fixed, NOW, 24 * HOUR)).toEqual([])
+})
+
+test("old runs in the environment don't need attention", () => {
+  const runs = [
+    { executionId: 'e1', processName: 'JMX Capability Scan', status: 'ERROR', at: '2026-09-07T09:45:11Z' },
+    { executionId: 'e2', processName: 'Orders Sync', status: 'ERROR', at: '2026-10-12T10:00:00Z' },
+  ]
+  const state = cockpit([], { platform: { phase: 'ok', message: '', runs } })
+  expect(recentRuns(runs, NOW, 24 * HOUR).map(r => r.executionId)).toEqual(['e2'])
+  expect(attention(state, NOW, 24 * HOUR).map(a => a.title)).toEqual(['Orders Sync ended ERROR in the environment'])
+})
+
+test('the status line leads with the latest step, then what needs attention, then the cost', () => {
+  const state = cockpit([
+    act('test', 'failed', 'Orders Sync', NOW - 10, { executionStatus: 'ERROR' }),
+    act('push', 'ok', 'Weather API', NOW, { file: 'active-development/c/W.xml', version: '2' }),
+  ])
+  expect(statusLine(state, NOW, 24 * HOUR, 1.837)).toBe('✓ Saved Weather API to Boomi (v2) · ✗ 1 needs attention · $1.84 this session')
+  expect(statusLine(cockpit(), NOW, 24 * HOUR)).toBe('waiting for Companion')
+})
+
+test('describe words each step for a person, not a script', () => {
+  expect(describe(act('other', 'ok', 'Companion', NOW, { script: 'component-search' }))).toBe('Searched components')
+  expect(describe(act('deploy', 'failed', 'Orders Sync', NOW))).toBe('Deploy of Orders Sync failed')
+  expect(describe(act('push', 'blocked', 'Orders Sync', NOW))).toBe('Blocked: push of Orders Sync')
+  expect(describe(act('push', 'running', 'Orders Sync', NOW))).toBe('Saving Orders Sync…')
+})
+
+test('the summary has each section, in plain words', () => {
+  const text = summary(cockpit([act('edit', 'ok', 'New Map', NOW - 120_000, { file: 'active-development/maps/New.xml', type: 'transform.map' })]), { usd: 0.5, contextPercent: 41.6 }, NOW, 24 * HOUR)
+  expect(text).toContain('✓ Nothing needs attention.')
+  expect(text).toContain('New Map (map): ◐ edited, not in Boomi yet')
+  expect(text).toContain('Edited New Map, 2m ago')
+  expect(text).toContain('Live environment, last 24h:')
+  expect(text).toContain('Session: $0.50 so far · context 42% full')
 })
 
 test('a watched component changed by someone else is flagged, a change of our own is not', () => {
@@ -122,11 +183,8 @@ test('a watched component changed by someone else is flagged, a change of our ow
   const theirs = compareWatched(before, { version: '4', modifiedBy: 'pat@example.com' }, 'me@example.com')
   expect(theirs.isNewChange).toBe(true)
   expect(theirs.next.changedBy).toBe('pat@example.com')
-  const ours = compareWatched(before, { version: '4', modifiedBy: 'ME@example.com' }, 'me@example.com')
-  expect(ours.isNewChange).toBe(false)
-  const first = compareWatched({ componentId: ID }, { version: '3' }, 'me@example.com')
-  expect(first.isNewChange).toBe(false)
-  expect(first.next.version).toBe('3')
+  expect(compareWatched(before, { version: '4', modifiedBy: 'ME@example.com' }, 'me@example.com').isNewChange).toBe(false)
+  expect(compareWatched({ componentId: ID }, { version: '3' }, 'me@example.com').isNewChange).toBe(false)
 })
 
 test('newFailures returns only failed runs not seen before', () => {
@@ -139,8 +197,10 @@ test('newFailures returns only failed runs not seen before', () => {
   expect(newFailures(old, fresh).map(run => run.executionId)).toEqual(['e2'])
 })
 
-test('componentOf reads the root element, not nested references', () => {
+test('componentOf reads the root element; friendlyType names types in plain words', () => {
   const xml = `<bns:Component xmlns:bns="http://api.platform.boomi.com/" componentId="${ID}" name="Orders Sync" type="process"><bns:object><x componentId="other"/></bns:object></bns:Component>`
-  expect(componentOf(xml)).toEqual({ componentId: ID, name: 'Orders Sync' })
+  expect(componentOf(xml)).toEqual({ componentId: ID, name: 'Orders Sync', type: 'process' })
   expect(componentOf('<bns:Component componentId="" name="New">').componentId).toBeUndefined()
+  expect(friendlyType('connector-settings')).toBe('connection')
+  expect(friendlyType('profile.json')).toBe('JSON profile')
 })
