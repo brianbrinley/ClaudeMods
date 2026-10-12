@@ -1,6 +1,6 @@
 import type { CommandRunInput, On, RenderElement, RenderPropsOf } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
-import type { Engine } from 'claude-code/testing'
+import type { Engine, MockClock } from 'claude-code/testing'
 
 const dashboard = (args = '') => ({ command: 'bc-dashboard', args }) as CommandRunInput
 
@@ -16,6 +16,10 @@ const CREDENTIALS = {
   BOOMI_ACCOUNT_ID: 'acct-1',
 }
 
+/** The mocked clock of the test running now, set by world(). */
+let clock: MockClock
+
+
 /** The surface, files, clock and session cost beneath the plugin; records the toasts. */
 const world = (on: On, files: Record<string, string> = {}) => {
   const toasts: string[] = []
@@ -28,7 +32,7 @@ const world = (on: On, files: Record<string, string> = {}) => {
   on('ui.status', async () => ({ value: undefined }))
   on('ui.open', async () => ({ value: { isPlaced: false as const, reason: 'no pane in tests' } }))
   on('session.cwd', async () => ({ value: '/work' }))
-  mock.clock(on, { now: NOW })
+  clock = mock.clock(on, { now: NOW })
   on('ui.toast', async (_$, e) => {
     toasts.push(String(e.text))
     return { value: undefined }
@@ -53,7 +57,7 @@ const shell = (on: On, stdout: string, isError = false) => {
 
 /** The Write tool beneath the plugins: accepts every write. */
 /** One model call of `tokens` tokens, as a turn step reports it; registers its answer beneath. */
-const modelCall = async ($: Engine, on: On, tokens: number) => {
+const modelCall = async ($: Engine, on: On, tokens: number, model = 'claude') => {
   on('turn.step', async function* () {
     return {
       turnId: 't1',
@@ -61,7 +65,7 @@ const modelCall = async ($: Engine, on: On, tokens: number) => {
       answer: '',
       toolUses: [],
       stopReason: 'tool_use',
-      usage: { model: 'claude', input_tokens: tokens / 4, output_tokens: tokens / 4, cache_read_input_tokens: tokens / 2, cache_creation_input_tokens: 0 },
+      usage: { model, input_tokens: tokens / 4, output_tokens: tokens / 4, cache_read_input_tokens: tokens / 2, cache_creation_input_tokens: 0 },
     } as never
   })
   const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude', messageCount: 1 })
@@ -260,4 +264,50 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(title?.props.color).toBe('claude')
     expect(await pane.find({ text: '◇ IDLE' })).toBeDefined()
   })
+
+  test(`on ${surface}, the theme buttons switch the pane's colors and the choice is kept`, async ($, on) => {
+    world(on)
+    mock.store(on)
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
+    expect(await pane.find({ type: 'Button', key: 'theme-day' })).toBeDefined()
+    expect((await pane.find({ type: 'Button', key: 'theme-day' }))?.props.label).toBe('◆ Day')
+    await pane.press({ key: 'theme-night' })
+    expect(propsOf(await pane.drawn()).backgroundColor).toBe('#161A2E')
+    expect((await pane.find({ type: 'Button', key: 'theme-night' }))?.props.label).toBe('◆ Night')
+    const listed = await $.command.run(dashboard('theme'))
+    expect(listed.text).toContain('◆ night')
+    await $.command.run(dashboard('theme day'))
+    expect(propsOf(await pane.drawn()).backgroundColor).toBe('#FBF6EE')
+  })
+
+  test(`on ${surface}, the flamingo walks while Claude works and stands while idle`, async ($, on) => {
+    world(on)
+    mock.store(on)
+    on('turn.start', async (_$, e) => ({ turnId: e.turnId }) as never)
+    on('turn.complete', async () => ({ text: '' }))
+    on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }) as never)
+    on('tool.register', async () => ({ value: undefined }) as never)
+    // The session starts on the mocked clock, so its animation timer does too.
+    await $.session.start({ cwd: '/work', surface, isInteractive: true })
+    await $.turn.complete({ reason: 'answer', turnId: 't0', answer: '' } as never)
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
+    const bird = async () => JSON.stringify((await pane.findAll({ text: /^[ ▀▄█]+$/ })).map(f => f.text))
+    const standing = await bird()
+    expect(standing).toContain('▀')
+    await $.turn.start({ text: 'go', turnId: 't1' } as never)
+    const walking = await bird()
+    expect(walking).not.toBe(standing)
+    await clock.advance(320)
+    expect(await bird()).not.toBe(walking)
+  })
+
+  test(`on ${surface}, the pane names the model that answered`, async ($, on) => {
+    world(on)
+    await modelCall($, on, 8_000, 'claude-opus-5-5')
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
+    expect(await pane.find({ text: /Opus 5\.5/ })).toBeDefined()
+    expect(await pane.find({ text: /VALENCE/ })).toBeUndefined()
+  })
 }
+

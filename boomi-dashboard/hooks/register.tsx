@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
-import type { Activity, Dashboard, Ledger, Platform, Watched } from '../types'
+import type { Activity, Dashboard, Ledger, PaneTheme, Platform, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -27,8 +27,12 @@ import {
   formatTokens,
   friendlyType,
   headline,
+  flamingo,
   levelOf,
   meter,
+  modelMix,
+  modelName,
+  pixelCells,
   newFailures,
   readOutput,
   recentRuns,
@@ -67,7 +71,11 @@ const ledger = atom({ plugin: 'boomi-dashboard', key: 'ledger' } as const, EMPTY
 
 const isWorking = atom({ plugin: 'boomi-dashboard', key: 'isWorking' } as const, false)
 
-type PaneTheme = 'day' | 'night' | 'terminal'
+/** The theme picked in the pane or with /bc-dashboard theme; null follows the setting. */
+const pickedTheme = atom({ plugin: 'boomi-dashboard', key: 'theme' } as const, null as PaneTheme | null)
+
+/** The flamingo's animation frame, moved on while Claude works. */
+const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
 
 type Settings = {
   envFile: string
@@ -77,6 +85,7 @@ type Settings = {
   paneTheme: PaneTheme
   isToasting: boolean
   isBanded: boolean
+  hasFlamingo: boolean
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -87,10 +96,17 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   paneTheme: options.paneTheme === 'night' || options.paneTheme === 'terminal' ? options.paneTheme : 'day',
   isToasting: options.toasts !== false,
   isBanded: options.banner !== false,
+  hasFlamingo: options.flamingo !== false,
 })
 
 const PANE = 'boomi-dashboard'
 const WATCH_KEY = 'watched'
+const THEME_KEY = 'theme'
+
+const THEMES: readonly PaneTheme[] = ['day', 'night', 'terminal']
+const THEME_NAMES: Record<PaneTheme, string> = { day: 'Day', night: 'Night', terminal: 'Terminal' }
+
+const isTheme = (value: unknown): value is PaneTheme => THEMES.includes(value as PaneTheme)
 const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit'])
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
@@ -105,19 +121,21 @@ const toast = ($: Engine, settings: Settings, text: string) => {
 }
 
 const usageOf = async ($: Engine): Promise<Usage> => {
-  const tokens = totalTokens(await read($, ledger)) || undefined
+  const l = await read($, ledger)
+  const tokens = totalTokens(l) || undefined
+  const models = { model: modelName(l.lastModel), models: modelMix(l) || undefined }
   try {
     const usage = await $.session.usage()
-    return { usd: usage.cost?.usd, contextPercent: usage.context.percent, tokens, startedAt: usage.startedAt }
+    return { usd: usage.cost?.usd, contextPercent: usage.context.percent, tokens, startedAt: usage.startedAt, ...models }
   } catch {
-    return { tokens }
+    return { tokens, ...models }
   }
 }
 
 /** The session's tokens and cost right now, stamped on each step as it begins. */
 const snapshot = async ($: Engine) => {
   const usage = await usageOf($)
-  return { tokensAt: usage.tokens ?? 0, usdAt: usage.usd }
+  return { tokensAt: usage.tokens ?? 0, usdAt: usage.usd, model: usage.model }
 }
 
 const refreshStatus = async ($: Engine, settings: Settings) => {
@@ -393,6 +411,26 @@ const seen = async ($: Engine): Promise<string> => {
   return 'Watched changes marked as seen.'
 }
 
+/** Picks the pane's theme, now and for later sessions. */
+const pickTheme = async ($: Engine, theme: PaneTheme) => {
+  await update($, pickedTheme, () => theme)
+  await $.store.set(THEME_KEY, theme)
+}
+
+const themeOf = async ($: Engine, settings: Settings): Promise<PaneTheme> => (await read($, pickedTheme)) ?? settings.paneTheme
+
+/** /bc-dashboard theme [day|night|terminal]: picks one, or lists them. */
+const theme = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const wanted = target.toLowerCase()
+  if (isTheme(wanted)) {
+    await pickTheme($, wanted)
+    return `Dashboard theme: ${THEME_NAMES[wanted]}.`
+  }
+  const current = await themeOf($, settings)
+  const list = THEMES.map(t => `${t === current ? '◆' : '◇'} ${t}`).join('   ')
+  return `${target ? `No theme called ${target}. ` : ''}Themes: ${list}\nPick one with /bc-dashboard theme <name>, or with the buttons in the pane.`
+}
+
 // --- Commands and tools ------------------------------------------------------
 
 const USAGE = [
@@ -402,6 +440,7 @@ const USAGE = [
   '/bc-dashboard unwatch <id>    stop watching it',
   '/bc-dashboard seen            mark watched changes as seen',
   '/bc-dashboard banner          show the banner above the prompt again',
+  '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
 ].join('\n')
 
 const summaryNow = async ($: Engine, settings: Settings) =>
@@ -423,6 +462,8 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return unwatch($, target)
     case 'seen':
       return seen($)
+    case 'theme':
+      return theme($, settings, target)
     case 'banner':
       await update($, isBandHidden, () => false)
       return 'The dashboard banner is back above the prompt.'
@@ -446,6 +487,8 @@ type Palette = {
   band?: string
   bandText: string
   accent: string
+  /** The flamingo's pink. */
+  bird: string
 }
 
 const PALETTES: Record<PaneTheme, Palette> = {
@@ -458,6 +501,7 @@ const PALETTES: Record<PaneTheme, Palette> = {
     band: '#C2185B',
     bandText: '#FBF6EE',
     accent: '#0F766E',
+    bird: '#C2185B',
   },
   night: {
     bg: '#161A2E',
@@ -468,8 +512,9 @@ const PALETTES: Record<PaneTheme, Palette> = {
     band: '#F48FB1',
     bandText: '#161A2E',
     accent: '#5EEAD4',
+    bird: '#F48FB1',
   },
-  terminal: { text: 'text', muted: 'inactive', heading: 'claude', rule: 'subtle', bandText: 'claude', accent: 'suggestion' },
+  terminal: { text: 'text', muted: 'inactive', heading: 'claude', rule: 'subtle', bandText: 'claude', accent: 'suggestion', bird: '#C2185B' },
 }
 
 /** The Deco rule under the title: double lines with a diamond at the center. */
@@ -486,7 +531,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'poll | watch <id|file> | unwatch <id> | seen | banner',
+      argumentHint: 'poll | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
     })
     await $.tool.register({
       name: 'summary',
@@ -505,6 +550,9 @@ export const register: Register = (on, options) => {
     })
 
     // The watch list outlives the session; restore it the first time.
+    const saved = await $.store.get(THEME_KEY)
+    if (isTheme(saved)) await update($, pickedTheme, () => saved)
+
     const ids = await $.store.get(WATCH_KEY)
     if (Array.isArray(ids)) {
       await update($, dashboard, c =>
@@ -513,6 +561,12 @@ export const register: Register = (on, options) => {
     }
 
     $.clock.every(5_000, () => refreshStatus($, settings))
+    // The flamingo walks while Claude works: about three frames a second.
+    if (settings.hasFlamingo) {
+      $.clock.every(320, async () => {
+        if (await read($, isWorking)) await update($, frame, n => (n + 1) % 1000)
+      })
+    }
     if (settings.pollSeconds > 0) {
       $.clock.after(2_000, () => poll($, settings))
       $.clock.every(settings.pollSeconds * 1000, () => poll($, settings))
@@ -559,12 +613,15 @@ export const register: Register = (on, options) => {
     const response = yield* next(e)
     const used = response.usage
     if (used) {
+      const total = used.input_tokens + used.output_tokens + used.cache_read_input_tokens + used.cache_creation_input_tokens
       await update($, ledger, l => ({
         input: l.input + used.input_tokens,
         output: l.output + used.output_tokens,
         cacheRead: l.cacheRead + used.cache_read_input_tokens,
         cacheWrite: l.cacheWrite + used.cache_creation_input_tokens,
         calls: l.calls + 1,
+        models: { ...l.models, [used.model]: (l.models?.[used.model] ?? 0) + total },
+        lastModel: used.model,
       })).catch(() => undefined)
     }
     return response
@@ -633,8 +690,9 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
-    const p = PALETTES[settings.paneTheme]
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const themeNow = await themeOf($, settings)
+    const p = PALETTES[themeNow]
     const current = await read($, dashboard)
     const now = await $.clock.now()
     const usage = await usageOf($)
@@ -697,29 +755,51 @@ export const register: Register = (on, options) => {
           {t('◆ BOOMI COMPANION DASHBOARD ◆', { color: p.bandText, bold: true, bg: p.band })}
           {t(status, { color: p.bandText, bold: true, bg: p.band })}
         </Box>
-        <Box justifyContent="space-between">
-          {t('VALENCE · MIAMI DECO', { color: p.rule, bold: true })}
+        <Box justifyContent="space-between" flexWrap="wrap">
           {t(
-            [session, `${rows.length} component${rows.length === 1 ? '' : 's'}`].filter(Boolean).join(' · '),
+            [session, `${rows.length} component${rows.length === 1 ? '' : 's'}`, usage.model].filter(Boolean).join(' · '),
             { color: p.muted },
           )}
+          <Box>
+            {t('Theme ', { color: p.muted })}
+            {THEMES.map(name => (
+              <Button key={`theme-${name}`} label={name === themeNow ? `◆ ${THEME_NAMES[name]}` : THEME_NAMES[name]} onPress={() => pickTheme($, name)} />
+            ))}
+          </Box>
         </Box>
         {t(decoRule(width), { color: p.rule })}
 
-        <Box flexWrap="wrap" columnGap={1}>
-          {gauge('TOKENS', usage.tokens ? formatTokens(usage.tokens) : '—', last?.tokens ? `last step ${formatTokens(last.tokens)}` : undefined)}
-          {gauge('SPEND', formatCost(usage.usd) ?? '—', last?.usd ? `last step ${formatCost(last.usd)}` : undefined)}
-          {gauge(
-            'CONTEXT',
-            usage.contextPercent === undefined ? '—' : `${meter(usage.contextPercent, 8)} ${Math.round(usage.contextPercent)}%`,
+        <Box>
+          <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+            <Box flexWrap="wrap" columnGap={1}>
+              {gauge('TOKENS', usage.tokens ? formatTokens(usage.tokens) : '—', last?.tokens ? `last step ${formatTokens(last.tokens)}` : undefined)}
+              {gauge('SPEND', formatCost(usage.usd) ?? '—', last?.usd ? `last step ${formatCost(last.usd)}` : undefined)}
+              {gauge(
+                'CONTEXT',
+                usage.contextPercent === undefined ? '—' : `${meter(usage.contextPercent, 8)} ${Math.round(usage.contextPercent)}%`,
+              )}
+            </Box>
+            {sparkline(trail) && (
+              <Box>
+                {t('tokens per step ', { color: p.muted })}
+                {t(sparkline(trail), { color: p.accent })}
+              </Box>
+            )}
+          </Box>
+          {settings.hasFlamingo && (
+            <Box flexDirection="column" flexShrink={0} marginLeft={1}>
+              {pixelCells(flamingo(working, await read($, frame)), { P: p.bird, L: '#F7A8C4', K: '#0B0B0B' }).map(row => (
+                <Text backgroundColor={p.bg}>
+                  {row.map(cell => (
+                    <Text color={cell.color} backgroundColor={cell.bg ?? p.bg}>
+                      {cell.char}
+                    </Text>
+                  ))}
+                </Text>
+              ))}
+            </Box>
           )}
         </Box>
-        {sparkline(trail) && (
-          <Box>
-            {t('tokens per step ', { color: p.muted })}
-            {t(sparkline(trail), { color: p.accent })}
-          </Box>
-        )}
 
         {heading('Needs attention')}
         {needs.length === 0 && line('healthy', 'All clear.')}

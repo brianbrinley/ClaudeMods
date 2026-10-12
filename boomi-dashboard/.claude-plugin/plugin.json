@@ -1,15 +1,25 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Boomi Companion at a glance while you build: each component's stage, what needs attention, the live environment and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
     "paneTheme": {
       "type": "string",
       "title": "Pane colors",
-      "description": "day: Valence Day, light, with its own background; night: Valence Night, dark; terminal: your terminal's theme",
-      "options": ["day", "night", "terminal"],
+      "description": "The pane's colors until you pick a theme in the pane or with /bc-dashboard theme: day (Valence Day, light, with its own background), night (Valence Night, dark) or terminal (your terminal's theme)",
+      "options": [
+        "day",
+        "night",
+        "terminal"
+      ],
       "default": "day"
+    },
+    "flamingo": {
+      "type": "boolean",
+      "title": "Flamingo",
+      "description": "Show the 8-bit flamingo in the pane: standing on one leg while Claude is idle, walking while it works",
+      "default": true
     },
     "recentHours": {
       "type": "number",

@@ -23,16 +23,31 @@ You see it as a banner above the prompt, a pane, a status line and toasts. `/bc-
 
 **The pane** has the whole picture. It opens the first time Claude edits or saves a component:
 
-<img alt="The dashboard pane: a Flamingo title band reading BOOMI COMPANION DASHBOARD with a WORKING light, gauges for tokens, spend and context, a tokens-per-step sparkline, then Needs attention, Components this session with each one's stages and tokens, Recently, and Live environment" src="assets/pane-day.png" width="560">
+<img alt="The dashboard pane in the Day theme: a Flamingo title band reading BOOMI COMPANION DASHBOARD with a WORKING light, the session's length, components and model, theme buttons, gauges for tokens, spend and context beside an 8-bit flamingo, then Needs attention, Components this session, Recently, and Live environment" src="assets/pane-day.png" width="420"> <img alt="The same pane in the Night theme" src="assets/pane-night.png" width="420">
 
-- **Title band:** shows **● WORKING** while Claude works on a turn and **◇ IDLE** between turns, plus how long the session has run and how many components it has touched.
+- **Title band:** shows **● WORKING** while Claude works on a turn and **◇ IDLE** between turns.
+- **Under it:** how long the session has run, how many components it has touched, and the model that answered last, such as Opus 5.5.
+- **Theme buttons:** **Day**, **Night** and **Terminal**; see [Themes](#themes).
 - **Gauges:** the session's tokens and spend, with the last step's share, and how full the context window is. Under them, a sparkline of the tokens each step took.
+- **The flamingo:** an 8-bit flamingo beside the gauges. It stands on one leg while Claude is idle, and walks with flapping wings while Claude works. The `flamingo` setting turns it off.
 - **Needs attention:** what's still broken, each with a next step.
 - **Components this session:** each component's stages, and the tokens and spend it took across all its steps.
 - **Recently:** the latest steps, each with its tokens.
 - **Live environment:** the environment's recent runs.
 
-The pane draws in the Valence Day colors with its own background, so it reads the same on any terminal theme. **Pane colors** under `/config` switches it to Valence Night or to your terminal's theme.
+### Themes
+
+| Theme | Looks like |
+|---|---|
+| **Day** (the default) | Light: sand background, Flamingo title band, ink text. |
+| **Night** | Dark: midnight background, neon Flamingo title band, white text. |
+| **Terminal** | No background of its own; follows your terminal's colors. |
+
+Day and Night set their own background, so they read the same on any terminal theme. To switch:
+- press a theme button in the pane, or
+- run `/bc-dashboard theme night`, which also works on the web; `/bc-dashboard theme` on its own lists them.
+
+The pane redraws straight away, and the choice is kept for later sessions. Until you pick one, the **Pane colors** setting under `/config` decides.
 
 **The status line** shows the latest step, what needs attention and the session's spend: `✓ Saved Orders Sync to Boomi (v4) · ✗ 1 needs attention · 338k tokens · $0.54 this session`.
 
@@ -69,6 +84,8 @@ Status is shown with an icon and a label, never color alone:
 - **Running token count.** Every model call reports its tokens, and the dashboard adds them up. That covers Claude's own calls and those of the agents it starts. The total includes the prompt cache's reads and writes, which make up most of a long session's tokens.
 - **Spend** is the session's cost, as `/cost` reports it.
 - **Each step's share** is what Claude used between the previous step and this one: the thinking, reading and writing that led to it. A component's share is all its steps added up.
+
+- **Models.** The pane names the model that answered last. If Claude used more than one, for example a smaller model for agents, `/bc-dashboard` lists each with its tokens: `Models: Opus 5.5 312k · Haiku 5.5 26k`.
 
 /bc-dashboard and the `summary` tool show the same figures in brackets, for example `[61k tokens · $0.21]`.
 
@@ -135,6 +152,7 @@ The token is used only in the requests' `Authorization` header. The dashboard ne
 | `/bc-dashboard unwatch <id\|name>` | | Stops watching it. |
 | `/bc-dashboard seen` | | Clears the warnings about watched changes. |
 | `/bc-dashboard banner` | | Shows the banner again after **Hide**. |
+| `/bc-dashboard theme [day\|night\|terminal]` | | Picks the pane's theme, or lists the themes. |
 
 The tools are listed to Claude as `mcp__boomi-dashboard__summary` and `mcp__boomi-dashboard__watch`. Ask Claude "what's left to fix?" and it can answer from the summary.
 
@@ -152,7 +170,8 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 
 | Setting | Default | |
 |---|---|---|
-| `paneTheme` | `day` | The pane's colors: `day` (Valence Day, light), `night` (Valence Night, dark), or `terminal` (your terminal's theme). |
+| `paneTheme` | `day` | The pane's colors until you pick a theme: `day`, `night` or `terminal`. |
+| `flamingo` | `true` | Show the 8-bit flamingo in the pane. |
 | `recentHours` | `24` | How far back the live environment's runs count. |
 | `envFile` | `.env` | Companion's `.env`, relative to the session's working directory. |
 | `componentsDir` | `active-development` | Where Companion keeps component XML. |
@@ -209,4 +228,4 @@ Two files hold plain functions:
 
 Everything that touches the engine is in `hooks/register.tsx`, because the engine only follows `$` within one file. The engine tests also draw the banner and the pane on the terminal and desktop surfaces, and check the pane's colors.
 
-`assets/pane-day.png` is the pane as the engine's test kit draws it for a sample session, rendered with its colors.
+`assets/pane-day.png` and `assets/pane-night.png` are the pane as the engine's test kit draws it for a sample session, rendered with its colors.

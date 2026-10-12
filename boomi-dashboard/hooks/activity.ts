@@ -467,7 +467,23 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
 
 // --- Tokens and spend --------------------------------------------------------------
 
-export const EMPTY_LEDGER: Ledger = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 }
+export const EMPTY_LEDGER: Ledger = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0, models: {} }
+
+/** A model id in words: claude-opus-5-5 is Opus 5.5; an id it can't read stays as it is. */
+export const modelName = (id: string | undefined): string | undefined => {
+  if (!id) return undefined
+  const found = id.match(/claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(?:\[.*\])?$/)
+  if (!found) return id
+  const [, family = '', major, minor] = found
+  return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${major}${minor ? `.${minor}` : ''}`
+}
+
+/** Each model's tokens, biggest first, in words: Opus 5.5 312k · Haiku 5.5 26k. */
+export const modelMix = (l: Ledger): string =>
+  Object.entries(l.models ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, tokens]) => `${modelName(id)} ${formatTokens(tokens)}`)
+    .join(' · ')
 
 /** Every token the session's model calls used: input, output and the prompt cache's. */
 export const totalTokens = (l: Ledger): number => l.input + l.output + l.cacheRead + l.cacheWrite
@@ -565,7 +581,15 @@ export const statusLine = (dashboard: Dashboard, now: number, windowMs: number, 
   return parts.join(' · ')
 }
 
-export type Usage = { usd?: number; contextPercent?: number; tokens?: number; startedAt?: number }
+export type Usage = {
+  usd?: number
+  contextPercent?: number
+  tokens?: number
+  startedAt?: number
+  /** The model that answered the latest call, and each model's tokens in words. */
+  model?: string
+  models?: string
+}
 
 /** How long something has run: 45s, 12m, 1h 12m. */
 export const duration = (ms: number): string => {
@@ -617,6 +641,7 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   const tokens = usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined
   const context = usage.contextPercent === undefined ? undefined : `context ${Math.round(usage.contextPercent)}% full`
   if (cost || tokens || context) lines.push('', `Session: ${[tokens, cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
+  if (usage.models) lines.push(`Models: ${usage.models}`)
   return lines.join('\n')
 }
 
@@ -678,4 +703,69 @@ export const compareWatched = (
 export const newFailures = (known: readonly Run[], fresh: readonly Run[]): Run[] => {
   const ids = new Set(known.map(run => run.executionId))
   return fresh.filter(run => !ids.has(run.executionId) && isFailedStatus(run.status))
+}
+
+// --- The flamingo ---------------------------------------------------------------
+// An 8-bit flamingo, 12 pixels wide and 16 tall. Each letter is a pixel:
+// P is the flamingo's pink, L its pastel (wing and beak), K ink (eye and beak
+// tip), and a dot is clear. Two pixel rows make one row of terminal cells.
+
+const HEAD = [
+  '....PPP.....',
+  '...PPKPP....',
+  '...PPPPLL...',
+  '....PP.LK...',
+  '....PP......',
+  '.....PP.....',
+  '......PP....',
+  '.....PP.....',
+]
+
+const WING_DOWN = ['....PPPPPP..', '...PPLLLLPPP', '...PPPLLLPP.', '.....PPPP...']
+const WING_UP = ['....PPLLLP..', '...PPLLLLPPP', '...PPPPPPPP.', '.....PPPP...']
+
+const ONE_LEG = ['......PPP...', '......P.....', '......P.....', '.....PP.....']
+const STRIDE = ['......P.....', '.....P.P....', '....P...P...', '...PP...PP..']
+const STEP = ['......P.....', '......PP....', '.....P..P...', '....PP...PP.']
+
+/** Standing on one leg while Claude is idle. */
+export const FLAMINGO_IDLE: readonly string[] = [...HEAD, ...WING_DOWN, ...ONE_LEG]
+
+/** Walking, wings flapping, while Claude works: one frame per tick. */
+export const FLAMINGO_WALK: readonly (readonly string[])[] = [
+  [...HEAD, ...WING_DOWN, ...STRIDE],
+  [...HEAD, ...WING_UP, ...STEP],
+  [...HEAD, ...WING_DOWN, ...STEP],
+  [...HEAD, ...WING_UP, ...STRIDE],
+]
+
+/** The flamingo's pixels for a frame: walking while working, else standing. */
+export const flamingo = (isWorking: boolean, frame: number): readonly string[] =>
+  isWorking ? FLAMINGO_WALK[frame % FLAMINGO_WALK.length]! : FLAMINGO_IDLE
+
+/** One terminal cell: a character, its color and its background, either absent for clear. */
+export type Cell = { char: string; color?: string; bg?: string }
+
+/**
+ * Pixel rows as terminal cells, two pixel rows to a cell: ▀ in the top pixel's
+ * color over the bottom pixel's, ▄ when only the bottom is set, a space when
+ * neither is. `colors` maps each pixel letter to a color.
+ */
+export const pixelCells = (pixels: readonly string[], colors: Record<string, string>): Cell[][] => {
+  const rows: Cell[][] = []
+  for (let y = 0; y < pixels.length; y += 2) {
+    const top = pixels[y] ?? ''
+    const bottom = pixels[y + 1] ?? ''
+    const row: Cell[] = []
+    for (let x = 0; x < Math.max(top.length, bottom.length); x++) {
+      const up = colors[top[x] ?? '.']
+      const down = colors[bottom[x] ?? '.']
+      if (up && down) row.push({ char: up === down ? '█' : '▀', color: up, bg: up === down ? undefined : down })
+      else if (up) row.push({ char: '▀', color: up })
+      else if (down) row.push({ char: '▄', color: down })
+      else row.push({ char: ' ' })
+    }
+    rows.push(row)
+  }
+  return rows
 }
