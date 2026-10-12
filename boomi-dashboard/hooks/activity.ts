@@ -596,7 +596,12 @@ export const stages = (row: ComponentRow, runs: readonly Run[] = []): Stage[] =>
 
 // --- What needs attention --------------------------------------------------------
 
-export type Attention = { level: Level; title: string; hint: string; at: number }
+/**
+ * One thing needing attention. `key` says what closing it closes: `step:<id>`
+ * a failed step, `run:<execution id>` a failed run, `watch:<component id>` a
+ * watched component someone else changed.
+ */
+export type Attention = { key: string; level: Level; title: string; hint: string; at: number }
 
 /** Runs in the window, newest first: a run from last month isn't news. */
 export const recentRuns = (runs: readonly Run[], now: number, windowMs: number): Run[] =>
@@ -608,16 +613,17 @@ export const recentRuns = (runs: readonly Run[], now: number, windowMs: number):
 /** What failed and is still failing, each with what to do about it. */
 export const attention = (dashboard: Dashboard, now: number, windowMs: number): Attention[] => {
   const items: Attention[] = []
+  const closedSteps = new Set(dashboard.closedSteps ?? [])
   for (const row of components(dashboard.activity)) {
     for (const a of [row.saved, row.deployed, row.tested]) {
-      if (!a || (a.outcome !== 'failed' && a.outcome !== 'blocked')) continue
+      if (!a || (a.outcome !== 'failed' && a.outcome !== 'blocked') || closedSteps.has(a.id)) continue
       const hint =
         a.outcome === 'blocked'
           ? a.detail
           : a.kind === 'test'
             ? `Ask Claude to read the execution log${a.executionId ? ` (${a.executionId.replace(/^execution-/, '').slice(0, 8)}…)` : ''} and fix the process.`
             : a.detail
-      items.push({ level: levelOf(a), title: describe(a), hint, at: when(a) })
+      items.push({ key: `step:${a.id}`, level: levelOf(a), title: describe(a), hint, at: when(a) })
     }
   }
   const seenRuns = new Set(dashboard.seenRuns ?? [])
@@ -628,18 +634,20 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
     const row = rows.find(r => runsOf(r, [run]).length > 0)
     const noun = run.executionType === 'exec_listener' ? 'Listener run' : 'Run'
     items.push({
+      key: `run:${run.executionId}`,
       level: 'critical',
       title: row ? `${noun} of ${row.name} ended ${run.status}` : `${run.processName} ended ${run.status} in the environment`,
-      hint: `Execution ${run.executionId.replace(/^execution-/, '').slice(0, 8)}…${row ? ', a component from this session' : ''}. Ask Claude to read its log, or /bc-dashboard seen if the failure was expected.`,
+      hint: `Execution ${run.executionId.replace(/^execution-/, '').slice(0, 8)}…${row ? ', a component from this session' : ''}. Ask Claude to read its log, or close this if the failure was expected.`,
       at: Number.isNaN(at) ? now : at,
     })
   }
   for (const w of dashboard.watched) {
     if (w.changedBy) {
       items.push({
+        key: `watch:${w.componentId}`,
         level: 'warning',
         title: `${w.name ?? w.componentId} was changed by ${w.changedBy}`,
-        hint: 'Pull it before you push, or you overwrite their change. /bc-dashboard seen clears this.',
+        hint: 'Pull it before you push, or you overwrite their change. Close this once you have.',
         at: w.modifiedDate ? Date.parse(w.modifiedDate) || now : now,
       })
     }
@@ -655,6 +663,23 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
       return true
     })
 }
+
+/** How many items the person closed that would otherwise need attention now. */
+export const closedCount = (dashboard: Dashboard, now: number, windowMs: number): number =>
+  attention({ ...dashboard, closedSteps: [], seenRuns: [] }, now, windowMs).length - attention(dashboard, now, windowMs).length
+
+/** What closing an item changes in the dashboard: a step is closed, a run seen, a watched change cleared. */
+export const closeItem = (dashboard: Dashboard, key: string): Dashboard => {
+  const [kind, ...rest] = key.split(':')
+  const id = rest.join(':')
+  if (kind === 'step') return { ...dashboard, closedSteps: [...new Set([...(dashboard.closedSteps ?? []), Number(id)])].slice(-200) }
+  if (kind === 'run') return { ...dashboard, seenRuns: [...new Set([...(dashboard.seenRuns ?? []), id])].slice(-200) }
+  if (kind === 'watch') return { ...dashboard, watched: dashboard.watched.map(w => (w.componentId === id ? { ...w, changedBy: undefined } : w)) }
+  return dashboard
+}
+
+/** Brings back every closed step and run. (A watched change, once cleared, comes back with the next one.) */
+export const reopenAll = (dashboard: Dashboard): Dashboard => ({ ...dashboard, closedSteps: [], seenRuns: [] })
 
 // --- Tokens and spend --------------------------------------------------------------
 
@@ -840,7 +865,10 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   const lines: string[] = []
   const needs = attention(dashboard, now, windowMs)
   lines.push(needs.length > 0 ? `Needs attention (${needs.length}):` : '✓ Nothing needs attention.')
-  for (const n of needs) lines.push(`  ${STATUS[n.level].icon} ${n.title}`, `      ${n.hint}`)
+  needs.forEach((n, i) => lines.push(`  ${i + 1}. ${STATUS[n.level].icon} ${n.title}`, `      ${n.hint}`))
+  const closed = closedCount(dashboard, now, windowMs)
+  if (closed > 0) lines.push(`  (${closed} closed: /bc-dashboard reopen brings them back)`)
+  else if (needs.length > 0) lines.push('  (/bc-dashboard close <number> closes one, or "all")')
 
   const all = spends(dashboard.activity)
   const rows = components(dashboard.activity)

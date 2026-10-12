@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Boomi Companion at a glance while you build: each component's stage, what needs attention, the live environment and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {

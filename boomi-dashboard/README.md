@@ -70,6 +70,8 @@ The pane redraws straight away, and the choice is kept for later sessions. Until
 
 A later success clears an earlier failure, so **Needs attention** lists only what's still broken.
 
+**Closing an item.** Each item in **Needs attention** has a `☐` box. Press it to close the item, for example a failure you expected or one you've dealt with another way. A dim `☑ 2 closed` line keeps count, and its **Reopen** button brings closed items back. Without a pane, `/bc-dashboard close <number>` does the same; the numbers are in `/bc-dashboard text`. Closing a failed run marks it seen, and closing a watched component's warning clears it. Closed items stay closed after a restart. A new failure of the same component shows up as a new item.
+
 ### Status icons
 
 Status is shown with an icon and a label, never color alone:
@@ -168,6 +170,8 @@ The token is used only in the requests' `Authorization` header. The dashboard ne
 | `/bc-dashboard poll` | | Checks Boomi now, then shows the summary. |
 | `/bc-dashboard watch <id\|file>` | `watch` | Watches a component, given its ID or the XML file Companion created. |
 | `/bc-dashboard unwatch <id\|name>` | | Stops watching it. |
+| `/bc-dashboard close <number\|all>` | | Closes a **Needs attention** item by its number in `/bc-dashboard text`, or all of them. |
+| `/bc-dashboard reopen` | | Brings closed items back. |
 | `/bc-dashboard seen` | | Marks the current failed runs and watched changes as seen: they leave **Needs attention**. |
 | `/bc-dashboard banner` | | Shows the banner again after **Hide**. |
 | `/bc-dashboard theme [day\|night\|terminal]` | | Picks the pane's theme, or lists the themes. |

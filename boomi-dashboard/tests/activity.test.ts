@@ -2,6 +2,9 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   attention,
+  closeItem,
+  closedCount,
+  reopenAll,
   compareWatched,
   componentOf,
   componentPath,
@@ -472,4 +475,31 @@ test("steps from an earlier session don't skew the first new step's spend", () =
     act('push', 'ok', 'A', NOW - 10, { file: FILE, tokensAt: 5_000 }),
   ]
   expect(spends(list).get(list[1]!.id)?.tokens).toBe(5_000)
+})
+
+test('closing an item takes it out of Needs attention; a new failure of the same component comes back', () => {
+  const failed = act('deploy', 'failed', 'Orders Sync', NOW - 30, { componentId: ID, detail: 'ERROR: no runtime' })
+  let state = dashboard([failed])
+  const [item] = attention(state, NOW, 24 * HOUR)
+  expect(item!.key).toBe(`step:${failed.id}`)
+  state = closeItem(state, item!.key)
+  expect(attention(state, NOW, 24 * HOUR)).toEqual([])
+  expect(closedCount(state, NOW, 24 * HOUR)).toBe(1)
+  const again = { ...state, activity: [...state.activity, act('deploy', 'failed', 'Orders Sync', NOW, { componentId: ID, detail: 'ERROR: no runtime' })] }
+  expect(attention(again, NOW, 24 * HOUR).length).toBe(1)
+  expect(attention(reopenAll(state), NOW, 24 * HOUR).length).toBe(1)
+})
+
+test('closing a run marks it seen, and closing a watched change clears it', () => {
+  const run = { executionId: 'execution-e9', processName: 'P', status: 'ERROR', at: '2026-10-12T11:00:00Z' }
+  const state = dashboard([], {
+    platform: { phase: 'ok', message: '', runs: [run] },
+    watched: [{ componentId: ID, name: 'W', version: '4', changedBy: 'pat@example.com' }],
+  })
+  const keys = attention(state, NOW, 24 * HOUR).map(item => item.key).sort()
+  expect(keys).toEqual(['run:execution-e9', `watch:${ID}`])
+  const closed = keys.reduce(closeItem, state)
+  expect(attention(closed, NOW, 24 * HOUR)).toEqual([])
+  expect(closed.seenRuns).toEqual(['execution-e9'])
+  expect(closed.watched[0]!.changedBy).toBeUndefined()
 })
