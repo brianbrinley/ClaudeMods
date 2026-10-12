@@ -267,6 +267,9 @@ test('the 8-bit flamingo stands on one leg when idle and walks through its frame
     expect(f.length).toBe(16)
     expect(f.every(row => row.length === 12)).toBe(true)
   }
+  // Resting on one leg: a single leg reaches the ground, the other is folded up.
+  expect(FLAMINGO_IDLE[FLAMINGO_IDLE.length - 1]).toBe('.....PP.....')
+  expect(FLAMINGO_IDLE[FLAMINGO_IDLE.length - 2]).toBe('......P.....')
 })
 
 test('pixelCells packs two pixel rows into each cell with half blocks', () => {
@@ -332,11 +335,14 @@ test('the flamingo paces across its strip and turns at each end', () => {
 
 test('facing left, the flamingo is drawn mirrored', () => {
   expect(mirror(['P..L'])).toEqual(['L..P'])
+  // It moves a column every second frame: frame 14 is step 7, on the way back.
   const right = flamingoView(true, 1)
-  const left = flamingoView(true, 7)
+  const left = flamingoView(true, 14)
   expect(right.facing).toBe('right')
   expect(left.facing).toBe('left')
-  expect(left.pixels).toEqual(mirror(flamingo(true, 7)))
+  expect(left.pixels).toEqual(mirror(flamingo(true, 14)))
+  expect(flamingoView(true, 2).offset).toBe(1)
+  expect(flamingoView(true, 3).offset).toBe(1)
   expect(right.pixels).toEqual([...flamingo(true, 1)])
 })
 

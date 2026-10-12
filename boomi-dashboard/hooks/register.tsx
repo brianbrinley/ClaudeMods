@@ -108,6 +108,9 @@ const PANE = 'boomi-dashboard'
 const WATCH_KEY = 'watched'
 const THEME_KEY = 'theme'
 
+/** How often the flamingo's frame moves on while Claude works. */
+const FLAMINGO_TICK_MS = 500
+
 const THEMES: readonly PaneTheme[] = ['day', 'night', 'terminal']
 const THEME_NAMES: Record<PaneTheme, string> = { day: 'Day', night: 'Night', terminal: 'Terminal' }
 
@@ -592,9 +595,9 @@ export const register: Register = (on, options) => {
     }
 
     $.clock.every(5_000, () => refreshStatus($, settings))
-    // The flamingo walks while Claude works: about three frames a second.
+    // The flamingo walks while Claude works: a frame every half second, a column every second.
     if (settings.hasFlamingo) {
-      $.clock.every(320, async () => {
+      $.clock.every(FLAMINGO_TICK_MS, async () => {
         if (await read($, isWorking)) await update($, frame, n => (n + 1) % 1000)
       })
     }
@@ -745,7 +748,8 @@ export const register: Register = (on, options) => {
     const runs = recentRuns(current.platform.runs, now, settings.windowMs)
     const feed = current.activity.slice(-6).reverse()
     const all = spends(current.activity)
-    const width = Math.max(30, (e.viewport?.columns ?? 64) - 2)
+    // The pane's padding and the surface's own frame take a few columns: leave room for both.
+    const width = Math.max(30, (e.viewport?.columns ?? 64) - 6)
     const trail = current.activity
       .slice(-24)
       .map(a => all.get(a.id)?.tokens ?? 0)
@@ -781,11 +785,12 @@ export const register: Register = (on, options) => {
         {aside ? <Box flexShrink={0}>{t(`  ${aside}`, { color: p.muted })}</Box> : undefined}
       </Box>
     )
-    const gauge = (label: string, value: string, note?: string) => (
+    // A gauge's notes go one to a line, so the gauges stay narrow enough to sit side by side.
+    const gauge = (label: string, value: string, ...notes: (string | undefined)[]) => (
       <Box flexDirection="column" borderStyle="round" borderColor={p.rule} backgroundColor={p.bg} paddingX={1} flexGrow={1} minWidth={14}>
         {t(label, { color: p.muted, bold: true })}
         {t(value, { color: p.accent, bold: true })}
-        {note ? t(note, { color: p.muted }) : t(' ')}
+        {notes.filter(Boolean).map(note => t(note!, { color: p.muted }))}
       </Box>
     )
 
@@ -810,7 +815,9 @@ export const register: Register = (on, options) => {
             ))}
           </Box>
         </Box>
-        {t(decoRule(width), { color: p.rule })}
+        <Text color={p.rule} backgroundColor={p.bg} wrap="truncate-end">
+          {decoRule(width)}
+        </Text>
 
         <Box>
           <Box flexDirection="column" flexGrow={1} flexShrink={1}>
@@ -818,9 +825,8 @@ export const register: Register = (on, options) => {
               {gauge(
                 'TOKENS',
                 usage.tokens ? formatTokens(usage.tokens) : '—',
-                [last?.tokens ? `last step ${formatTokens(last.tokens)}` : undefined, usage.cached ? `+${formatTokens(usage.cached)} cached` : undefined]
-                  .filter(Boolean)
-                  .join(' · ') || undefined,
+                last?.tokens ? `last step ${formatTokens(last.tokens)}` : undefined,
+                usage.cached ? `+${formatTokens(usage.cached)} cached` : undefined,
               )}
               {gauge('SPEND', formatCost(usage.usd) ?? '—', last?.usd ? `last step ${formatCost(last.usd)}` : undefined)}
               {gauge(
