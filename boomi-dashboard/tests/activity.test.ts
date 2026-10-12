@@ -11,6 +11,8 @@ import {
   pastSessions,
   historyTotals,
   historySummary,
+  pastParts,
+  projectsDiffer,
   runWords,
   budgetOf,
   nextStep,
@@ -187,14 +189,17 @@ test('needs attention lists current failures with a next step, and a later fix c
   expect(attention(fixed, NOW, 24 * HOUR)).toEqual([])
 })
 
-test("old runs in the environment don't need attention", () => {
+test("only recent runs of this session's components need attention", () => {
   const runs = [
-    { executionId: 'e1', processName: 'JMX Capability Scan', status: 'ERROR', at: '2026-09-07T09:45:11Z' },
+    { executionId: 'e1', processName: 'Orders Sync', status: 'ERROR', at: '2026-09-07T09:45:11Z' },
     { executionId: 'e2', processName: 'Orders Sync', status: 'ERROR', at: '2026-10-12T10:00:00Z' },
+    { executionId: 'e3', processName: 'JMX Capability Scan', status: 'ERROR', at: '2026-10-12T10:30:00Z' },
   ]
-  const state = dashboard([], { platform: { phase: 'ok', message: '', runs } })
-  expect(recentRuns(runs, NOW, 24 * HOUR).map(r => r.executionId)).toEqual(['e2'])
-  expect(attention(state, NOW, 24 * HOUR).map(a => a.title)).toEqual(['Orders Sync ended ERROR in the environment'])
+  const state = dashboard([act('deploy', 'ok', 'Orders Sync', NOW - HOUR, { file: FILE })], { platform: { phase: 'ok', message: '', runs } })
+  expect(recentRuns(runs, NOW, 24 * HOUR).map(r => r.executionId)).toEqual(['e2', 'e3'])
+  // An old run, and a run of a process this session never touched, aren't news.
+  expect(attention(state, NOW, 24 * HOUR).map(a => a.title)).toEqual(['Run of Orders Sync ended ERROR'])
+  expect(attention({ ...state, activity: [] }, NOW, 24 * HOUR)).toEqual([])
 })
 
 test('the status line leads with the latest step, then what needs attention, then the cost', () => {
@@ -467,7 +472,7 @@ test('a failed run of a session component needs attention with that context, unt
   })
   const [item] = attention(state, NOW, 24 * HOUR)
   expect(item!.title).toBe(`Listener run of ${LISTENER} ended ERROR`)
-  expect(item!.hint).toContain('Execution 81f61084…, a component from this session')
+  expect(item!.hint).toContain('Execution 81f61084…. Press Why?')
   expect(item!.executionId).toBe('execution-81f61084-fd93-4565-9bda-9bf0d4b4f102')
   expect(attention({ ...state, seenRuns: ['execution-81f61084-fd93-4565-9bda-9bf0d4b4f102'] }, NOW, 24 * HOUR)).toEqual([])
 })
@@ -509,7 +514,7 @@ test('closing an item takes it out of Needs attention; a new failure of the same
 
 test('closing a run marks it seen, and closing a watched change clears it', () => {
   const run = { executionId: 'execution-e9', processName: 'P', status: 'ERROR', at: '2026-10-12T11:00:00Z' }
-  const state = dashboard([], {
+  const state = dashboard([act('deploy', 'ok', 'P', NOW - HOUR, { file: FILE })], {
     platform: { phase: 'ok', message: '', runs: [run] },
     watched: [{ componentId: ID, name: 'W', version: '4', changedBy: 'pat@example.com' }],
   })
@@ -601,6 +606,8 @@ const SCAN: { sessions: ScannedSession[] } = {
       id: 'aaaaaaaa-1111',
       project: '/Users/me/orders',
       startedAt: '2026-10-10T09:00:00Z',
+      endedAt: '2026-10-10T09:47:00Z',
+      firstPrompt: 'Build the orders sync process',
       costUsd: 3.5,
       models: { 'claude-opus-5-5': { input: 100, output: 900, cacheRead: 50_000, cacheWrite: 1000 } },
       commands: [
@@ -635,11 +642,12 @@ test('history adds up the week, the month and everything, and says what has no r
   const past = pastSessions(SCAN)
   expect(historyTotals(past, NOW, 7 * 86_400_000)).toEqual({ sessions: 1, usd: 3.5, unpriced: 0, tokens: 2000 })
   expect(historyTotals(past, NOW)).toMatchObject({ sessions: 2, usd: 3.5, unpriced: 1 })
-  const text = historySummary(past, NOW, 90, 'aaaaaaaa-1111')
+  const text = historySummary(past, NOW, 90, { currentId: 'aaaaaaaa-1111', timeZone: 'UTC' })
   expect(text).toContain('This week: 1 session · $3.50 · 2.0k tokens')
   expect(text).toContain('All 90 days: 2 sessions · $3.50 (+1 without a recorded cost)')
-  expect(text).toContain('2026-10-10 (this session) · orders · $3.50 · 2.0k tokens · 1 push · 1 deploy · 2 tests · Orders')
-  expect(text).toContain('2026-09-01 · old · 20 tokens, no recorded cost · 1 create · P')
+  // Each session: when, how long, the cost and what it was about; then what it did. The folders differ, so they show.
+  expect(text).toContain('Oct 10, 09:00 (this session) · 47m · $3.50 · "Build the orders sync process"\n      1 push · 1 deploy · 2 tests · Orders · 2.0k tokens · orders')
+  expect(text).toContain('Sep 1, 09:00 · no recorded cost\n      1 create · P · 20 tokens · old')
   expect(historySummary([], NOW, 90)).toContain('No Boomi Companion sessions')
 })
 
@@ -679,4 +687,13 @@ test('guardrails: what the standards and runtime mods say, each with an icon and
 
 test("event-streams-setup.sh is Companion's too, though it isn't named boomi-*", () => {
   expect(scriptRuns('bash scripts/event-streams-setup.sh create-topic orders')).toMatchObject([{ kind: 'other', script: 'event-streams-setup' }])
+})
+
+test('a session is named by its own title first, then its first request; one folder for all of them goes unsaid', () => {
+  const both = pastSessions({ sessions: [{ ...SCAN.sessions[0]!, title: 'Orders sync build' }] })[0]!
+  expect(both.label).toBe('Orders sync build')
+  const parts = pastParts(both, { timeZone: 'UTC' })
+  expect(parts.head).toBe('Oct 10, 09:00 · 47m · $3.50 · "Orders sync build"')
+  expect(parts.detail).toBe('1 push · 1 deploy · 2 tests · Orders · 2.0k tokens')
+  expect(projectsDiffer(pastSessions({ sessions: [SCAN.sessions[0]!, { ...SCAN.sessions[0]!, id: 'x' }] }))).toBe(false)
 })

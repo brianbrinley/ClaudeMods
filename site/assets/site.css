@@ -54,6 +54,18 @@ tr:last-child td { border-bottom: 0; }
 
 blockquote { margin: 16px 0; padding: 12px 16px; background: color-mix(in srgb, var(--valence-highlight) 45%, transparent); border-radius: 12px; color: var(--valence-text); }
 
+pre:not(.mermaid) { position: relative; padding-right: 96px; }
+/* Text blocks (a prompt to copy, sample output) wrap; code keeps its lines. */
+pre:has(> code.language-text) { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* On a phone the button sits above the text rather than beside it. */
+@media (max-width: 600px) { pre:not(.mermaid) { padding-right: 16px; padding-top: 52px; } }
+.copy-button {
+  position: absolute; top: 8px; right: 8px; min-height: 36px; padding: 4px 14px; border-radius: 999px; cursor: pointer;
+  font-family: var(--valence-font-heading); font-weight: 600; font-size: 13px; letter-spacing: .06em;
+  background: var(--valence-bg); color: var(--valence-secondary); border: 1px solid var(--valence-line);
+}
+.copy-button:hover { color: var(--valence-secondary-hover); }
+
 .mermaid { background: var(--valence-surface); border: 1px solid color-mix(in srgb, var(--valence-line) 50%, transparent); border-radius: 16px; padding: 16px; overflow-x: auto; text-align: center; margin: 16px 0; }
 .mermaid:not([data-processed]) { color: transparent; min-height: 120px; }
 .mermaid .labelBkg { padding: 2px 6px; border-radius: 4px; }

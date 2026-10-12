@@ -42,6 +42,28 @@ async function renderDiagrams() {
   await mermaid.run({ nodes });
 }
 
+// A Copy button on each code block (not diagrams): the install prompt is meant to be pasted.
+function addCopyButtons() {
+  document.querySelectorAll('pre:not(.mermaid)').forEach((pre) => {
+    if (pre.querySelector('.copy-button')) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'copy-button';
+    button.textContent = 'Copy';
+    button.addEventListener('click', async () => {
+      const text = (pre.querySelector('code') ?? pre).innerText;
+      try {
+        await navigator.clipboard.writeText(text);
+        button.textContent = 'Copied';
+      } catch (e) {
+        button.textContent = 'Select it to copy';
+      }
+      setTimeout(() => { button.textContent = 'Copy'; }, 2000);
+    });
+    pre.appendChild(button);
+  });
+}
+
 function update() {
   syncPictures();
   renderDiagrams();
@@ -55,4 +77,5 @@ document.querySelector('.theme-toggle')?.addEventListener('click', () => {
 });
 media.addEventListener('change', () => { if (!root.getAttribute('data-theme')) update(); });
 
+addCopyButtons();
 update();

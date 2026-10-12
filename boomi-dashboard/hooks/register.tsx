@@ -23,7 +23,8 @@ import {
   fixPrompt,
   report,
   pastSessions,
-  pastLine,
+  pastParts,
+  projectsDiffer,
   historySummary,
   historyTotals,
   guardrails,
@@ -56,6 +57,8 @@ import {
   newFailures,
   readOutput,
   recentRuns,
+  sessionRuns,
+  runsOf,
   reopenAll,
   restoredNote,
   runsSummary,
@@ -113,6 +116,14 @@ const budgetAlert = atom({ plugin: 'boomi-dashboard', key: 'budgetAlert' } as co
 
 /** Past Companion sessions on this machine, from the last scan of the transcripts. */
 const history = atom({ plugin: 'boomi-dashboard', key: 'history' } as const, { phase: 'idle' } as HistoryState)
+
+/** How many of Claude's latest steps the pane lists: More adds a page, Fewer goes back to one. */
+const STEPS_PAGE = 6
+const stepsShown = atom({ plugin: 'boomi-dashboard', key: 'stepsShown' } as const, STEPS_PAGE)
+
+/** How many past sessions the pane lists: More adds a page, Fewer goes back to one. */
+const PAST_PAGE = 5
+const historyShown = atom({ plugin: 'boomi-dashboard', key: 'historyShown' } as const, PAST_PAGE)
 
 /** The next step last suggested in the prompt box, so it isn't suggested after every turn. */
 const suggested = atom({ plugin: 'boomi-dashboard', key: 'suggested' } as const, '')
@@ -475,8 +486,10 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
         }
         // The first poll sets the baseline: only failures after it are news.
         if (before.platform.checkedAt !== undefined) {
-          for (const run of newFailures(before.platform.runs, runs)) {
-            toast($, settings, `${STATUS.critical.icon} ${runText(run, checkedAt)} in the environment`)
+          // Only this session's components: other processes' failures aren't this person's news.
+          const rows = components(before.activity)
+          for (const run of newFailures(before.platform.runs, runs).filter(run => rows.some(row => runsOf(row, [run]).length > 0))) {
+            toast($, settings, `${STATUS.critical.icon} ${runText(run, checkedAt)}`)
           }
         }
       } catch (error) {
@@ -761,7 +774,7 @@ const scanHistory = async ($: Engine, settings: Settings): Promise<HistoryState>
 const historyCommand = async ($: Engine, settings: Settings): Promise<string> => {
   const state = await scanHistory($, settings)
   if (state.phase === 'error') return state.error ?? 'The transcript scan failed.'
-  return historySummary(state.sessions ?? [], await $.clock.now(), settings.historyDays, await $.session.id().catch(() => undefined))
+  return historySummary(state.sessions ?? [], await $.clock.now(), settings.historyDays, { currentId: await $.session.id().catch(() => undefined) })
 }
 
 // --- The session report ------------------------------------------------------------
@@ -1198,6 +1211,7 @@ export const register: Register = (on, options) => {
     const collapsed = await read($, isRunsCollapsed)
     const guards = await guardLines($)
     const past = await read($, history)
+    const shown = await read($, historyShown)
     const sessionId = await $.session.id().catch(() => undefined)
     const footer = await footerOf($)
     const p = PALETTES[themeNow]
@@ -1211,8 +1225,10 @@ export const register: Register = (on, options) => {
     const closedItems = closedCount(current, now, settings.windowMs)
     const whys = await read($, diagnoses)
     const rows = components(current.activity)
-    const runs = recentRuns(current.platform.runs, now, settings.windowMs)
-    const feed = current.activity.slice(-6).reverse()
+    const runs = sessionRuns(current, now, settings.windowMs)
+    const stepsLimit = await read($, stepsShown)
+    const steps = current.activity.slice().reverse()
+    const feed = steps.slice(0, stepsLimit)
     const all = spends(current.activity)
     // The pane's padding and the surface's own frame take a few columns: leave room for both.
     const width = Math.max(30, (e.viewport?.columns ?? 64) - 6)
@@ -1410,6 +1426,13 @@ export const register: Register = (on, options) => {
           const spent = all.get(a.id)?.tokens
           return line(levelOf(a), describe(a), [ago(a.endedAt ?? a.startedAt, now), spent ? `${formatTokens(spent)} tok` : undefined].filter(Boolean).join(' · '))
         })}
+        {steps.length > STEPS_PAGE && (
+          <Box>
+            {t(`  Showing ${feed.length} of ${steps.length}  `, { color: p.muted })}
+            {feed.length < steps.length && <Button key="steps-more" label="More" onPress={() => update($, stepsShown, n => n + STEPS_PAGE * 2)} />}
+            {stepsLimit > STEPS_PAGE && <Button key="steps-fewer" label="Fewer" onPress={() => update($, stepsShown, () => STEPS_PAGE)} />}
+          </Box>
+        )}
 
         {guards.length > 0 && heading('Guardrails')}
         {guards.map(g => (g.level ? line(g.level, g.text) : note(g.text)))}
@@ -1422,10 +1445,10 @@ export const register: Register = (on, options) => {
           </Box>
           <Button key="runs-toggle" label={collapsed ? 'Show' : 'Hide'} onPress={() => update($, isRunsCollapsed, v => !v)} />
         </Box>
-        {!collapsed && note("Every execution in your Boomi environment: this session's tests, schedules and other people's runs.")}
+        {!collapsed && note("Runs of this session's components in your Boomi environment: tests, listener calls and schedules.")}
         {current.platform.phase !== 'ok' && line(current.platform.phase === 'error' ? 'serious' : 'warning', current.platform.message)}
         {current.platform.phase === 'ok' && collapsed && line(runsSummary(runs, hours).level, runsSummary(runs, hours).text)}
-        {current.platform.phase === 'ok' && !collapsed && runs.length === 0 && line('healthy', `No process ran in the last ${hours}h.`)}
+        {current.platform.phase === 'ok' && !collapsed && runs.length === 0 && note(rows.length > 0 ? `None of this session's components ran in the last ${hours}h.` : "Runs show up here once this session's components run.")}
         {current.platform.phase === 'ok' && !collapsed && runs.slice(0, 6).map(run => line(runLevel(run), runText(run, now)))}
 
         <Box marginTop={1} justifyContent="space-between">
@@ -1450,12 +1473,28 @@ export const register: Register = (on, options) => {
           return (
             <Box flexDirection="column">
               {t(`${total('This week', week)}   ${total('30 days', month)}`, { color: p.accent, bold: true })}
-              {past.sessions.slice(0, 5).map(s => (
-                <Text backgroundColor={p.bg} wrap="truncate-end">
-                  {t(`  ${pastLine(s, sessionId)}`)}
-                </Text>
-              ))}
-              {past.sessions.length > 5 && note(`  …and ${past.sessions.length - 5} more: /bc-dashboard history lists them all.`)}
+              {past.sessions.slice(0, shown).map(s => {
+                const { head, detail } = pastParts(s, { currentId: sessionId, withProject: projectsDiffer(past.sessions!) })
+                return (
+                  <Box flexDirection="column">
+                    <Text backgroundColor={p.bg} wrap="truncate-end">
+                      {t(`  ${head}`)}
+                    </Text>
+                    <Text backgroundColor={p.bg} wrap="truncate-end">
+                      {t(`      ${detail}`, { color: p.muted })}
+                    </Text>
+                  </Box>
+                )
+              })}
+              {past.sessions.length > PAST_PAGE && (
+                <Box>
+                  {t(`  Showing ${Math.min(shown, past.sessions.length)} of ${past.sessions.length}  `, { color: p.muted })}
+                  {shown < past.sessions.length && (
+                    <Button key="history-more" label="More" onPress={() => update($, historyShown, n => n + PAST_PAGE)} />
+                  )}
+                  {shown > PAST_PAGE && <Button key="history-fewer" label="Fewer" onPress={() => update($, historyShown, () => PAST_PAGE)} />}
+                </Box>
+              )}
             </Box>
           )
         })()}

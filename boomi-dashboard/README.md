@@ -7,9 +7,28 @@
 
 A Claude Code mod that shows where your [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) build stands while Claude works: each component's stage, what failed and what to do about it, what the session has cost, and the environment's recent runs.
 
-> **Prototype.** Tested against Companion's scripts and their output, not yet against a live Boomi account.
+## Install
 
-**Install it:** paste the prompt in [INSTALL.md](INSTALL.md) into Claude Code.
+Copy this prompt into a Claude Code session started from your Boomi Companion workspace (the folder with Companion's `.env`). It works for any Claude account. On Windows, run Claude Code in WSL and paste it there.
+
+```text
+Install the boomi-dashboard Claude Code mod from https://github.com/brianbrinley/ClaudeMods for my user account, so it loads in every Claude Code session on this computer.
+
+1. Clone the repo (main branch) to ~/ClaudeMods. If it's already there, run `git -C ~/ClaudeMods pull` instead.
+2. Check that ~/ClaudeMods/boomi-dashboard/.claude-plugin/plugin.json and ~/ClaudeMods/boomi-dashboard/hooks/register.tsx exist, then run `claude plugin validate ~/ClaudeMods/boomi-dashboard` and `claude plugin test ~/ClaudeMods/boomi-dashboard` and show me the results.
+3. Add the mod to the "env" block of my user settings file, ~/.claude/settings.json (not the project's settings):
+   "CLAUDE_CODE_PLUGIN_DIRS": "<absolute path to ~/ClaudeMods/boomi-dashboard>"
+   Use the absolute path, with my home folder spelled out. If CLAUDE_CODE_PLUGIN_DIRS already has a value, append to it with ":" instead of replacing it. Keep everything else in the file as it is, and show me the diff before you save.
+4. Check that Boomi Companion (bc-integration) is installed. If it isn't, tell me how to install it, but don't install it yourself.
+5. Run `perl -MJSON::PP -e 'print "ok\n"'`. If it doesn't print ok, tell me the command to install Perl for this system (on Debian or Ubuntu, including WSL: `sudo apt install perl`), but don't run it yourself.
+6. Tell me to restart Claude Code. After the restart I'll run /bc-dashboard to check it loaded.
+
+Never read, print or copy my .env or any Boomi credentials. The mod reads them itself.
+```
+
+**After the restart:** `/bc-dashboard` should open the pane with nothing needing attention, and `/bc-dashboard poll` checks the connection to Boomi (**Process runs in Boomi** says what's missing, if anything). Perl is only for **Past Companion sessions**; macOS and Linux have it.
+
+**To update:** `git -C ~/ClaudeMods pull`, then restart Claude Code.
 
 ## What you see
 
@@ -20,10 +39,10 @@ A Claude Code mod that shows where your [Boomi Companion](https://github.com/Off
 - **Gauges:** tokens, spend and how full the context is, with the last step's share.
 - **Needs attention:** what's still broken, each with a next step.
 - **Components this session:** each component's stages, tokens and cost.
-- **Claude's latest steps:** what Claude just did with Companion.
-- **Process runs in Boomi:** every execution in the environment in the last 24 hours. **Hide** folds it to one line.
+- **Claude's latest steps:** what Claude just did with Companion. **More** shows older steps.
+- **Process runs in Boomi:** runs of this session's components in the last 24 hours. **Hide** folds it to one line.
 - **Guardrails:** with [boomi-standards](../boomi-standards/README.md) or [boomi-runtime](../boomi-runtime/README.md) loaded, the last standards check (what it blocked, and why) and the runtime's state and smoke test.
-- **Past Companion sessions:** what earlier sessions on this machine cost.
+- **Past Companion sessions:** what earlier sessions on this machine did and cost. **More** pages through them.
 - **Themes:** **Day**, **Night** or **Terminal** (your terminal's colors), from the buttons or `/bc-dashboard theme night`. The choice is kept.
 
 A banner above the prompt shows the latest step and what needs attention, and the status line and toasts carry the same news:
@@ -71,27 +90,28 @@ Spend is the session's cost as `/cost` reports it. A step's share is what Claude
 
 ## Process runs in Boomi
 
-With Companion's credentials, the dashboard reads (never writes) the runs on the runtimes attached to `BOOMI_ENVIRONMENT_ID`: every 60 seconds, soon after a deploy or test, and every 10 seconds while a run is in progress.
+With Companion's credentials, the dashboard reads (never writes) the runs on the runtimes attached to `BOOMI_ENVIRONMENT_ID`: every 60 seconds, soon after a deploy or test, and every 10 seconds while a run is in progress. It shows only runs of the components this session worked on, matched by process ID: tests, listener calls and schedules of those. Other processes' runs in the environment aren't shown, flagged or toasted.
 
-- A run is matched to this session's components by process ID, so a component's row shows its runs, and a failed run names its component. `/bc-dashboard seen` moves an expected failure out of **Needs attention**.
+- A component's row shows its runs, and a failed run names its component under **Needs attention**. `/bc-dashboard seen` moves an expected failure out.
 - `/bc-dashboard watch <component ID or XML file>` watches a component across sessions. When someone other than Companion's API user changes it, it shows under **Needs attention**: pull before you push.
 
 Credentials come from Companion's `.env`, falling back to environment variables: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID`, `BOOMI_ENVIRONMENT_ID`. The token goes only into requests' `Authorization` header; the dashboard never stores, shows or logs it, and its errors carry only the HTTP status. Without credentials, everything else still works.
 
 ## Past Companion sessions
 
-**Scan** in the pane, `/bc-dashboard history`, or the `history` tool lists the sessions on this machine from the last `historyDays` days that ran a Companion script:
+**Scan** in the pane, `/bc-dashboard history`, or the `history` tool lists the sessions on this machine from the last `historyDays` days that ran a Companion script. Each one says when it started and how long it ran, what it cost, what it was about (its title if you named it with `/rename`, else your first request), and what it did:
 
 ```text
 Boomi Companion sessions on this machine, last 90 days:
   This week: 3 sessions · $18.40 · 1.2M tokens
   Last 30 days: 9 sessions · $61.75 (+1 without a recorded cost) · 4.1M tokens
 
-  2026-10-10 · orders · $6.10 · 410k tokens · 2 pushes · 1 deploy · 2 tests · Orders Sync, Order Profile
+  Oct 10, 14:05 · 47m · $6.10 · "Build the orders sync process and test it"
+      2 pushes · 1 deploy · 2 tests · Orders Sync, Order Profile · 410k tokens
 ```
 
 - The cost is Claude Code's own, as `/cost` showed it, read from the transcript. Older Claude Code versions didn't record it; those sessions show tokens only.
-- A session counts only if it ran a Companion script, not if it only looked at one.
+- A session counts only if it ran a Companion script, not if it only looked at one. The folder shows on each line only when sessions come from different folders.
 - Transcripts are often tens of MB, past the 4 MiB a mod can read at once, so `scripts/scan-sessions.pl` reads them a line at a time and returns only each session's totals and the commands that name a Companion script. It needs Perl, which macOS and Linux have. **On Windows, run Claude Code in WSL.**
 
 ## Session report
@@ -119,7 +139,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 
 ## Setup and settings
 
-- **Your own computer:** [INSTALL.md](INSTALL.md).
+- **Your own computer:** see [Install](#install).
 - **Claude Code on the web:** add the folder to `CLAUDE_CODE_PLUGIN_DIRS`, separating mods with `:`.
 - **One terminal session:** `claude --plugin-dir boomi-dashboard`.
 

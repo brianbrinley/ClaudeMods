@@ -658,6 +658,16 @@ export const recentRuns = (runs: readonly Run[], now: number, windowMs: number):
     return Number.isNaN(at) || now - at <= windowMs
   })
 
+/**
+ * The recent runs of this session's components, newest first: what someone
+ * building with Companion cares about. Schedules and other people's runs of
+ * other processes in the environment are left out.
+ */
+export const sessionRuns = (dashboard: Dashboard, now: number, windowMs: number): Run[] => {
+  const rows = components(dashboard.activity)
+  return recentRuns(dashboard.platform.runs, now, windowMs).filter(run => rows.some(row => runsOf(row, [run]).length > 0))
+}
+
 /** What failed and is still failing, each with what to do about it. */
 export const attention = (dashboard: Dashboard, now: number, windowMs: number): Attention[] => {
   const items: Attention[] = []
@@ -685,7 +695,7 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
   const seenRuns = new Set(dashboard.seenRuns ?? [])
   const testRuns = new Set(dashboard.activity.filter(a => a.kind === 'test' && a.executionId).map(a => a.executionId!))
   const rows = components(dashboard.activity)
-  for (const run of recentRuns(dashboard.platform.runs, now, windowMs)) {
+  for (const run of sessionRuns(dashboard, now, windowMs)) {
     if (!isFailedStatus(run.status) || seenRuns.has(run.executionId)) continue
     // A failed test Claude ran is the same execution: its step says so, or was closed.
     if (testRuns.has(run.executionId)) continue
@@ -696,8 +706,8 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
       key: `run:${run.executionId}`,
       executionId: run.executionId,
       level: 'critical',
-      title: row ? `${noun} of ${row.name} ended ${run.status}` : `${run.processName} ended ${run.status} in the environment`,
-      hint: `Execution ${run.executionId.replace(/^execution-/, '').slice(0, 8)}…${row ? ', a component from this session' : ''}. Press Why? to read its log, or close this if the failure was expected.`,
+      title: `${noun} of ${row?.name ?? run.processName} ended ${run.status}`,
+      hint: `Execution ${run.executionId.replace(/^execution-/, '').slice(0, 8)}…. Press Why? to read its log, or close this if the failure was expected.`,
       at: Number.isNaN(at) ? now : at,
     })
   }
@@ -964,7 +974,7 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
 
   const all = spends(dashboard.activity)
   const rows = components(dashboard.activity)
-  const runs = recentRuns(dashboard.platform.runs, now, windowMs)
+  const runs = sessionRuns(dashboard, now, windowMs)
   lines.push('', rows.length > 0 ? 'Components this session:' : 'Components this session: none yet. They show up as Claude edits, saves, deploys and tests them.')
   if (dashboard.restored) lines.push(`  (${restoredNote(dashboard.restored, windowMs)})`)
   for (const row of rows) {
@@ -982,10 +992,10 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
     }
   }
 
-  lines.push('', `Process runs in Boomi, last ${hours}h (every execution in the environment, not only this session's):`)
+  lines.push('', `Process runs in Boomi, last ${hours}h (runs of this session's components):`)
   if (dashboard.platform.phase !== 'ok') lines.push(`  ${dashboard.platform.message}`)
   else {
-    if (runs.length === 0) lines.push(`  No process ran in the last ${hours}h.`)
+    if (runs.length === 0) lines.push(rows.length > 0 ? `  None of this session's components ran in the last ${hours}h.` : "  Runs show up here once this session's components run.")
     for (const run of runs) lines.push(`  ${runLine(run, now)}`)
   }
   if (dashboard.watched.length > 0) {
@@ -1244,7 +1254,7 @@ const cell = (text: string) => text.replace(/\|/g, '\\|')
 export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, windowMs: number): string => {
   const hours = Math.round(windowMs / 3_600_000)
   const all = spends(dashboard.activity)
-  const runs = recentRuns(dashboard.platform.runs, now, windowMs)
+  const runs = sessionRuns(dashboard, now, windowMs)
   const rows = components(dashboard.activity)
   const needs = attention(dashboard, now, windowMs)
   const closed = closedCount(dashboard, now, windowMs)
@@ -1308,6 +1318,8 @@ export type ScannedSession = {
   costUsd?: number | null
   models?: Record<string, { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }>
   commands?: string[]
+  title?: string
+  firstPrompt?: string
 }
 
 const fileName = (path: string) => (path.split('/').pop() ?? path).replace(/\.xml$/, '')
@@ -1347,6 +1359,7 @@ export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession
       runs,
       // A file names a component; an ID only when the session named no file.
       components: files.size > 0 ? [...files] : [...ids].map(id => (id.length > 12 ? `${id.slice(0, 8)}…` : id)),
+      label: s.title || s.firstPrompt || undefined,
     })
   }
   return found.sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
@@ -1388,21 +1401,49 @@ const totalsLine = (label: string, t: HistoryTotals) =>
     ? undefined
     : `${label}: ${t.sessions} session${t.sessions === 1 ? '' : 's'} · ${formatCost(t.usd)}${t.unpriced ? ` (+${t.unpriced} without a recorded cost)` : ''} · ${formatTokens(t.tokens)} tokens`
 
-/** One past session on a line: when, where, what it did, what it cost. */
-export const pastLine = (s: PastSession, currentId?: string): string => {
+/** How to show past sessions: whose is current, whether their folders differ, and in which time zone. */
+export type PastView = { currentId?: string; withProject?: boolean; timeZone?: string }
+
+/** Whether the sessions come from more than one folder, so the folder tells them apart. */
+export const projectsDiffer = (sessions: readonly PastSession[]): boolean => new Set(sessions.map(s => s.project ?? '')).size > 1
+
+const folderOf = (project: string | undefined) => (project ? (project.split('/').filter(Boolean).pop() ?? project) : undefined)
+
+/**
+ * A past session in two parts. The head says which session: when it started,
+ * how long it ran, its cost and what it was about. The detail says what it did.
+ */
+export const pastParts = (s: PastSession, view: PastView = {}): { head: string; detail: string } => {
   const at = Date.parse(s.startedAt ?? '')
-  const when = Number.isNaN(at) ? 'unknown date' : new Date(at).toISOString().slice(0, 10)
-  const where = s.project ? (s.project.split('/').filter(Boolean).pop() ?? s.project) : undefined
-  const cost = s.costUsd === undefined ? `${formatTokens(s.tokens)} tokens, no recorded cost` : `${formatCost(s.costUsd)} · ${formatTokens(s.tokens)} tokens`
-  const names = s.components.length > 3 ? `${s.components.slice(0, 3).join(', ')} +${s.components.length - 3}` : s.components.join(', ')
-  // The cost goes first: a long line is cut at its end.
-  return [`${when}${s.id === currentId ? ' (this session)' : ''}${where ? ` · ${where}` : ''}`, cost, runWords(s.runs), names || undefined]
+  const end = Date.parse(s.endedAt ?? '')
+  const when = Number.isNaN(at)
+    ? 'unknown date'
+    : new Date(at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: view.timeZone })
+  const length = Number.isNaN(at) || Number.isNaN(end) || end <= at ? undefined : duration(end - at)
+  const cost = s.costUsd === undefined ? 'no recorded cost' : formatCost(s.costUsd)
+  const head = [
+    `${when}${s.id === view.currentId ? ' (this session)' : ''}`,
+    length,
+    cost,
+    s.label ? `"${s.label}"` : undefined,
+  ]
     .filter(Boolean)
     .join(' · ')
+  const names = s.components.length > 3 ? `${s.components.slice(0, 3).join(', ')} +${s.components.length - 3}` : s.components.join(', ')
+  const detail = [runWords(s.runs), names || undefined, `${formatTokens(s.tokens)} tokens`, view.withProject ? folderOf(s.project) : undefined]
+    .filter(Boolean)
+    .join(' · ')
+  return { head, detail }
+}
+
+/** One past session as text: its head, then what it did. */
+export const pastLine = (s: PastSession, view: PastView = {}): string => {
+  const { head, detail } = pastParts(s, view)
+  return `${head}\n      ${detail}`
 }
 
 /** The history as text: totals for the week, the month and everything scanned, then each session. */
-export const historySummary = (sessions: readonly PastSession[], now: number, days: number, currentId?: string): string => {
+export const historySummary = (sessions: readonly PastSession[], now: number, days: number, view: PastView = {}): string => {
   if (sessions.length === 0) return `No Boomi Companion sessions in the transcripts on this machine from the last ${days} days.`
   const lines = [
     `Boomi Companion sessions on this machine, last ${days} days:`,
@@ -1412,7 +1453,7 @@ export const historySummary = (sessions: readonly PastSession[], now: number, da
       totalsLine(`  All ${days} days`, historyTotals(sessions, now)),
     ].filter((line): line is string => !!line),
     '',
-    ...sessions.slice(0, 20).map(s => `  ${pastLine(s, currentId)}`),
+    ...sessions.slice(0, 20).map(s => `  ${pastLine(s, { ...view, withProject: projectsDiffer(sessions) })}`),
   ]
   if (sessions.length > 20) lines.push(`  …and ${sessions.length - 20} more`)
   lines.push('', "Costs are Claude Code's own, from each transcript. Claude Code on the web and other machines keep their transcripts elsewhere.")

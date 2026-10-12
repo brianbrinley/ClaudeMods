@@ -34,7 +34,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
 
 ## C. Windows (WSL)
 
-- [ ] **C1.** In Claude Code inside WSL, install the dashboard with [INSTALL.md](boomi-dashboard/INSTALL.md), then press **Scan**.
+- [ ] **C1.** In Claude Code inside WSL, install the dashboard with the prompt under [Install](boomi-dashboard/README.md#install), then press **Scan**.
   **Pass:** past sessions list, or `No Companion sessions`. **Fail:** `Perl's JSON module is missing` (run `sudo apt install perl`, then scan again) or anything else.
 
 ## D. Docs site

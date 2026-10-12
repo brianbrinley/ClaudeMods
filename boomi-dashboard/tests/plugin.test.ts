@@ -217,8 +217,9 @@ test('after a deploy, the dashboard checks Boomi again within seconds', async ($
   expect(urls.length).toBeGreaterThan(before)
 })
 
-test("the environment's new failures are toasted, and old ones don't count", async ($, on) => {
-  const toasts = world(on)
+test("new failures of this session's components are toasted; old runs and other processes don't count", async ($, on) => {
+  const toasts = world(on, { [FILE]: ORDERS })
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
   mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-1' })
   let runs = [
     { executionId: 'e0', processName: 'JMX Capability Scan', status: 'ERROR', executionTime: '2026-09-07T09:45:11Z' },
@@ -229,6 +230,7 @@ test("the environment's new failures are toasted, and old ones don't count", asy
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
   })
 
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
   const first = await $.command.run(dashboard('poll'))
   expect(first.text).toContain('✓ Nothing needs attention.')
   expect(first.text).toContain('✓ Orders Sync completed, 2h ago')
@@ -236,8 +238,14 @@ test("the environment's new failures are toasted, and old ones don't count", asy
 
   runs = [{ executionId: 'e2', processName: 'Orders Sync', status: 'ERROR', executionTime: '2026-10-12T11:55:00Z' }, ...runs]
   const status = await $.command.run(dashboard('poll'))
-  expect(status.text).toContain('Orders Sync ended ERROR in the environment')
+  expect(status.text).toContain('Run of Orders Sync ended ERROR')
   expect(toasts.some(t => t.includes('Orders Sync failed'))).toBe(true)
+
+  // A failure of a process this session never touched: not shown, not toasted.
+  runs = [{ executionId: 'e3', processName: 'Nightly Cleanup', status: 'ERROR', executionTime: '2026-10-12T11:58:00Z' }, ...runs]
+  const other = await $.command.run(dashboard('poll'))
+  expect(other.text).not.toContain('Nightly Cleanup')
+  expect(toasts.some(t => t.includes('Nightly Cleanup'))).toBe(false)
 })
 
 /** A drawn tree's root props. */
@@ -352,12 +360,13 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`on ${surface}, Process runs in Boomi folds to one line and stays folded for the session`, async ($, on) => {
-    world(on)
+    world(on, { [LISTENER_FILE]: LISTENER_XML })
     mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-test' })
     on('http.fetch', async (_$, e) => {
       const result = e.url.endsWith('EnvironmentAtomAttachment/query') ? [{ atomId: 'atom-1' }] : RUNS
       return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
     })
+    await deployListener($, on)
     await $.command.run(dashboard('poll'))
     const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
     expect(await pane.find({ text: /listener|Listener/ })).toBeDefined()
@@ -399,7 +408,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`on ${surface}, Why? reads a failed run's log, and Ask Claude to fix drafts the request`, async ($, on) => {
-    world(on)
+    world(on, { [LISTENER_FILE]: LISTENER_XML })
     mock.store(on)
     mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-test' })
     on('http.fetch', async (_$, e) => {
@@ -419,6 +428,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       fills.push(`${e.mode}:${e.text}`)
       return { isFilled: true }
     })
+    await deployListener($, on)
     await $.command.run(dashboard('poll'))
     const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
     expect((await pane.find({ type: 'Button', key: 'why-0' }))?.props.label).toBe('Why?')
@@ -429,7 +439,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await pane.find({ text: /secret-token-value/ })).toBeUndefined()
     await pane.press({ key: 'fix-0' })
     expect(fills.at(-1)).toContain('append:\n')
-    expect(fills.at(-1)).toContain('ended ERROR in the environment (execution execution-81f61084-fd93-4565-9bda-9bf0d4b4f102)')
+    expect(fills.at(-1)).toContain(`Listener run of ${LISTENER} ended ERROR (execution execution-81f61084-fd93-4565-9bda-9bf0d4b4f102)`)
   })
 }
 
@@ -449,6 +459,13 @@ const RUNS = [
 /** The shell beneath the plugins, answering each command with its own output. */
 const scriptedShell = (on: On, outputs: Record<string, string>) => {
   on('tool.call', { tool: 'Bash' }, async (_$, e) => ({ result: { stdout: outputs[String(e.command)] ?? '', stderr: '', interrupted: false } }))
+}
+
+/** The session deploys the listener, so its runs in Boomi are this session's to show. */
+const deployListener = async ($: Engine, on: On) => {
+  const command = `bash scripts/boomi-deploy.sh ${LISTENER_FILE}`
+  scriptedShell(on, { [command]: `Packaging '${LISTENER}' (${LISTENER_ID}) from the account default branch\nSUCCESS: Deployed '${LISTENER}' (package: p1)` })
+  await $.tool.call({ tool: 'Bash', command })
 }
 
 test('a build in a loop and on several lines shows every component, and a failed listener run names its component', async ($, on) => {
@@ -477,7 +494,7 @@ test('a build in a loop and on several lines shows every component, and a failed
   expect(status.text).toContain('OrderValidator - Order Response Profile: ✓ created in Boomi')
   expect(status.text).toContain(`${LISTENER} (process): ✓ created in Boomi  ✓ deployed  ✗ 1 of 5 listener runs failed`)
   expect(status.text).toContain(`✗ Listener run of ${LISTENER} ended ERROR`)
-  expect(status.text).toContain('Execution 81f61084…, a component from this session')
+  expect(status.text).toContain('Execution 81f61084…. Press Why?')
 
   const seen = await $.command.run(dashboard('seen'))
   expect(seen.text).toContain('1 failed run')
@@ -671,7 +688,8 @@ test('/bc-dashboard history scans the transcripts with the bundled script, and t
   expect(ran[0]![4]).toMatch(/\/scripts\/scan-sessions\.pl$/)
   expect(ran[0]!.slice(5)).toEqual(['--since', String(NOW - 90 * 86_400_000)])
   expect(text.text).toContain('This week: 1 session · $3.50')
-  expect(text.text).toContain('orders · $3.50 · 2.0k tokens · 1 push · Orders')
+  expect(text.text).toContain('$3.50')
+  expect(text.text).toContain('1 push · Orders · 2.0k tokens')
   expect(await pane.find({ text: /This week \$3\.50 · 1 session/ })).toBeDefined()
   expect((await pane.find({ type: 'Button', key: 'history-scan' }))?.props.label).toBe('Rescan')
   const tool = await $.tool.call({ tool: 'mcp__boomi-dashboard__history' } as never)
@@ -805,4 +823,47 @@ test('Companion v1.0.83: a test that times out while waited for fails', async ($
   const text = String((await $.command.run(dashboard('text'))).text)
   expect(text).toContain('Needs attention (1)')
   expect(text).toContain('ERROR: Polling timed out after 60 attempts')
+})
+
+test('the pane lists past sessions a page at a time: More adds a page, Fewer goes back', async ($, on) => {
+  world(on)
+  mock.store(on)
+  const sessions = Array.from({ length: 12 }, (_, i) => ({
+    id: `s${i}`,
+    project: '/Users/me/ws',
+    startedAt: `2026-10-${String(10 - Math.floor(i / 2)).padStart(2, '0')}T0${i % 10}:00:00Z`,
+    costUsd: 1 + i / 10,
+    firstPrompt: `Request number ${i}`,
+    models: {},
+    commands: [`bash scripts/boomi-component-push.sh ${FILE}`],
+  }))
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: JSON.stringify({ version: 1, scanned: 12, sessions }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await $.command.run(dashboard('history'))
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /Showing 5 of 12/ })).toBeDefined()
+  expect(await pane.find({ text: /"Request number 0"/ })).toBeDefined()
+  expect(await pane.find({ text: /"Request number 7"/ })).toBeUndefined()
+  // One folder for every session: it isn't repeated on each line.
+  expect(await pane.find({ text: /· ws$/ })).toBeUndefined()
+  await pane.press({ key: 'history-more' })
+  expect(await pane.find({ text: /Showing 10 of 12/ })).toBeDefined()
+  expect(await pane.find({ text: /"Request number 7"/ })).toBeDefined()
+  await pane.press({ key: 'history-more' })
+  expect(await pane.find({ text: /Showing 12 of 12/ })).toBeDefined()
+  expect(await pane.find({ type: 'Button', key: 'history-more' })).toBeUndefined()
+  await pane.press({ key: 'history-fewer' })
+  expect(await pane.find({ text: /Showing 5 of 12/ })).toBeDefined()
+})
+
+test("Claude's latest steps page too: More shows older steps, Fewer goes back", async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  for (let i = 0; i < 14; i++) await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /Showing 6 of 14/ })).toBeDefined()
+  await pane.press({ key: 'steps-more' })
+  expect(await pane.find({ text: /Showing 14 of 14/ })).toBeDefined()
+  expect(await pane.find({ type: 'Button', key: 'steps-more' })).toBeUndefined()
+  await pane.press({ key: 'steps-fewer' })
+  expect(await pane.find({ text: /Showing 6 of 14/ })).toBeDefined()
 })

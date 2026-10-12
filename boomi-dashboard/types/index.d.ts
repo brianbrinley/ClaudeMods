@@ -141,6 +141,8 @@ export type PastSession = {
   runs: Partial<Record<ActivityKind, number>>
   /** The components the runs named: their file names, else their IDs. */
   components: string[]
+  /** What the session was about: its title, else the person's first request. */
+  label?: string
 }
 
 export type HistoryState = {
@@ -172,6 +174,6 @@ export type RuntimeSeen = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; suggested: string; history: HistoryState }
+    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; suggested: string; history: HistoryState; historyShown: number; stepsShown: number }
   }
 }

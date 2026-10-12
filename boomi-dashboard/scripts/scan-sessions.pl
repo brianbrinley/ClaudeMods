@@ -31,8 +31,8 @@ my $max_commands = 40;
 Getopt::Long::GetOptions('root=s' => \$root, 'since=i' => \$since, 'max-commands=i' => \$max_commands)
   or die "usage: scan-sessions.pl [--root DIR] [--since EPOCH_MS] [--max-commands N]\n";
 
-my $json = JSON::PP->new->canonical;
-my $out = JSON::PP->new->canonical;
+my $json = JSON::PP->new->utf8->canonical;
+my $out = JSON::PP->new->utf8->canonical;
 
 unless (-d $root) {
   print $out->encode({ version => 1, root => $root, sessions => [], scanned => 0, error => 'no transcripts folder' }), "\n";
@@ -54,6 +54,27 @@ File::Find::find(
   $root,
 );
 
+# A message's first text: its content when that's a string, else its first text block.
+sub first_text {
+  my ($m) = @_;
+  return undef unless ref $m eq 'HASH';
+  my $c = $m->{content};
+  return $c unless ref $c;
+  return undef unless ref $c eq 'ARRAY';
+  for my $block (@$c) {
+    return $block->{text} if ref $block eq 'HASH' && ($block->{type} // '') eq 'text' && defined $block->{text};
+  }
+  return undef;
+}
+
+# One line of at most 80 characters.
+sub short_text {
+  my ($t) = @_;
+  $t =~ s/\s+/ /g;
+  $t =~ s/^ | $//g;
+  return length($t) > 80 ? substr($t, 0, 79) . "\x{2026}" : $t;
+}
+
 my %sessions;
 my ($scanned, $bad_lines) = (0, 0);
 
@@ -63,9 +84,13 @@ for my $file (sort @files) {
   my $is_subagent = $file =~ m{/subagents/};
   my ($file_session) = $file =~ m{/([0-9a-fA-F-]{8,})(?:\.jsonl\z|/subagents/)};
   my %seen;
+  # The session's first request, read from its main transcript only, once.
+  my $wants_prompt = !$is_subagent;
   while (my $line = <$fh>) {
-    # Only these two kinds carry what's summed; skipping the rest unread keeps it quick.
-    next unless index($line, '"type":"assistant"') >= 0 || index($line, '"type":"cost-state"') >= 0;
+    # Only these kinds carry what's kept; skipping the rest unread keeps it quick.
+    my $is_title = $line =~ /"type":"(?:custom-title|ai-title|summary)"/;
+    my $is_user = $wants_prompt && index($line, '"type":"user"') >= 0;
+    next unless $is_title || $is_user || index($line, '"type":"assistant"') >= 0 || index($line, '"type":"cost-state"') >= 0;
     my $o = eval { $json->decode($line) };
     unless (ref $o eq 'HASH') { $bad_lines++; next }
     my $id = $o->{sessionId} // $file_session // $file;
@@ -74,6 +99,23 @@ for my $file (sort @files) {
     if (my $t = $o->{timestamp}) {
       $s->{startedAt} = $t if !defined $s->{startedAt} || $t lt $s->{startedAt};
       $s->{endedAt} = $t if !defined $s->{endedAt} || $t gt $s->{endedAt};
+    }
+
+    # A title the session was given (/rename) or that Claude Code made for it.
+    if ($is_title) {
+      my $text = $o->{customTitle} // $o->{title} // $o->{aiTitle} // $o->{summary};
+      $s->{title} = short_text($text) if defined $text && !ref $text && ($o->{type} eq 'custom-title' || !defined $s->{title});
+      next;
+    }
+    if (($o->{type} // '') eq 'user') {
+      next if $o->{isMeta} || $o->{isSidechain};
+      my $text = first_text($o->{message});
+      # Skip command echoes and system notes (<command-name>, <system-reminder>, ...).
+      if (defined $text && $text !~ /^\s*(?:<|Caveat:)/ && $text =~ /\S/) {
+        $s->{firstPrompt} = short_text($text);
+        $wants_prompt = 0;
+      }
+      next;
     }
 
     if (($o->{type} // '') eq 'cost-state') {
