@@ -3,7 +3,7 @@
 // attention, the recent feed and the live environment. Plain functions:
 // nothing here touches the engine, so the tests call them directly.
 
-import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, Run, TokenSplit, Watched } from '../types'
+import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, PastSession, Run, TokenSplit, Watched } from '../types'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
@@ -1257,5 +1257,129 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
   if (u.usd !== undefined) lines.push(`- Cost: ${formatCost(u.usd)}`)
   if (u.split) lines.push(`- Tokens: ${u.split}`)
   for (const line of u.modelSplits ?? []) lines.push(`  - ${line}`)
+  return lines.join('\n')
+}
+
+// --- Past sessions ---------------------------------------------------------------
+
+/** One session as scan-sessions.pl prints it. */
+export type ScannedSession = {
+  id: string
+  project?: string
+  startedAt?: string
+  endedAt?: string
+  costUsd?: number | null
+  models?: Record<string, { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }>
+  commands?: string[]
+}
+
+const fileName = (path: string) => (path.split('/').pop() ?? path).replace(/\.xml$/, '')
+
+/**
+ * The scan's sessions that ran a Companion script, newest first. A command
+ * that only names a script, as `cat` or `find` does, isn't a run: the same
+ * reading as live steps decides.
+ */
+export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession[] => {
+  const found: PastSession[] = []
+  for (const s of scan.sessions ?? []) {
+    const runs: Partial<Record<ActivityKind, number>> = {}
+    const named = new Set<string>()
+    for (const command of s.commands ?? []) {
+      for (const run of scriptRuns(command)) {
+        if (run.kind === 'other') continue
+        runs[run.kind] = (runs[run.kind] ?? 0) + 1
+        const name = run.file ? fileName(run.file) : (run.processId ?? run.componentId)
+        if (name) named.add(name)
+      }
+    }
+    if (Object.keys(runs).length === 0) continue
+    const models = Object.entries(s.models ?? {})
+    const sum = (pick: (m: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }) => number) =>
+      models.reduce((n, [, m]) => n + pick(m), 0)
+    found.push({
+      id: s.id,
+      project: s.project,
+      startedAt: s.startedAt,
+      endedAt: s.endedAt,
+      costUsd: typeof s.costUsd === 'number' ? s.costUsd : undefined,
+      tokens: sum(m => (m.input ?? 0) + (m.output ?? 0) + (m.cacheWrite ?? 0)),
+      cached: sum(m => m.cacheRead ?? 0),
+      models: models.map(([id]) => modelName(id) ?? id),
+      runs,
+      components: [...named],
+    })
+  }
+  return found.sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
+}
+
+const PAST_WORDS: [ActivityKind, string, string][] = [
+  ['create', 'create', 'creates'],
+  ['push', 'push', 'pushes'],
+  ['pull', 'pull', 'pulls'],
+  ['deploy', 'deploy', 'deploys'],
+  ['undeploy', 'undeploy', 'undeploys'],
+  ['test', 'test', 'tests'],
+]
+
+/** A past session's Companion work in words: 3 pushes · 1 deploy · 2 tests. */
+export const runWords = (runs: PastSession['runs']): string =>
+  PAST_WORDS.filter(([kind]) => runs[kind])
+    .map(([kind, one, many]) => `${runs[kind]} ${runs[kind] === 1 ? one : many}`)
+    .join(' · ')
+
+export type HistoryTotals = { sessions: number; usd: number; unpriced: number; tokens: number }
+
+/** The sessions that started within `ms` of now, added up. A session with no recorded cost counts as unpriced. */
+export const historyTotals = (sessions: readonly PastSession[], now: number, ms = Infinity): HistoryTotals => {
+  const within = sessions.filter(s => {
+    const at = Date.parse(s.startedAt ?? '')
+    return Number.isNaN(at) ? ms === Infinity : now - at <= ms
+  })
+  return {
+    sessions: within.length,
+    usd: within.reduce((n, s) => n + (s.costUsd ?? 0), 0),
+    unpriced: within.filter(s => s.costUsd === undefined).length,
+    tokens: within.reduce((n, s) => n + s.tokens, 0),
+  }
+}
+
+const totalsLine = (label: string, t: HistoryTotals) =>
+  t.sessions === 0
+    ? undefined
+    : `${label}: ${t.sessions} session${t.sessions === 1 ? '' : 's'} · ${formatCost(t.usd)}${t.unpriced ? ` (+${t.unpriced} without a recorded cost)` : ''} · ${formatTokens(t.tokens)} tokens`
+
+/** One past session on a line: when, where, what it did, what it cost. */
+export const pastLine = (s: PastSession, currentId?: string): string => {
+  const at = Date.parse(s.startedAt ?? '')
+  const when = Number.isNaN(at) ? 'unknown date' : new Date(at).toISOString().slice(0, 10)
+  const where = s.project ? (s.project.split('/').filter(Boolean).pop() ?? s.project) : undefined
+  const cost = s.costUsd === undefined ? `${formatTokens(s.tokens)} tokens, no recorded cost` : `${formatCost(s.costUsd)} · ${formatTokens(s.tokens)} tokens`
+  const names = s.components.length > 3 ? `${s.components.slice(0, 3).join(', ')} +${s.components.length - 3}` : s.components.join(', ')
+  return [
+    `${when}${s.id === currentId ? ' (this session)' : ''}${where ? ` · ${where}` : ''}`,
+    runWords(s.runs),
+    names || undefined,
+    cost,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/** The history as text: totals for the week, the month and everything scanned, then each session. */
+export const historySummary = (sessions: readonly PastSession[], now: number, days: number, currentId?: string): string => {
+  if (sessions.length === 0) return `No Boomi Companion sessions in the transcripts on this machine from the last ${days} days.`
+  const lines = [
+    `Boomi Companion sessions on this machine, last ${days} days:`,
+    ...[
+      totalsLine('  This week', historyTotals(sessions, now, 7 * 86_400_000)),
+      totalsLine('  Last 30 days', historyTotals(sessions, now, 30 * 86_400_000)),
+      totalsLine(`  All ${days} days`, historyTotals(sessions, now)),
+    ].filter((line): line is string => !!line),
+    '',
+    ...sessions.slice(0, 20).map(s => `  ${pastLine(s, currentId)}`),
+  ]
+  if (sessions.length > 20) lines.push(`  …and ${sessions.length - 20} more`)
+  lines.push('', "Costs are Claude Code's own, from each transcript. Claude Code on the web and other machines keep their transcripts elsewhere.")
   return lines.join('\n')
 }

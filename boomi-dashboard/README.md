@@ -173,7 +173,23 @@ The dashboard reads the credentials from Companion's `.env`, falling back to env
 
 The token is used only in the requests' `Authorization` header. The dashboard never stores, shows or logs it, and its error messages carry only the HTTP status, never Boomi's reply. Without credentials, everything else still works, and the **Process runs in Boomi** section says what's missing.
 
-## Commands and tools
+## Past Companion sessions
+
+What did earlier Companion work cost? Press **Scan** under **Past Companion sessions** in the pane, run `/bc-dashboard history`, or ask Claude, which calls the `history` tool. The dashboard reads the transcripts Claude Code keeps on this machine (`~/.claude/projects`, or `$CLAUDE_CONFIG_DIR/projects`) for the last `historyDays` days and lists each session that ran a Companion script:
+
+```
+Boomi Companion sessions on this machine, last 90 days:
+  This week: 3 sessions · $18.40 · 1.2M tokens
+  Last 30 days: 9 sessions · $61.75 (+1 without a recorded cost) · 4.1M tokens
+
+  2026-10-10 · orders · 2 pushes · 1 deploy · 2 tests · Orders Sync, Order Profile · $6.10 · 410k tokens
+```
+
+- **The cost is Claude Code's own**, the figure `/cost` showed in that session, which Claude Code writes into the transcript as it goes. A transcript from a Claude Code version that didn't write it shows its tokens and "no recorded cost".
+- **A session counts** only when a Bash command in it ran a Companion script, read the same way as live steps. A session that only looked at a script, with `cat` or `find`, doesn't. A subagent's transcript counts toward its session.
+- **Transcripts can be large**, often tens of MB, and a mod may read only 4 MiB of a file at a time. So `scripts/scan-sessions.pl` reads them one line at a time and hands back only each session's totals and the Bash commands that name a Companion script. Nothing else of the conversations leaves the script. It needs Perl, which macOS and most Linux have, and nothing else.
+- The last scan is kept, so the pane shows it in later sessions until you **Rescan**.
+
 
 | Command | Tool Claude calls | Does |
 |---|---|---|
@@ -184,6 +200,7 @@ The token is used only in the requests' `Authorization` header. The dashboard ne
 | `/bc-dashboard unwatch <id\|name>` | | Stops watching it. |
 | `/bc-dashboard close <number\|all>` | | Closes a **Needs attention** item by its number in `/bc-dashboard text`, or all of them. |
 | `/bc-dashboard reopen` | | Brings closed items back. |
+| `/bc-dashboard history` | `history` | Past Companion sessions on this machine, what each did and cost, with totals for the week and the month. |
 | `/bc-dashboard rerun <number>` | | Runs a failed test in **Needs attention** again, the way Claude ran it. |
 | `/bc-dashboard why <number>` | | Reads the process log of a failed test or run in **Needs attention** and prints its `SEVERE` lines. |
 | `/bc-dashboard report [save]` | `report` | The session report as Markdown; `save` also writes it to a file in the working folder. |
@@ -191,7 +208,7 @@ The token is used only in the requests' `Authorization` header. The dashboard ne
 | `/bc-dashboard banner` | | Shows the banner again after **Hide**. |
 | `/bc-dashboard theme [day\|night\|terminal]` | | Picks the pane's theme, or lists the themes. |
 
-The tools are listed to Claude as `mcp__boomi-dashboard__summary`, `mcp__boomi-dashboard__watch` and `mcp__boomi-dashboard__report`. Ask Claude "what's left to fix?" and it can answer from the summary.
+The tools are listed to Claude as `mcp__boomi-dashboard__summary`, `mcp__boomi-dashboard__watch`, `mcp__boomi-dashboard__report` and `mcp__boomi-dashboard__history`. Ask Claude "what's left to fix?" and it can answer from the summary.
 
 ## Setup
 
@@ -216,6 +233,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 | `toasts` | `true` | Pop up toasts for failures, finished deploys and tests, and watched changes. |
 | `banner` | `true` | Show the banner above the prompt. |
 | `budgetUsd` | `0` | The session's spend budget in US dollars. The dashboard warns at 80% and when it's spent. `0` turns it off. |
+| `historyDays` | `90` | How far back **Past Companion sessions** reads the transcripts. |
 | `suggestions` | `true` | Suggest the next step (deploy, then test) in the prompt box when Claude finishes a turn. |
 
 ## Limits
@@ -229,6 +247,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 - A call another mod refuses shows as blocked only when that mod's refusal reaches the dashboard, which depends on the order in which the mods' hooks run.
 - **Process runs in Boomi** includes runs from schedules and other people, not only this session's.
 - The dashboard counts a Companion script as run only when the command runs it (`bash`, `sh`, `./`, `source`). Reading or searching a script, as with `cat` or `grep`, doesn't count.
+- **Past sessions are this machine's.** Claude Code on the web runs each session in a cloud container, and another computer keeps its own transcripts, so neither shows up. Claude Code deletes transcripts after 30 days unless `cleanupPeriodDays` says otherwise, so `historyDays` past that finds only what's left. A session's cost can come in a little under the bill: some calls aren't written to the transcript.
 - **Run again** repeats only tests Claude ran with `boomi-test-execute.sh` in this session or a restored one, not runs from the environment.
 - **Why?** needs Companion's scripts, which the dashboard finds where the last Companion script ran, or else in Claude Code's plugin cache. It runs them through the mod's process access, so it works where the Claude Code CLI runs and can take up to 4 minutes for a large log. Any API token in the log's output is masked before it's shown.
 - The cost is the session's total so far, as `/cost` reports it, not just Companion's share.
@@ -241,7 +260,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 | Tool-call hooks | `tool.call` on `Bash`, `Write`, `Edit` | Notes each Companion script and how it went, and each edit to component XML. |
 | Session usage | `$.session.usage` | The session's cost, how full the context is and how long the session has run. |
 | Turn hooks | `turn.step`, `turn.start`, `turn.complete` | Every model call's tokens, and whether Claude is working. |
-| Processes | `$.process.run` | Runs Companion's log script for **Why?**, and its test script for **Run again**. |
+| Processes | `$.process.run` | Runs Companion's log script for **Why?**, its test script for **Run again**, and `scripts/scan-sessions.pl` for past sessions. |
 | Prompt box | `$.prompt.read`, `$.prompt.fill`, `$.prompt.suggest` | **Ask Claude to fix** drafts its request after what's typed; the next step is suggested after a turn. |
 | Network | `$.http.fetch` | Read-only Platform API queries: `EnvironmentAtomAttachment`, `ExecutionRecord` and `ComponentMetadata`. |
 | Timers | `$.clock.every` | Refreshes the status line every 5 seconds and checks Boomi every `pollSeconds`. |
@@ -249,7 +268,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 | Session state | `$.state` | The activity, Boomi's results and the watch list that the banner and pane read. |
 | Store | `$.store` | Keeps the watch list across sessions. |
 | Slash command | `$.command.register` | `/bc-dashboard` and its actions. |
-| Tools for Claude | `$.tool.register` | `summary`, `watch` and `report`. |
+| Tools for Claude | `$.tool.register` | `summary`, `watch`, `report` and `history`. |
 | Display | `ui.render` (`AbovePrompt`, `Pane`), `$.ui.status`, `$.ui.toast` | The banner, the pane, the status line and the toasts. |
 
 ## To do
@@ -267,6 +286,7 @@ Built against Claude Code 2.1.296.
 cd boomi-dashboard
 claude plugin validate .
 claude plugin test .
+prove tests          # scripts/scan-sessions.pl, against made-up transcripts
 ```
 
 Two files hold plain functions:

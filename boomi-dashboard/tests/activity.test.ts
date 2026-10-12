@@ -6,6 +6,10 @@ import {
   diagnose,
   fixPrompt,
   report,
+  pastSessions,
+  historyTotals,
+  historySummary,
+  runWords,
   budgetOf,
   nextStep,
   closedCount,
@@ -50,6 +54,7 @@ import {
   summary,
 } from '../hooks/activity'
 import type { Activity, Dashboard } from '../types'
+import type { ScannedSession } from '../hooks/activity'
 
 const ID = '1a2b3c4d-1111-2222-3333-444455556666'
 const HOUR = 3_600_000
@@ -586,4 +591,52 @@ test('the next step is to deploy what was saved, then to test what was deployed'
   expect(nextStep([saved, act('deploy', 'running', 'Orders Sync', NOW - 50_000, { file: FILE, type: 'process' })])).toBeUndefined()
   expect(nextStep([act('push', 'ok', 'Order Profile', NOW, { file: 'active-development/profiles/P.xml', type: 'profile.json' })])).toBeUndefined()
   expect(nextStep([{ ...saved, isRestored: true }])).toBeUndefined()
+})
+
+const SCAN: { sessions: ScannedSession[] } = {
+  sessions: [
+    {
+      id: 'aaaaaaaa-1111',
+      project: '/Users/me/orders',
+      startedAt: '2026-10-10T09:00:00Z',
+      costUsd: 3.5,
+      models: { 'claude-opus-5-5': { input: 100, output: 900, cacheRead: 50_000, cacheWrite: 1000 } },
+      commands: [
+        'bash scripts/boomi-component-push.sh active-development/processes/Orders.xml && bash scripts/boomi-deploy.sh active-development/processes/Orders.xml',
+        `bash scripts/boomi-test-execute.sh --process-id ${ID}`,
+        `bash scripts/boomi-test-execute.sh --process-id ${ID}`,
+      ],
+    },
+    {
+      id: 'bbbbbbbb-2222',
+      project: '/Users/me/old',
+      startedAt: '2026-09-01T09:00:00Z',
+      costUsd: null,
+      models: { 'claude-sonnet-5-5': { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 } },
+      commands: ['bash scripts/boomi-component-create.sh active-development/profiles/P.xml'],
+    },
+    // Only looked at a script: not a Companion session.
+    { id: 'cccccccc-3333', startedAt: '2026-10-11T09:00:00Z', costUsd: 9, models: {}, commands: ['cat scripts/boomi-deploy.sh', 'find / -name boomi-deploy.sh'] },
+  ],
+}
+
+test('past sessions are the ones that ran a Companion script, with their work, components and cost', () => {
+  const past = pastSessions(SCAN)
+  expect(past.map(s => s.id)).toEqual(['aaaaaaaa-1111', 'bbbbbbbb-2222'])
+  expect(past[0]).toMatchObject({ costUsd: 3.5, tokens: 2000, cached: 50_000, runs: { push: 1, deploy: 1, test: 2 }, components: ['Orders', ID] })
+  expect(past[0]!.models).toEqual(['Opus 5.5'])
+  expect(past[1]!.costUsd).toBeUndefined()
+  expect(runWords(past[0]!.runs)).toBe('1 push · 1 deploy · 2 tests')
+})
+
+test('history adds up the week, the month and everything, and says what has no recorded cost', () => {
+  const past = pastSessions(SCAN)
+  expect(historyTotals(past, NOW, 7 * 86_400_000)).toEqual({ sessions: 1, usd: 3.5, unpriced: 0, tokens: 2000 })
+  expect(historyTotals(past, NOW)).toMatchObject({ sessions: 2, usd: 3.5, unpriced: 1 })
+  const text = historySummary(past, NOW, 90, 'aaaaaaaa-1111')
+  expect(text).toContain('This week: 1 session · $3.50 · 2.0k tokens')
+  expect(text).toContain('All 90 days: 2 sessions · $3.50 (+1 without a recorded cost)')
+  expect(text).toContain('2026-10-10 (this session) · orders · 1 push · 1 deploy · 2 tests · Orders, 1a2b3c4d')
+  expect(text).toContain('2026-09-01 · old · 1 create · P · 20 tokens, no recorded cost')
+  expect(historySummary([], NOW, 90)).toContain('No Boomi Companion sessions')
 })

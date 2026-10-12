@@ -638,3 +638,56 @@ test('no suggestion when turned off', { options: { suggestions: false } }, async
   await $.command.run(dashboard('text'))
   expect(suggestions).toEqual([])
 })
+
+const SCANNED = JSON.stringify({
+  version: 1,
+  scanned: 4,
+  sessions: [
+    {
+      id: 'aaaaaaaa-1111',
+      project: '/Users/me/orders',
+      startedAt: '2026-10-10T09:00:00Z',
+      costUsd: 3.5,
+      models: { 'claude-opus-5-5': { input: 100, output: 900, cacheRead: 50_000, cacheWrite: 1000 } },
+      commands: [`bash scripts/boomi-component-push.sh ${FILE}`],
+    },
+  ],
+})
+
+test('/bc-dashboard history scans the transcripts with the bundled script, and the pane keeps the result', async ($, on) => {
+  world(on)
+  mock.store(on)
+  const ran: string[][] = []
+  on('process.run', async (_$, e) => {
+    ran.push([...e.argv])
+    return { value: { exitCode: 0, stdout: SCANNED, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect((await pane.find({ type: 'Button', key: 'history-scan' }))?.props.label).toBe('Scan')
+  const text = await $.command.run(dashboard('history'))
+  expect(ran[0]![0]).toBe('perl')
+  expect(ran[0]![1]).toMatch(/\/scripts\/scan-sessions\.pl$/)
+  expect(ran[0]!.slice(2)).toEqual(['--since', String(NOW - 90 * 86_400_000)])
+  expect(text.text).toContain('This week: 1 session · $3.50')
+  expect(text.text).toContain('orders · 1 push · Orders')
+  expect(await pane.find({ text: /This week \$3\.50 · 1 session/ })).toBeDefined()
+  expect((await pane.find({ type: 'Button', key: 'history-scan' }))?.props.label).toBe('Rescan')
+  const tool = await $.tool.call({ tool: 'mcp__boomi-dashboard__history' } as never)
+  expect(JSON.stringify(tool)).toContain('$3.50')
+})
+
+test('without Perl, history says what it needs, and keeps the last good scan', async ($, on) => {
+  world(on)
+  mock.store(on)
+  let isMissing = false
+  on('process.run', async () => {
+    if (isMissing) return { deny: 'spawn perl ENOENT' }
+    return { value: { exitCode: 0, stdout: SCANNED, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await $.command.run(dashboard('history'))
+  isMissing = true
+  expect((await $.command.run(dashboard('history'))).text).toContain('History needs Perl')
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /History needs Perl/ })).toBeDefined()
+  expect(await pane.find({ text: /This week \$3\.50/ })).toBeDefined()
+})

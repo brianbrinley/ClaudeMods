@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
-import type { Activity, Dashboard, DiagnosisState, Ledger, PaneTheme, Platform, Watched } from '../types'
+import type { Activity, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -22,6 +22,10 @@ import {
   diagnose,
   fixPrompt,
   report,
+  pastSessions,
+  pastLine,
+  historySummary,
+  historyTotals,
   budgetOf,
   nextStep,
   compareWatched,
@@ -105,6 +109,9 @@ const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
 /** The budget's last warning, as a percent (0, 80 or 100), so each is toasted once. */
 const budgetAlert = atom({ plugin: 'boomi-dashboard', key: 'budgetAlert' } as const, 0)
 
+/** Past Companion sessions on this machine, from the last scan of the transcripts. */
+const history = atom({ plugin: 'boomi-dashboard', key: 'history' } as const, { phase: 'idle' } as HistoryState)
+
 /** The next step last suggested in the prompt box, so it isn't suggested after every turn. */
 const suggested = atom({ plugin: 'boomi-dashboard', key: 'suggested' } as const, '')
 
@@ -119,6 +126,7 @@ type Settings = {
   hasFlamingo: boolean
   budgetUsd: number
   isSuggesting: boolean
+  historyDays: number
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -132,12 +140,14 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   hasFlamingo: options.flamingo !== false,
   budgetUsd: Math.max(0, Number(options.budgetUsd ?? 0) || 0),
   isSuggesting: options.suggestions !== false,
+  historyDays: Math.max(1, Number(options.historyDays ?? 90) || 90),
 })
 
 const PANE = 'boomi-dashboard'
 const WATCH_KEY = 'watched'
 const SCRIPTS_KEY = 'scriptsDir'
 const THEME_KEY = 'theme'
+const HISTORY_KEY = 'history'
 
 /** How often the flamingo's frame moves on while Claude works. */
 const FLAMINGO_TICK_MS = 500
@@ -680,6 +690,51 @@ const suggestNext = async ($: Engine, settings: Settings) => {
   await $.prompt.suggest({ text }).catch(() => undefined)
 }
 
+// --- Past sessions -----------------------------------------------------------------
+
+/**
+ * Reads the transcripts on this machine for past Companion sessions. A
+ * transcript can be far over the 4 MiB a mod may read at once, so a script
+ * reads them a line at a time and prints only each session's totals.
+ */
+const scanHistory = async ($: Engine, settings: Settings): Promise<HistoryState> => {
+  await update($, history, (h): HistoryState => ({ ...h, phase: 'loading', error: undefined }))
+  const now = await $.clock.now()
+  let state: HistoryState
+  try {
+    const ran = await $.process.run(
+      ['perl', `${$.plugin.root}/scripts/scan-sessions.pl`, '--since', String(now - settings.historyDays * 86_400_000)],
+      { timeoutMs: 300_000 },
+    )
+    if (ran.exitCode !== 0) {
+      const why = ran.stderr.split(/\r?\n/).find(line => line.trim()) ?? `exit ${ran.exitCode}`
+      state = { phase: 'error', error: `The transcript scan failed: ${why.slice(0, 200)}` }
+    } else if (ran.isStdoutTruncated) {
+      state = { phase: 'error', error: 'Too many sessions to read at once. Lower the historyDays setting and try again.' }
+    } else {
+      const scan = JSON.parse(ran.stdout) as { sessions?: []; scanned?: number }
+      state = { phase: 'ready', sessions: pastSessions(scan), scannedAt: now, scanned: scan.scanned }
+      await $.store.set(HISTORY_KEY, { sessions: state.sessions, scannedAt: now, scanned: scan.scanned }).catch(() => undefined)
+    }
+  } catch (error) {
+    const message = messageOf(error)
+    state = {
+      phase: 'error',
+      error: /ENOENT|not found/i.test(message) ? 'History needs Perl, which macOS and most Linux have. Install it, then try again.' : message,
+    }
+  }
+  // A failed scan keeps the sessions from the last one that worked.
+  await update($, history, h => (state.phase === 'error' ? { ...h, ...state } : state))
+  return state
+}
+
+/** /bc-dashboard history: scans now, then lists the past sessions with their cost. */
+const historyCommand = async ($: Engine, settings: Settings): Promise<string> => {
+  const state = await scanHistory($, settings)
+  if (state.phase === 'error') return state.error ?? 'The transcript scan failed.'
+  return historySummary(state.sessions ?? [], await $.clock.now(), settings.historyDays, await $.session.id().catch(() => undefined))
+}
+
 // --- The session report ------------------------------------------------------------
 
 const reportNow = async ($: Engine, settings: Settings) => {
@@ -758,6 +813,7 @@ const USAGE = [
   '/bc-dashboard why <n>         read the log of a failed run or test and show what failed',
   '/bc-dashboard rerun <n>       run a failed test again, the same way Claude ran it',
   '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
+  '/bc-dashboard history         past Companion sessions on this machine and what each cost',
   '/bc-dashboard seen            mark failed runs and watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
@@ -799,6 +855,8 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return rerunByNumber($, settings, target)
     case 'report':
       return reportCommand($, settings, target)
+    case 'history':
+      return historyCommand($, settings)
     case 'reopen':
       return reopen($)
     case 'theme':
@@ -899,6 +957,11 @@ export const register: Register = (on, options) => {
         "The Boomi Companion session as a Markdown report: each component and where it stands, deployments and tests, what needs attention and what was closed, the environment's runs, and the session's cost and tokens. Use it for a PR description, a ticket or a hand-off.",
     })
     await $.tool.register({
+      name: 'history',
+      description:
+        "Past Boomi Companion sessions on this machine, from Claude Code's transcripts: each session's date, project, Companion work (pushes, deploys, tests), components and cost, with totals for the week and the month. Use it when asked what earlier Companion work cost.",
+    })
+    await $.tool.register({
       name: 'watch',
       description:
         'Watch a Boomi component for changes someone else makes in Boomi; the dashboard flags it when its version moves. Takes a component ID or a component XML file Companion created.',
@@ -914,6 +977,11 @@ export const register: Register = (on, options) => {
     if (isTheme(saved)) await update($, pickedTheme, () => saved)
 
     await restoreActivity($, settings)
+
+    const scanned = (await $.store.get(HISTORY_KEY)) as { sessions?: PastSession[]; scannedAt?: number; scanned?: number } | undefined
+    if (Array.isArray(scanned?.sessions)) {
+      await update($, history, (): HistoryState => ({ phase: 'ready', sessions: scanned.sessions, scannedAt: scanned.scannedAt, scanned: scanned.scanned }))
+    }
 
     const ids = await $.store.get(WATCH_KEY)
     if (Array.isArray(ids)) {
@@ -962,6 +1030,10 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: 'mcp__boomi-dashboard__summary' }, async $ => ({
     result: await summaryNow($, settings).catch(error => `The dashboard couldn't build its summary: ${messageOf(error)}`),
+  }))
+
+  on('tool.call', { tool: 'mcp__boomi-dashboard__history' }, async $ => ({
+    result: await historyCommand($, settings).catch(error => `The dashboard couldn't read past sessions: ${messageOf(error)}`),
   }))
 
   on('tool.call', { tool: 'mcp__boomi-dashboard__report' }, async $ => ({
@@ -1070,6 +1142,8 @@ export const register: Register = (on, options) => {
     const { Box, Button, Link, Text } = $.ui.resolve(e)
     const themeNow = await themeOf($, settings)
     const collapsed = await read($, isRunsCollapsed)
+    const past = await read($, history)
+    const sessionId = await $.session.id().catch(() => undefined)
     const footer = await footerOf($)
     const p = PALETTES[themeNow]
     const current = await read($, dashboard)
@@ -1295,6 +1369,38 @@ export const register: Register = (on, options) => {
         {current.platform.phase === 'ok' && collapsed && line(runsSummary(runs, hours).level, runsSummary(runs, hours).text)}
         {current.platform.phase === 'ok' && !collapsed && runs.length === 0 && line('healthy', `No process ran in the last ${hours}h.`)}
         {current.platform.phase === 'ok' && !collapsed && runs.slice(0, 6).map(run => line(runLevel(run), runText(run, now)))}
+
+        <Box marginTop={1} justifyContent="space-between">
+          <Box>
+            {t('◇ ', { color: p.rule, bold: true })}
+            {t('PAST COMPANION SESSIONS', { color: p.heading, bold: true })}
+            {past.scannedAt !== undefined && t(`  scanned ${ago(past.scannedAt, now)}`, { color: p.muted })}
+          </Box>
+          {past.phase !== 'loading' && (
+            <Button key="history-scan" label={past.phase === 'idle' ? 'Scan' : 'Rescan'} onPress={() => void scanHistory($, settings)} />
+          )}
+        </Box>
+        {past.phase === 'idle' && note(`What earlier Companion sessions on this machine cost, from Claude Code's transcripts. Scan reads the last ${settings.historyDays} days.`)}
+        {past.phase === 'loading' && note('Reading the transcripts…')}
+        {past.phase === 'error' && line('warning', past.error ?? 'The transcript scan failed.')}
+        {past.sessions && past.sessions.length === 0 && note(`No Companion sessions in the last ${settings.historyDays} days.`)}
+        {past.sessions && past.sessions.length > 0 && (() => {
+          const week = historyTotals(past.sessions, now, 7 * 86_400_000)
+          const month = historyTotals(past.sessions, now, 30 * 86_400_000)
+          const total = (label: string, x: typeof week) =>
+            `${label} ${formatCost(x.usd)}${x.unpriced ? ` +${x.unpriced} unpriced` : ''} · ${x.sessions} session${x.sessions === 1 ? '' : 's'}`
+          return (
+            <Box flexDirection="column">
+              {t(`${total('This week', week)}   ${total('30 days', month)}`, { color: p.accent, bold: true })}
+              {past.sessions.slice(0, 5).map(s => (
+                <Text backgroundColor={p.bg} wrap="truncate-end">
+                  {t(`  ${pastLine(s, sessionId)}`)}
+                </Text>
+              ))}
+              {past.sessions.length > 5 && note(`  …and ${past.sessions.length - 5} more: /bc-dashboard history lists them all.`)}
+            </Box>
+          )
+        })()}
 
         {current.watched.length > 0 && heading('Watched components')}
         {current.watched.length > 0 && note('Flagged when someone other than Companion changes one in Boomi.')}

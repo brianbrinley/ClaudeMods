@@ -68,6 +68,12 @@
       "title": "Suggest the next step",
       "description": "When Claude finishes a turn with a component saved but not deployed, or deployed but not tested, suggest that step in the prompt box (Tab takes it)",
       "default": true
+    },
+    "historyDays": {
+      "type": "number",
+      "title": "Past sessions window (days)",
+      "description": "How far back Past Companion sessions reads Claude Code's transcripts on this machine",
+      "default": 90
     }
   }
 }

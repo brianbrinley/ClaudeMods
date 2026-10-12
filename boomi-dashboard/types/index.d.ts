@@ -125,8 +125,35 @@ export type DiagnosisState = {
 /** The pane's colors: Valence Day, Valence Night, or the terminal's own theme. */
 export type PaneTheme = 'day' | 'night' | 'terminal'
 
+/** A past Companion session, from the transcripts on this machine. */
+export type PastSession = {
+  id: string
+  project?: string
+  startedAt?: string
+  endedAt?: string
+  /** Claude Code's own cost for the session, when its transcript recorded one. */
+  costUsd?: number
+  /** New tokens (input, output, cache writes) and cache reads. */
+  tokens: number
+  cached: number
+  models: string[]
+  /** Companion script runs by kind: push 3, deploy 1, ... */
+  runs: Partial<Record<ActivityKind, number>>
+  /** The components the runs named: their file names, else their IDs. */
+  components: string[]
+}
+
+export type HistoryState = {
+  phase: 'idle' | 'loading' | 'ready' | 'error'
+  sessions?: PastSession[]
+  scannedAt?: number
+  /** How many transcripts the scan read. */
+  scanned?: number
+  error?: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; suggested: string }
+    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; suggested: string; history: HistoryState }
   }
 }
