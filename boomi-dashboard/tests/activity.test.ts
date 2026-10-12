@@ -7,9 +7,15 @@ import {
   componentPath,
   components,
   describe,
+  FLAMINGO_IDLE,
+  FLAMINGO_WALK,
+  flamingo,
   formatTokens,
   friendlyType,
   meter,
+  modelMix,
+  modelName,
+  pixelCells,
   newFailures,
   readOutput,
   recentRuns,
@@ -234,4 +240,32 @@ test('sparkline and meter draw at a glance', () => {
   expect(sparkline([1, 4, 8])).toBe('▂▅█')
   expect(sparkline([0, 0])).toBe('')
   expect(meter(31, 10)).toBe('▰▰▰▱▱▱▱▱▱▱')
+})
+
+test('modelName reads model ids in words, and modelMix lists each model biggest first', () => {
+  expect(modelName('claude-opus-5-5')).toBe('Opus 5.5')
+  expect(modelName('claude-haiku-5-5-20260901')).toBe('Haiku 5.5')
+  expect(modelName('claude-sonnet-5')).toBe('Sonnet 5')
+  expect(modelName('some-gateway-model')).toBe('some-gateway-model')
+  const mix = modelMix({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 2, models: { 'claude-haiku-5-5': 26_000, 'claude-opus-5-5': 312_000 } })
+  expect(mix).toBe('Opus 5.5 312k · Haiku 5.5 26k')
+})
+
+test('the 8-bit flamingo stands on one leg when idle and walks through its frames', () => {
+  expect(flamingo(false, 3)).toBe(FLAMINGO_IDLE)
+  expect(flamingo(true, 0)).toBe(FLAMINGO_WALK[0])
+  expect(flamingo(true, 5)).toBe(FLAMINGO_WALK[1])
+  for (const f of [FLAMINGO_IDLE, ...FLAMINGO_WALK]) {
+    expect(f.length).toBe(16)
+    expect(f.every(row => row.length === 12)).toBe(true)
+  }
+})
+
+test('pixelCells packs two pixel rows into each cell with half blocks', () => {
+  const colors = { P: '#C2185B', L: '#F7A8C4' }
+  expect(pixelCells(['P.P.', 'PL..'], colors)).toEqual([
+    [{ char: '█', color: '#C2185B', bg: undefined }, { char: '▄', color: '#F7A8C4' }, { char: '▀', color: '#C2185B' }, { char: ' ' }],
+  ])
+  expect(pixelCells(['PL', 'LP'], colors)[0]![0]).toEqual({ char: '▀', color: '#C2185B', bg: '#F7A8C4' })
+  expect(pixelCells(FLAMINGO_IDLE, { P: 'p', L: 'l', K: 'k' }).length).toBe(8)
 })

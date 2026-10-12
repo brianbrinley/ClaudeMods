@@ -36,6 +36,8 @@ export type Activity = {
    */
   tokensAt?: number
   usdAt?: number
+  /** The model that answered the latest call before this step. */
+  model?: string
 }
 
 /** Every token the session's model calls used, summed as the API reported them. */
@@ -46,6 +48,10 @@ export type Ledger = {
   cacheWrite: number
   /** How many model calls the sums cover. */
   calls: number
+  /** Tokens per model, by the id the API reports; absent in a ledger from an older version. */
+  models?: Record<string, number>
+  /** The model that answered the latest call. */
+  lastModel?: string
 }
 
 export type Run = {
@@ -82,8 +88,11 @@ export type Dashboard = {
   watched: Watched[]
 }
 
+/** The pane's colors: Valence Day, Valence Night, or the terminal's own theme. */
+export type PaneTheme = 'day' | 'night' | 'terminal'
+
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean }
+    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number }
   }
 }
