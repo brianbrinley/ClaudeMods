@@ -3,6 +3,15 @@ import { expect, test } from 'claude-code/testing'
 import {
   attention,
   closeItem,
+  diagnose,
+  fixPrompt,
+  report,
+  pastSessions,
+  historyTotals,
+  historySummary,
+  runWords,
+  budgetOf,
+  nextStep,
   closedCount,
   reopenAll,
   compareWatched,
@@ -45,6 +54,7 @@ import {
   summary,
 } from '../hooks/activity'
 import type { Activity, Dashboard } from '../types'
+import type { ScannedSession } from '../hooks/activity'
 
 const ID = '1a2b3c4d-1111-2222-3333-444455556666'
 const HOUR = 3_600_000
@@ -71,30 +81,33 @@ const act = (kind: Activity['kind'], outcome: Activity['outcome'], subject: stri
 
 const FILE = 'active-development/processes/Orders.xml'
 
+/** The script runs in a command, without the folder each ran from (its own test checks that). */
+const runsIn = (command: string) => scriptRuns(command).map(({ scriptsDir: _dir, args: _args, ...run }) => run)
+
 test('scriptRuns finds the Companion scripts a command runs and what they name', () => {
   expect(
-    scriptRuns(
+    runsIn(
       `cd work && bash scripts/boomi-component-push.sh ${FILE} --branch dev && bash scripts/boomi-deploy.sh ${FILE} --deployment-notes "first cut"`,
     ),
   ).toEqual([
     { kind: 'push', file: `work/${FILE}` },
     { kind: 'deploy', file: `work/${FILE}` },
   ])
-  expect(scriptRuns(`bash scripts/boomi-test-execute.sh --process-id ${ID} --test-data in.json`)).toEqual([{ kind: 'test', processId: ID }])
-  expect(scriptRuns('bash scripts/boomi-undeploy.sh dep-123')).toEqual([{ kind: 'undeploy', deploymentId: 'dep-123' }])
-  expect(scriptRuns(`bash scripts/boomi-component-pull.sh --component-id ${ID}`)).toEqual([{ kind: 'pull', componentId: ID }])
+  expect(runsIn(`bash scripts/boomi-test-execute.sh --process-id ${ID} --test-data in.json`)).toEqual([{ kind: 'test', processId: ID }])
+  expect(runsIn('bash scripts/boomi-undeploy.sh dep-123')).toEqual([{ kind: 'undeploy', deploymentId: 'dep-123' }])
+  expect(runsIn(`bash scripts/boomi-component-pull.sh --component-id ${ID}`)).toEqual([{ kind: 'pull', componentId: ID }])
 })
 
 test("scriptRuns notes Companion's other scripts, and finds scripts inside bash -c", () => {
-  expect(scriptRuns('bash scripts/boomi-component-search.sh --name Orders')).toEqual([{ kind: 'other', script: 'component-search' }])
-  expect(scriptRuns(`bash -c 'cd x && bash scripts/boomi-deploy.sh ${FILE}'`)).toEqual([{ kind: 'deploy', file: `x/${FILE}` }])
+  expect(runsIn('bash scripts/boomi-component-search.sh --name Orders')).toEqual([{ kind: 'other', script: 'component-search' }])
+  expect(runsIn(`bash -c 'cd x && bash scripts/boomi-deploy.sh ${FILE}'`)).toEqual([{ kind: 'deploy', file: `x/${FILE}` }])
 })
 
 test('scriptRuns leaves out help, connection tests, the shared library and other commands', () => {
-  expect(scriptRuns('bash scripts/boomi-component-push.sh --test-connection')).toEqual([])
-  expect(scriptRuns('bash scripts/boomi-deploy.sh --list-environments')).toEqual([])
-  expect(scriptRuns('source scripts/boomi-common.sh')).toEqual([])
-  expect(scriptRuns('git status')).toEqual([])
+  expect(runsIn('bash scripts/boomi-component-push.sh --test-connection')).toEqual([])
+  expect(runsIn('bash scripts/boomi-deploy.sh --list-environments')).toEqual([])
+  expect(runsIn('source scripts/boomi-common.sh')).toEqual([])
+  expect(runsIn('git status')).toEqual([])
 })
 
 test('componentPath names a component file the same way from a script and from an edit', () => {
@@ -165,7 +178,8 @@ test('needs attention lists current failures with a next step, and a later fix c
   const failing = dashboard([act('test', 'failed', 'Orders Sync', NOW, { componentId: ID, executionStatus: 'ERROR', executionId: 'execution-0490202b-2e2f' })])
   const [item] = attention(failing, NOW, 24 * HOUR)
   expect(item!.title).toBe('Test of Orders Sync ended ERROR')
-  expect(item!.hint).toContain('execution log (0490202b…)')
+  expect(item!.hint).toContain('Execution 0490202b…: press Why?')
+  expect(item!.executionId).toBe('execution-0490202b-2e2f')
 
   const fixed = dashboard([...failing.activity, act('test', 'ok', 'Orders Sync', NOW + 1, { componentId: ID, executionStatus: 'COMPLETE' })])
   expect(attention(fixed, NOW, 24 * HOUR)).toEqual([])
@@ -291,18 +305,18 @@ test('pixelCells packs two pixel rows into each cell with half blocks', () => {
 })
 
 test("a script that's only read or searched isn't a run", () => {
-  expect(scriptRuns('cat scripts/boomi-deploy.sh')).toEqual([])
-  expect(scriptRuns('grep -n SUCCESS scripts/boomi-deploy.sh | head')).toEqual([])
-  expect(scriptRuns('sed -n 1,40p skills/boomi-integration/scripts/boomi-deploy.sh')).toEqual([])
-  expect(scriptRuns(`BOOMI_X=1 timeout 60 bash -x scripts/boomi-deploy.sh ${FILE}`)).toEqual([{ kind: 'deploy', file: FILE }])
-  expect(scriptRuns(`./scripts/boomi-deploy.sh ${FILE}; echo done`)).toEqual([{ kind: 'deploy', file: FILE }])
+  expect(runsIn('cat scripts/boomi-deploy.sh')).toEqual([])
+  expect(runsIn('grep -n SUCCESS scripts/boomi-deploy.sh | head')).toEqual([])
+  expect(runsIn('sed -n 1,40p skills/boomi-integration/scripts/boomi-deploy.sh')).toEqual([])
+  expect(runsIn(`BOOMI_X=1 timeout 60 bash -x scripts/boomi-deploy.sh ${FILE}`)).toEqual([{ kind: 'deploy', file: FILE }])
+  expect(runsIn(`./scripts/boomi-deploy.sh ${FILE}; echo done`)).toEqual([{ kind: 'deploy', file: FILE }])
 })
 
 test('a file named after a cd is read from that folder', () => {
-  const [run] = scriptRuns('cd active-development && bash ../scripts/boomi-deploy.sh processes/Listener.xml')
+  const [run] = runsIn('cd active-development && bash ../scripts/boomi-deploy.sh processes/Listener.xml')
   expect(run!.file).toBe('active-development/processes/Listener.xml')
   expect(componentPath(run!.file!)).toBe('active-development/processes/Listener.xml')
-  expect(scriptRuns('cd /w/active-development/processes && bash /w/scripts/boomi-deploy.sh ./Listener.xml')[0]!.file).toBe(
+  expect(runsIn('cd /w/active-development/processes && bash /w/scripts/boomi-deploy.sh ./Listener.xml')[0]!.file).toBe(
     '/w/active-development/processes/Listener.xml',
   )
 })
@@ -383,7 +397,7 @@ test('a multi-line command runs each script, each with its own file', () => {
     `bash ${SKILL}/scripts/boomi-component-create.sh active-development/profiles/OrderRequest.xml`,
     `bash ${SKILL}/scripts/boomi-component-create.sh active-development/processes/Listener.xml`,
   ].join('\n')
-  expect(scriptRuns(command)).toEqual([
+  expect(runsIn(command)).toEqual([
     { kind: 'create', file: 'active-development/profiles/OrderRequest.xml' },
     { kind: 'create', file: 'active-development/processes/Listener.xml' },
   ])
@@ -391,8 +405,8 @@ test('a multi-line command runs each script, each with its own file', () => {
 
 test('a script run in a loop is a run', () => {
   const command = `for f in active-development/profiles/*.xml; do bash ${SKILL}/scripts/boomi-component-create.sh "$f"; done`
-  expect(scriptRuns(command).map(run => run.kind)).toEqual(['create'])
-  expect(scriptRuns(`if true; then bash ${SKILL}/scripts/boomi-deploy.sh ${FILE}; fi`)).toEqual([{ kind: 'deploy', file: FILE }])
+  expect(runsIn(command).map(run => run.kind)).toEqual(['create'])
+  expect(runsIn(`if true; then bash ${SKILL}/scripts/boomi-deploy.sh ${FILE}; fi`)).toEqual([{ kind: 'deploy', file: FILE }])
 })
 
 test('each result in the output is read on its own, so a loop of creates is several components', () => {
@@ -452,6 +466,7 @@ test('a failed run of a session component needs attention with that context, unt
   const [item] = attention(state, NOW, 24 * HOUR)
   expect(item!.title).toBe(`Listener run of ${LISTENER} ended ERROR`)
   expect(item!.hint).toContain('Execution 81f61084…, a component from this session')
+  expect(item!.executionId).toBe('execution-81f61084-fd93-4565-9bda-9bf0d4b4f102')
   expect(attention({ ...state, seenRuns: ['execution-81f61084-fd93-4565-9bda-9bf0d4b4f102'] }, NOW, 24 * HOUR)).toEqual([])
 })
 
@@ -502,4 +517,134 @@ test('closing a run marks it seen, and closing a watched change clears it', () =
   expect(attention(closed, NOW, 24 * HOUR)).toEqual([])
   expect(closed.seenRuns).toEqual(['execution-e9'])
   expect(closed.watched[0]!.changedBy).toBeUndefined()
+})
+
+test("a script named by its path tells where Companion's scripts are", () => {
+  expect(scriptRuns(`bash ${SKILL}/scripts/boomi-deploy.sh ${FILE}`)[0]!.scriptsDir).toBe(`${SKILL}/scripts`)
+  expect(scriptRuns(`cd /w && bash scripts/boomi-deploy.sh ${FILE}`)[0]!.scriptsDir).toBe('/w/scripts')
+  expect(scriptRuns(`boomi-deploy.sh ${FILE}`)[0]!.scriptsDir).toBeUndefined()
+})
+
+const LOG = [
+  'Executing test for process 33333333 on atom a1',
+  '2026-10-12T11:05:00Z\tINFO\tStart\tExecuting Process OrderValidator - Listener Validate Order',
+  '2026-10-12T11:05:01Z\tWARNING\tMap\tNo data produced from map',
+  '2026-10-12T11:05:01Z\tSEVERE\tParse Order\tUnexpected character (\'}\' (code 125)) at line 1, column 18',
+  '2026-10-12T11:05:01Z\tSEVERE\tException\tOrder JSON is not valid',
+].join('\n')
+
+test('diagnose picks the SEVERE lines out of a process log, without their timestamps', () => {
+  expect(diagnose(LOG)).toEqual({
+    lines: ["SEVERE · Parse Order · Unexpected character ('}' (code 125)) at line 1, column 18", 'SEVERE · Exception · Order JSON is not valid'],
+    severe: 2,
+    warnings: 1,
+  })
+  expect(diagnose('a\nb\nc').lines).toEqual(['a', 'b', 'c'])
+})
+
+test('the fix request names the execution and quotes what the log said', () => {
+  const text = fixPrompt('Listener run of X ended ERROR', 'execution-81f6', { lines: ['SEVERE\tParse Order\tbad'], severe: 1, warnings: 0 })
+  expect(text).toContain('Listener run of X ended ERROR (execution execution-81f6). Its process log says:')
+  expect(text).toContain('  SEVERE\tParse Order\tbad')
+  expect(text).toContain('push, redeploy and test it again')
+})
+
+test('the session report has each section, and a pipe in a name keeps the table intact', () => {
+  const state = dashboard([
+    act('push', 'ok', 'A | B', NOW - 60_000, { file: FILE, version: '2' }),
+    act('deploy', 'ok', 'A | B', NOW - 50_000, { file: FILE }),
+    act('test', 'failed', 'A | B', NOW - 40_000, { file: FILE, executionStatus: 'ERROR', executionId: 'execution-1' }),
+  ])
+  const text = report(state, { session: '3adaec6a', date: '2026-10-12', repo: 'https://github.com/o/r', usage: { usd: 0.42, split: '12k new (…) · 80k cache reads', model: 'Opus 5.5', startedAt: NOW - 3_600_000 } }, NOW, 24 * HOUR)
+  expect(text).toContain('# Boomi Companion session report')
+  expect(text).toContain('Session 3adaec6a · 2026-10-12 · 1h 0m · Opus 5.5')
+  expect(text).toContain('Repository: https://github.com/o/r')
+  expect(text).toContain('| A \\| B |  | ✓ saved v2 · ✓ deployed · ✗ test ERROR |')
+  expect(text).toContain('- ✗ Test of A | B ended ERROR (execution execution-1)')
+  expect(text).toContain('## Needs attention')
+  expect(text).toContain('- Cost: $0.42')
+  expect(text).toContain('- Tokens: 12k new (…) · 80k cache reads')
+})
+
+test('a test keeps its arguments so it can be run again', () => {
+  expect(scriptRuns(`bash scripts/boomi-test-execute.sh --process-id ${ID} --atom-id a1`)[0]!.args).toEqual(['--process-id', ID, '--atom-id', 'a1'])
+  expect(scriptRuns(`bash scripts/boomi-component-push.sh ${FILE}`)[0]!.args).toBeUndefined()
+})
+
+test('the budget warns from 80% and says when it is spent, and stays quiet without one', () => {
+  expect(budgetOf(1, 5)).toEqual({ level: 'healthy', percent: 20, text: '20% of the $5.00 budget' })
+  expect(budgetOf(4.2, 5)?.level).toBe('warning')
+  expect(budgetOf(5.5, 5)).toMatchObject({ level: 'critical', text: 'budget spent: $5.50 of the $5.00 budget' })
+  expect(budgetOf(4, 0)).toBeUndefined()
+  expect(budgetOf(undefined, 5)).toBeUndefined()
+  expect(statusLine(dashboard(), NOW, 24 * HOUR, { usd: 4.2, budgetUsd: 5 })).toContain('◐ 84% of the $5.00 budget')
+  expect(statusLine(dashboard(), NOW, 24 * HOUR, { usd: 1, budgetUsd: 5 })).not.toContain('budget')
+})
+
+test('the next step is to deploy what was saved, then to test what was deployed', () => {
+  const saved = act('push', 'ok', 'Orders Sync', NOW - 60_000, { file: FILE, type: 'process' })
+  expect(nextStep([saved])).toBe('Deploy Orders Sync and test it')
+  const deployed = act('deploy', 'ok', 'Orders Sync', NOW - 50_000, { file: FILE, type: 'process' })
+  expect(nextStep([saved, deployed])).toBe('Test Orders Sync')
+  expect(nextStep([saved, deployed, act('test', 'ok', 'Orders Sync', NOW - 40_000, { file: FILE, type: 'process' })])).toBeUndefined()
+  expect(nextStep([saved, deployed, act('test', 'failed', 'Orders Sync', NOW - 40_000, { file: FILE, type: 'process' })])).toBeUndefined()
+  expect(nextStep([saved, act('deploy', 'running', 'Orders Sync', NOW - 50_000, { file: FILE, type: 'process' })])).toBeUndefined()
+  expect(nextStep([act('push', 'ok', 'Order Profile', NOW, { file: 'active-development/profiles/P.xml', type: 'profile.json' })])).toBeUndefined()
+  expect(nextStep([{ ...saved, isRestored: true }])).toBeUndefined()
+})
+
+const SCAN: { sessions: ScannedSession[] } = {
+  sessions: [
+    {
+      id: 'aaaaaaaa-1111',
+      project: '/Users/me/orders',
+      startedAt: '2026-10-10T09:00:00Z',
+      costUsd: 3.5,
+      models: { 'claude-opus-5-5': { input: 100, output: 900, cacheRead: 50_000, cacheWrite: 1000 } },
+      commands: [
+        'bash scripts/boomi-component-push.sh active-development/processes/Orders.xml && bash scripts/boomi-deploy.sh active-development/processes/Orders.xml',
+        `bash scripts/boomi-test-execute.sh --process-id ${ID}`,
+        `bash scripts/boomi-test-execute.sh --process-id ${ID}`,
+      ],
+    },
+    {
+      id: 'bbbbbbbb-2222',
+      project: '/Users/me/old',
+      startedAt: '2026-09-01T09:00:00Z',
+      costUsd: null,
+      models: { 'claude-sonnet-5-5': { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 } },
+      commands: ['bash scripts/boomi-component-create.sh active-development/profiles/P.xml'],
+    },
+    // Only looked at a script: not a Companion session.
+    { id: 'cccccccc-3333', startedAt: '2026-10-11T09:00:00Z', costUsd: 9, models: {}, commands: ['cat scripts/boomi-deploy.sh', 'find / -name boomi-deploy.sh'] },
+  ],
+}
+
+test('past sessions are the ones that ran a Companion script, with their work, components and cost', () => {
+  const past = pastSessions(SCAN)
+  expect(past.map(s => s.id)).toEqual(['aaaaaaaa-1111', 'bbbbbbbb-2222'])
+  expect(past[0]).toMatchObject({ costUsd: 3.5, tokens: 2000, cached: 50_000, runs: { push: 1, deploy: 1, test: 2 }, components: ['Orders'] })
+  expect(past[0]!.models).toEqual(['Opus 5.5'])
+  expect(past[1]!.costUsd).toBeUndefined()
+  expect(runWords(past[0]!.runs)).toBe('1 push · 1 deploy · 2 tests')
+})
+
+test('history adds up the week, the month and everything, and says what has no recorded cost', () => {
+  const past = pastSessions(SCAN)
+  expect(historyTotals(past, NOW, 7 * 86_400_000)).toEqual({ sessions: 1, usd: 3.5, unpriced: 0, tokens: 2000 })
+  expect(historyTotals(past, NOW)).toMatchObject({ sessions: 2, usd: 3.5, unpriced: 1 })
+  const text = historySummary(past, NOW, 90, 'aaaaaaaa-1111')
+  expect(text).toContain('This week: 1 session · $3.50 · 2.0k tokens')
+  expect(text).toContain('All 90 days: 2 sessions · $3.50 (+1 without a recorded cost)')
+  expect(text).toContain('2026-10-10 (this session) · orders · $3.50 · 2.0k tokens · 1 push · 1 deploy · 2 tests · Orders')
+  expect(text).toContain('2026-09-01 · old · 20 tokens, no recorded cost · 1 create · P')
+  expect(historySummary([], NOW, 90)).toContain('No Boomi Companion sessions')
+})
+
+test("a failed test's execution is one item, not a second one for its run in Boomi, even once it's closed", () => {
+  const tested = act('test', 'failed', 'Orders Sync', NOW - 30, { componentId: ID, executionStatus: 'ERROR', executionId: 'execution-77' })
+  const runs = [{ executionId: 'execution-77', processName: 'Orders Sync', processId: ID, status: 'ERROR', at: '2026-10-12T11:59:00Z' }]
+  const state = dashboard([tested], { platform: { phase: 'ok', message: '', runs } })
+  expect(attention(state, NOW, 24 * HOUR).map(item => item.key)).toEqual([`step:${tested.id}`])
+  expect(attention(closeItem(state, `step:${tested.id}`), NOW, 24 * HOUR)).toEqual([])
 })

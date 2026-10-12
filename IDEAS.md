@@ -5,6 +5,8 @@ Ideas for mods we could build next, starting with Boomi and integration work. Th
 **Built from this page so far:**
 - The Companion guardrail, now the [boomi-standards](boomi-standards/README.md) mod.
 - The deployment watcher, folded into the [boomi-dashboard](boomi-dashboard/README.md) mod: a live summary of a Companion session that also polls the environment's runs and watches components for changes.
+- The first half of the execution debugger, in the dashboard: **Why?** reads a failed run's process log and **Ask Claude to fix** drafts the request. A session report (`/bc-dashboard report`) came with it.
+- Dashboard follow-ups: **Run again** for a failed test, a spend budget (`budgetUsd`), and the next step (deploy, then test) suggested in the prompt box.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
 
@@ -50,7 +52,7 @@ quadrantChart
 
 | Rank | Idea | Business value | Effort | Status |
 |---|---|---|---|---|
-| 1 | [Execution debugger](#execution-debugger) | High | Small to medium | **Next up** |
+| 1 | [Execution debugger](#execution-debugger) | High | Small to medium | Log reading built into the dashboard; per-step documents next |
 | 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Idea |
 | 3 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
 | 4 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
@@ -69,6 +71,7 @@ quadrantChart
 - **Idea:** A `/boomi trace <execution>` command and a `trace` tool Claude can call. They pull the execution's process log and each step's documents from the local runtime, then summarize where the documents stopped and why.
 - **Why a mod:** The runtime runs in the session's container, so the execution artifacts are on local disk. This extends the existing `logs` tool.
 - **Open question:** Which execution artifacts the runtime keeps on disk by default, and for how long.
+- **Built so far:** The dashboard's **Why?** button reads the process log through Companion's own script. What's left is each step's documents from a local runtime.
 
 ### Credential broker
 
@@ -120,6 +123,13 @@ quadrantChart
 
 - **Idea:** `/boomi ext show <environment>` and `/boomi ext set` use the same masking as `/boomi env`, so Claude can configure an environment without seeing its passwords.
 - **Open question:** How much Companion already covers.
+
+### Dashboard follow-ups
+
+Smaller additions to the [boomi-dashboard](boomi-dashboard/README.md) mod that build on what it already tracks:
+
+- **Guardrails at a glance.** Show what [boomi-standards](boomi-standards/README.md) blocked or flagged and the state of the [boomi-runtime](boomi-runtime/README.md) in the pane, so one place shows the whole session.
+- **Promotion diff and mock endpoints** would each show up as a section in the pane once they exist.
 
 ## Add an idea or claim one
 

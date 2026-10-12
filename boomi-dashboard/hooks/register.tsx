@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
-import type { Activity, Dashboard, Ledger, PaneTheme, Platform, Watched } from '../types'
+import type { Activity, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -19,6 +19,15 @@ import {
   attention,
   closeItem,
   closedCount,
+  diagnose,
+  fixPrompt,
+  report,
+  pastSessions,
+  pastLine,
+  historySummary,
+  historyTotals,
+  budgetOf,
+  nextStep,
   compareWatched,
   componentOf,
   componentPath,
@@ -91,8 +100,20 @@ const pickedTheme = atom({ plugin: 'boomi-dashboard', key: 'theme' } as const, n
 /** Whether the Process runs in Boomi section is folded to one line, for this session. */
 const isRunsCollapsed = atom({ plugin: 'boomi-dashboard', key: 'isRunsCollapsed' } as const, false)
 
+/** What each failed execution's log says, by execution ID, once someone asks Why?. */
+const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const, {} as Record<string, DiagnosisState>)
+
 /** The flamingo's animation frame, moved on while Claude works. */
 const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
+
+/** The budget's last warning, as a percent (0, 80 or 100), so each is toasted once. */
+const budgetAlert = atom({ plugin: 'boomi-dashboard', key: 'budgetAlert' } as const, 0)
+
+/** Past Companion sessions on this machine, from the last scan of the transcripts. */
+const history = atom({ plugin: 'boomi-dashboard', key: 'history' } as const, { phase: 'idle' } as HistoryState)
+
+/** The next step last suggested in the prompt box, so it isn't suggested after every turn. */
+const suggested = atom({ plugin: 'boomi-dashboard', key: 'suggested' } as const, '')
 
 type Settings = {
   envFile: string
@@ -103,6 +124,9 @@ type Settings = {
   isToasting: boolean
   isBanded: boolean
   hasFlamingo: boolean
+  budgetUsd: number
+  isSuggesting: boolean
+  historyDays: number
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -114,11 +138,16 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   isToasting: options.toasts !== false,
   isBanded: options.banner !== false,
   hasFlamingo: options.flamingo !== false,
+  budgetUsd: Math.max(0, Number(options.budgetUsd ?? 0) || 0),
+  isSuggesting: options.suggestions !== false,
+  historyDays: Math.max(1, Number(options.historyDays ?? 90) || 90),
 })
 
 const PANE = 'boomi-dashboard'
 const WATCH_KEY = 'watched'
+const SCRIPTS_KEY = 'scriptsDir'
 const THEME_KEY = 'theme'
+const HISTORY_KEY = 'history'
 
 /** How often the flamingo's frame moves on while Claude works. */
 const FLAMINGO_TICK_MS = 500
@@ -166,7 +195,19 @@ const snapshot = async ($: Engine) => {
 
 const refreshStatus = async ($: Engine, settings: Settings) => {
   const now = await $.clock.now()
-  $.ui.status(statusLine(await read($, dashboard), now, settings.windowMs, await usageOf($)))
+  const usage = { ...(await usageOf($)), budgetUsd: settings.budgetUsd }
+  $.ui.status(statusLine(await read($, dashboard), now, settings.windowMs, usage))
+  await warnBudget($, settings, usage.usd)
+}
+
+/** Toasts once when the session passes 80% of its budget, and once when it's spent. */
+const warnBudget = async ($: Engine, settings: Settings, usd: number | undefined) => {
+  const left = budgetOf(usd, settings.budgetUsd)
+  if (!left) return
+  const mark = left.percent >= 100 ? 100 : left.percent >= 80 ? 80 : 0
+  if (mark <= (await read($, budgetAlert))) return
+  await update($, budgetAlert, () => mark)
+  toast($, settings, `${STATUS[left.level].icon} Boomi session ${left.text}`)
 }
 
 const record = ($: Engine, change: (list: Activity[]) => Activity[]) =>
@@ -254,9 +295,11 @@ const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun
   const started: Activity[] = []
   for (const run of runs) {
     const found = await subjectOf($, settings, run, current)
-    started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found })
+    const args = run.kind === 'test' && run.args ? { args: run.args } : {}
+    started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found, ...args })
   }
   if (!current.activity.some(a => a.kind !== 'other')) openPane($)
+  void rememberScripts($, runs)
   await record($, list => [...list, ...started])
   void refreshStatus($, settings)
   return started
@@ -516,6 +559,232 @@ const seen = async ($: Engine): Promise<string> => {
   return `Marked as seen: ${failedRuns.length} failed run${failedRuns.length === 1 ? '' : 's'} and ${changed} watched change${changed === 1 ? '' : 's'}. They leave Needs attention; the runs stay listed under Process runs in Boomi.`
 }
 
+// --- Why a run failed ------------------------------------------------------------
+
+/** Notes where Companion's scripts are, from a command that ran one by its path. */
+const rememberScripts = async ($: Engine, runs: readonly ScriptRun[]) => {
+  const dir = runs.find(run => run.scriptsDir)?.scriptsDir
+  if (!dir) return
+  const absolute = dir.startsWith('/') ? dir : `${await $.session.cwd()}/${dir}`
+  await $.store.set(SCRIPTS_KEY, absolute).catch(() => undefined)
+}
+
+/**
+ * Companion's scripts folder: the one Claude last ran a script from, else the
+ * newest bc-integration in the plugin cache. Undefined when neither is there.
+ */
+const findScripts = async ($: Engine): Promise<string | undefined> => {
+  const known = await $.store.get(SCRIPTS_KEY).catch(() => undefined)
+  if (typeof known === 'string' && (await $.fs.exists(`${known}/boomi-execution-query.sh`).catch(() => false))) return known
+  const found = await $.process
+    .run(['bash', '-c', 'ls -d "$HOME"/.claude/plugins/cache/*/bc-integration/*/skills/boomi-integration/scripts 2>/dev/null | sort -V | tail -1'], { timeoutMs: 10_000 })
+    .catch(() => undefined)
+  const dir = found?.stdout.trim()
+  return dir ? dir : undefined
+}
+
+const setDiagnosis = ($: Engine, executionId: string, state: DiagnosisState) =>
+  update($, diagnoses, all => ({ ...all, [executionId]: state }))
+
+/**
+ * Reads a failed execution's log with Companion's own boomi-execution-query.sh
+ * --logs, run in the workspace so it finds Companion's .env, and keeps what the
+ * log says went wrong. The API token never reaches the result: the script
+ * doesn't print it, and any copy of it is masked anyway.
+ */
+const explain = async ($: Engine, settings: Settings, executionId: string): Promise<DiagnosisState> => {
+  await setDiagnosis($, executionId, { phase: 'loading' })
+  let state: DiagnosisState
+  try {
+    const scripts = await findScripts($)
+    if (!scripts) {
+      state = { phase: 'error', error: "Couldn't find Boomi Companion's scripts. Run any Companion script once, then try again." }
+    } else {
+      const ran = await $.process.run(['bash', `${scripts}/boomi-execution-query.sh`, '--execution-id', executionId, '--logs'], {
+        cwd: await $.session.cwd(),
+        timeoutMs: 240_000,
+      })
+      const loaded = await loadCredentials($, settings).catch(() => 'unavailable')
+      const mask = (text: string) => (typeof loaded === 'string' || !loaded.apiToken ? text : text.split(loaded.apiToken).join('‹redacted›'))
+      if (ran.exitCode !== 0) {
+        const why = `${ran.stderr}\n${ran.stdout}`.split(/\r?\n/).find(line => /^ERROR:/.test(line.trim()))
+        state = { phase: 'error', error: mask(why?.trim() ?? `The log script exited with ${ran.exitCode}.`) }
+      } else {
+        const found = diagnose(mask(ran.stdout))
+        state = { phase: 'ready', lines: found.lines, severe: found.severe, warnings: found.warnings }
+      }
+    }
+  } catch (error) {
+    state = { phase: 'error', error: messageOf(error) }
+  }
+  await setDiagnosis($, executionId, state)
+  return state
+}
+
+/** Puts a fix request for a failed execution in the prompt box, after whatever is typed there. */
+const askToFix = async ($: Engine, title: string, executionId: string) => {
+  const state = (await read($, diagnoses))[executionId]
+  if (state?.phase !== 'ready') return
+  const draft = await $.prompt.read().catch(() => ({ text: '', cursor: 0 }))
+  const text = fixPrompt(title, executionId, { lines: state.lines ?? [], severe: state.severe ?? 0, warnings: state.warnings ?? 0 })
+  await $.prompt.fill({ text: draft.text.trim() ? `\n${text}` : text, mode: draft.text.trim() ? 'append' : 'replace' }).catch(() => undefined)
+}
+
+/** /bc-dashboard why <number>: reads the log of a Needs attention item, by its number. */
+const whyByNumber = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const needs = attention(await read($, dashboard), await $.clock.now(), settings.windowMs)
+  const item = needs[Number(target) - 1]
+  if (!item) return `Usage: /bc-dashboard why <1-${needs.length}>, a number from /bc-dashboard text.`
+  if (!item.executionId) return `${item.title} has no execution log to read.`
+  const state = await explain($, settings, item.executionId)
+  if (state.phase !== 'ready') return `Couldn't read the log of ${item.executionId}: ${state.error}`
+  return [`${item.title} (execution ${item.executionId}):`, ...(state.lines ?? []).map(line => `  ${line}`)].join('\n')
+}
+
+/**
+ * Runs a failed test again with the same arguments, through Companion's own
+ * script, and records it as a new step: a pass clears the failure.
+ */
+const rerun = async ($: Engine, settings: Settings, stepId: number): Promise<string> => {
+  const current = await read($, dashboard)
+  const step = current.activity.find(a => a.id === stepId)
+  if (!step?.args) return 'That test has no command to repeat.'
+  if (current.activity.some(a => a.kind === 'test' && a.outcome === 'running' && a.componentId === step.componentId)) {
+    return `A test of ${step.subject} is already running.`
+  }
+  const scripts = await findScripts($)
+  if (!scripts) return "Couldn't find Boomi Companion's scripts. Run any Companion script once, then try again."
+  const run: ScriptRun = { kind: 'test', args: step.args }
+  if (step.componentId) run.processId = step.componentId
+  const started = await noteStart($, settings, [run])
+  let ran: Ran
+  try {
+    const result = await $.process.run(['bash', `${scripts}/boomi-test-execute.sh`, ...step.args], {
+      cwd: await $.session.cwd(),
+      timeoutMs: 600_000,
+    })
+    ran = { text: `${result.stdout}\n${result.stderr}`, isError: result.exitCode !== 0 }
+  } catch (error) {
+    ran = { text: `ERROR: ${messageOf(error)}`, isError: true }
+  }
+  await noteEnd($, settings, started, ran)
+  const done = (await read($, dashboard)).activity.find(a => a.id === started[0]?.id)
+  return done ? `${STATUS[levelOf(done)].icon} ${describe(done)}` : 'Ran the test again.'
+}
+
+/** /bc-dashboard rerun <number>: runs a failed test in Needs attention again. */
+const rerunByNumber = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const needs = attention(await read($, dashboard), await $.clock.now(), settings.windowMs)
+  const item = needs[Number(target) - 1]
+  if (!item) return `Usage: /bc-dashboard rerun <1-${needs.length}>, a number from /bc-dashboard text.`
+  if (item.rerunId === undefined) return `${item.title} isn't a test Claude ran, so there's nothing to run again.`
+  return rerun($, settings, item.rerunId)
+}
+
+/** After Claude's turn, suggests the step a process still needs, once for each step. */
+const suggestNext = async ($: Engine, settings: Settings) => {
+  if (!settings.isSuggesting) return
+  const text = nextStep((await read($, dashboard)).activity)
+  if (!text || text === (await read($, suggested))) return
+  await update($, suggested, () => text)
+  await $.prompt.suggest({ text }).catch(() => undefined)
+}
+
+// --- Past sessions -----------------------------------------------------------------
+
+/**
+ * Reads the transcripts on this machine for past Companion sessions. A
+ * transcript can be far over the 4 MiB a mod may read at once, so a script
+ * reads them a line at a time and prints only each session's totals.
+ */
+const PERL_MISSING =
+  'History needs Perl. macOS and most Linux have it; on Windows it comes with Git for Windows, in Git Bash. Install it, then try again.'
+
+/**
+ * Runs the scan script with Perl: first through bash, where Git for Windows
+ * keeps its Perl on Windows (and where Companion's own scripts run), then
+ * Perl on its own. Undefined when neither has Perl.
+ */
+const runScan = async ($: Engine, args: string[]) => {
+  // Forward slashes: Git Bash's Perl reads C:/Users/... but not every backslash path.
+  const script = `${$.plugin.root}/scripts/scan-sessions.pl`.replace(/\\/g, '/')
+  const attempts = [
+    ['bash', '-c', 'exec perl "$@"', 'scan-sessions', script, ...args],
+    ['perl', script, ...args],
+  ]
+  for (const argv of attempts) {
+    try {
+      const ran = await $.process.run(argv, { timeoutMs: 300_000 })
+      // 127: bash is there, Perl isn't.
+      if (ran.exitCode !== 127) return ran
+    } catch (error) {
+      if (!/ENOENT|not found/i.test(messageOf(error))) throw error
+    }
+  }
+  return undefined
+}
+
+/**
+ * Reads the transcripts on this machine for past Companion sessions. A
+ * transcript can be far over the 4 MiB a mod may read at once, so a script
+ * reads them a line at a time and prints only each session's totals.
+ */
+const scanHistory = async ($: Engine, settings: Settings): Promise<HistoryState> => {
+  await update($, history, (h): HistoryState => ({ ...h, phase: 'loading', error: undefined }))
+  const now = await $.clock.now()
+  let state: HistoryState
+  try {
+    const ran = await runScan($, ['--since', String(now - settings.historyDays * 86_400_000)])
+    if (!ran) {
+      state = { phase: 'error', error: PERL_MISSING }
+    } else if (ran.exitCode !== 0) {
+      const why = ran.stderr.split(/\r?\n/).find(line => line.trim()) ?? `exit ${ran.exitCode}`
+      state = { phase: 'error', error: `The transcript scan failed: ${why.slice(0, 200)}` }
+    } else if (ran.isStdoutTruncated) {
+      state = { phase: 'error', error: 'Too many sessions to read at once. Lower the historyDays setting and try again.' }
+    } else {
+      const scan = JSON.parse(ran.stdout) as { sessions?: []; scanned?: number }
+      state = { phase: 'ready', sessions: pastSessions(scan), scannedAt: now, scanned: scan.scanned }
+      await $.store.set(HISTORY_KEY, { sessions: state.sessions, scannedAt: now, scanned: scan.scanned }).catch(() => undefined)
+    }
+  } catch (error) {
+    state = { phase: 'error', error: messageOf(error) }
+  }
+  // A failed scan keeps the sessions from the last one that worked.
+  await update($, history, h => (state.phase === 'error' ? { ...h, ...state } : state))
+  return state
+}
+
+/** /bc-dashboard history: scans now, then lists the past sessions with their cost. */
+const historyCommand = async ($: Engine, settings: Settings): Promise<string> => {
+  const state = await scanHistory($, settings)
+  if (state.phase === 'error') return state.error ?? 'The transcript scan failed.'
+  return historySummary(state.sessions ?? [], await $.clock.now(), settings.historyDays, await $.session.id().catch(() => undefined))
+}
+
+// --- The session report ------------------------------------------------------------
+
+const reportNow = async ($: Engine, settings: Settings) => {
+  const now = await $.clock.now()
+  const footer = await footerOf($)
+  return report(
+    await read($, dashboard),
+    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await usageOf($) },
+    now,
+    settings.windowMs,
+  )
+}
+
+/** /bc-dashboard report [save]: the report as text, and with save, as a file in the workspace too. */
+const reportCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const text = await reportNow($, settings)
+  if (target !== 'save') return text
+  const stamp = new Date(await $.clock.now()).toISOString().slice(0, 16).replace(/[-:T]/g, '')
+  const path = `${await $.session.cwd()}/boomi-session-report-${stamp}.md`
+  await $.fs.write(path, `${text}\n`)
+  return `Saved to ${path}.\n\n${text}`
+}
+
 /** Closes one Needs attention item by its key, and keeps that for later sessions. */
 const close = async ($: Engine, key: string) => {
   await update($, dashboard, c => closeItem(c, key))
@@ -568,13 +837,17 @@ const USAGE = [
   '/bc-dashboard unwatch <id>    stop watching it',
   '/bc-dashboard close <n|all>   close a Needs attention item by its number, or all of them',
   '/bc-dashboard reopen          bring closed items back',
+  '/bc-dashboard why <n>         read the log of a failed run or test and show what failed',
+  '/bc-dashboard rerun <n>       run a failed test again, the same way Claude ran it',
+  '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
+  '/bc-dashboard history         past Companion sessions on this machine and what each cost',
   '/bc-dashboard seen            mark failed runs and watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
 ].join('\n')
 
 const summaryNow = async ($: Engine, settings: Settings) =>
-  summary(await read($, dashboard), await usageOf($), await $.clock.now(), settings.windowMs)
+  summary(await read($, dashboard), { ...(await usageOf($)), budgetUsd: settings.budgetUsd }, await $.clock.now(), settings.windowMs)
 
 const runCommand = async ($: Engine, settings: Settings, args: string): Promise<string> => {
   const [action = 'status', ...rest] = args.trim().split(/\s+/).filter(Boolean)
@@ -603,6 +876,14 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return seen($)
     case 'close':
       return closeByNumber($, settings, target)
+    case 'why':
+      return whyByNumber($, settings, target)
+    case 'rerun':
+      return rerunByNumber($, settings, target)
+    case 'report':
+      return reportCommand($, settings, target)
+    case 'history':
+      return historyCommand($, settings)
     case 'reopen':
       return reopen($)
     case 'theme':
@@ -690,12 +971,22 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
+      argumentHint: 'text | poll | why <n> | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
     })
     await $.tool.register({
       name: 'summary',
       description:
         "The Boomi Companion session at a glance: what failed and needs attention (with what to do), each component's stage (edited, saved to Boomi with its version, deployed, tested), recent Companion activity, the live environment's recent runs, watched components and the session's cost. Use it to report progress or to find what to fix next.",
+    })
+    await $.tool.register({
+      name: 'report',
+      description:
+        "The Boomi Companion session as a Markdown report: each component and where it stands, deployments and tests, what needs attention and what was closed, the environment's runs, and the session's cost and tokens. Use it for a PR description, a ticket or a hand-off.",
+    })
+    await $.tool.register({
+      name: 'history',
+      description:
+        "Past Boomi Companion sessions on this machine, from Claude Code's transcripts: each session's date, project, Companion work (pushes, deploys, tests), components and cost, with totals for the week and the month. Use it when asked what earlier Companion work cost.",
     })
     await $.tool.register({
       name: 'watch',
@@ -713,6 +1004,11 @@ export const register: Register = (on, options) => {
     if (isTheme(saved)) await update($, pickedTheme, () => saved)
 
     await restoreActivity($, settings)
+
+    const scanned = (await $.store.get(HISTORY_KEY)) as { sessions?: PastSession[]; scannedAt?: number; scanned?: number } | undefined
+    if (Array.isArray(scanned?.sessions)) {
+      await update($, history, (): HistoryState => ({ phase: 'ready', sessions: scanned.sessions, scannedAt: scanned.scannedAt, scanned: scanned.scanned }))
+    }
 
     const ids = await $.store.get(WATCH_KEY)
     if (Array.isArray(ids)) {
@@ -763,6 +1059,14 @@ export const register: Register = (on, options) => {
     result: await summaryNow($, settings).catch(error => `The dashboard couldn't build its summary: ${messageOf(error)}`),
   }))
 
+  on('tool.call', { tool: 'mcp__boomi-dashboard__history' }, async $ => ({
+    result: await historyCommand($, settings).catch(error => `The dashboard couldn't read past sessions: ${messageOf(error)}`),
+  }))
+
+  on('tool.call', { tool: 'mcp__boomi-dashboard__report' }, async $ => ({
+    result: await reportNow($, settings).catch(error => `The dashboard couldn't build its report: ${messageOf(error)}`),
+  }))
+
   on('tool.call', { tool: 'mcp__boomi-dashboard__watch' }, async ($, e) => ({
     result: await watch($, settings, String((e as { target?: unknown }).target ?? '').trim()).catch(
       error => `The dashboard couldn't watch that component: ${messageOf(error)}`,
@@ -808,6 +1112,7 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     await update($, isWorking, () => false).catch(() => undefined)
     void refreshStatus($, settings)
+    if (e.reason === 'answer') void suggestNext($, settings)
     return done
   })
 
@@ -864,6 +1169,8 @@ export const register: Register = (on, options) => {
     const { Box, Button, Link, Text } = $.ui.resolve(e)
     const themeNow = await themeOf($, settings)
     const collapsed = await read($, isRunsCollapsed)
+    const past = await read($, history)
+    const sessionId = await $.session.id().catch(() => undefined)
     const footer = await footerOf($)
     const p = PALETTES[themeNow]
     const current = await read($, dashboard)
@@ -874,6 +1181,7 @@ export const register: Register = (on, options) => {
     const hours = Math.round(settings.windowMs / 3_600_000)
     const needs = attention(current, now, settings.windowMs)
     const closedItems = closedCount(current, now, settings.windowMs)
+    const whys = await read($, diagnoses)
     const rows = components(current.activity)
     const runs = recentRuns(current.platform.runs, now, settings.windowMs)
     const feed = current.activity.slice(-6).reverse()
@@ -885,6 +1193,7 @@ export const register: Register = (on, options) => {
       .map(a => all.get(a.id)?.tokens ?? 0)
     const last = feed[0] && all.get(feed[0].id)
 
+    const budget = budgetOf(usage.usd, settings.budgetUsd)
     // Every Text carries the pane's colors, so it reads the same on any terminal.
     const t = (text: string, style: { color?: string; bold?: boolean; bg?: string } = {}) => (
       <Text color={style.color ?? p.text} backgroundColor={style.bg ?? p.bg} bold={style.bold}>
@@ -958,7 +1267,12 @@ export const register: Register = (on, options) => {
                 last?.tokens ? `last step ${formatTokens(last.tokens)}` : undefined,
                 usage.cached ? `+${formatTokens(usage.cached)} cached` : undefined,
               )}
-              {gauge('SPEND', formatCost(usage.usd) ?? '—', last?.usd ? `last step ${formatCost(last.usd)}` : undefined)}
+              {gauge(
+                'SPEND',
+                formatCost(usage.usd) ?? '—',
+                last?.usd ? `last step ${formatCost(last.usd)}` : undefined,
+                budget ? `${STATUS[budget.level].icon} ${budget.percent >= 100 ? 'budget spent' : `${Math.round(budget.percent)}% of ${formatCost(settings.budgetUsd)}`}` : undefined,
+              )}
               {gauge(
                 'CONTEXT',
                 usage.contextPercent === undefined ? '—' : `${meter(usage.contextPercent, 8)} ${Math.round(usage.contextPercent)}%`,
@@ -994,20 +1308,37 @@ export const register: Register = (on, options) => {
 
         {heading('Needs attention')}
         {needs.length === 0 && line('healthy', 'All clear.')}
-        {needs.map((n, i) => (
-          <Box flexDirection="column">
-            <Box>
-              <Box flexShrink={0}>
-                <Button key={`close-${i}`} label="☐" onPress={() => close($, n.key)} />
-                {t(' ')}
+        {needs.map((n, i) => {
+          const why = n.executionId ? whys[n.executionId] : undefined
+          return (
+            <Box flexDirection="column">
+              <Box>
+                <Box flexShrink={0}>
+                  <Button key={`close-${i}`} label="☐" onPress={() => close($, n.key)} />
+                  {t(' ')}
+                </Box>
+                <Box flexGrow={1} flexShrink={1}>
+                  {line(n.level, n.title, ago(n.at, now))}
+                </Box>
               </Box>
-              <Box flexGrow={1} flexShrink={1}>
-                {line(n.level, n.title, ago(n.at, now))}
-              </Box>
+              {!why && t(`      ${n.hint}`, { color: p.muted })}
+              {why?.phase === 'loading' && t('      Reading the execution log…', { color: p.muted })}
+              {why?.phase === 'error' && t(`      ${why.error}`, { color: p.muted })}
+              {why?.phase === 'ready' && t(`      The log (${why.severe ?? 0} severe, ${why.warnings ?? 0} warnings):`, { color: p.muted })}
+              {why?.phase === 'ready' && (why.lines ?? []).map(text => t(`        ${text}`))}
+              {(n.executionId || n.rerunId !== undefined) && (
+                <Box>
+                  {t('      ')}
+                  {n.executionId && why?.phase !== 'ready' && why?.phase !== 'loading' && (
+                    <Button key={`why-${i}`} label="Why?" onPress={() => void explain($, settings, n.executionId!)} />
+                  )}
+                  {why?.phase === 'ready' && <Button key={`fix-${i}`} label="Ask Claude to fix" onPress={() => askToFix($, n.title, n.executionId!)} />}
+                  {n.rerunId !== undefined && <Button key={`rerun-${i}`} label="Run again" onPress={() => void rerun($, settings, n.rerunId!)} />}
+                </Box>
+              )}
             </Box>
-            {t(`      ${n.hint}`, { color: p.muted })}
-          </Box>
-        ))}
+          )
+        })}
         {closedItems > 0 && (
           <Box>
             {t(`☑ ${closedItems} closed  `, { color: p.muted })}
@@ -1065,6 +1396,38 @@ export const register: Register = (on, options) => {
         {current.platform.phase === 'ok' && collapsed && line(runsSummary(runs, hours).level, runsSummary(runs, hours).text)}
         {current.platform.phase === 'ok' && !collapsed && runs.length === 0 && line('healthy', `No process ran in the last ${hours}h.`)}
         {current.platform.phase === 'ok' && !collapsed && runs.slice(0, 6).map(run => line(runLevel(run), runText(run, now)))}
+
+        <Box marginTop={1} justifyContent="space-between">
+          <Box>
+            {t('◇ ', { color: p.rule, bold: true })}
+            {t('PAST COMPANION SESSIONS', { color: p.heading, bold: true })}
+            {past.scannedAt !== undefined && t(`  scanned ${ago(past.scannedAt, now)}`, { color: p.muted })}
+          </Box>
+          {past.phase !== 'loading' && (
+            <Button key="history-scan" label={past.phase === 'idle' ? 'Scan' : 'Rescan'} onPress={() => void scanHistory($, settings)} />
+          )}
+        </Box>
+        {past.phase === 'idle' && note(`What earlier Companion sessions on this machine cost, from Claude Code's transcripts. Scan reads the last ${settings.historyDays} days.`)}
+        {past.phase === 'loading' && note('Reading the transcripts…')}
+        {past.phase === 'error' && line('warning', past.error ?? 'The transcript scan failed.')}
+        {past.sessions && past.sessions.length === 0 && note(`No Companion sessions in the last ${settings.historyDays} days.`)}
+        {past.sessions && past.sessions.length > 0 && (() => {
+          const week = historyTotals(past.sessions, now, 7 * 86_400_000)
+          const month = historyTotals(past.sessions, now, 30 * 86_400_000)
+          const total = (label: string, x: typeof week) =>
+            `${label} ${formatCost(x.usd)}${x.unpriced ? ` +${x.unpriced} unpriced` : ''} · ${x.sessions} session${x.sessions === 1 ? '' : 's'}`
+          return (
+            <Box flexDirection="column">
+              {t(`${total('This week', week)}   ${total('30 days', month)}`, { color: p.accent, bold: true })}
+              {past.sessions.slice(0, 5).map(s => (
+                <Text backgroundColor={p.bg} wrap="truncate-end">
+                  {t(`  ${pastLine(s, sessionId)}`)}
+                </Text>
+              ))}
+              {past.sessions.length > 5 && note(`  …and ${past.sessions.length - 5} more: /bc-dashboard history lists them all.`)}
+            </Box>
+          )
+        })()}
 
         {current.watched.length > 0 && heading('Watched components')}
         {current.watched.length > 0 && note('Flagged when someone other than Companion changes one in Boomi.')}

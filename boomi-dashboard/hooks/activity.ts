@@ -3,7 +3,7 @@
 // attention, the recent feed and the live environment. Plain functions:
 // nothing here touches the engine, so the tests call them directly.
 
-import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, Run, TokenSplit, Watched } from '../types'
+import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, PastSession, Run, TokenSplit, Watched } from '../types'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
@@ -79,6 +79,10 @@ export type ScriptRun = {
   deploymentId?: string
   /** For `other`: the script's name without `boomi-` and `.sh`. */
   script?: string
+  /** The folder the script ran from, when the command names it: where Companion's scripts are. */
+  scriptsDir?: string
+  /** A test's arguments, so it can be run again. */
+  args?: string[]
 }
 
 const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefined => {
@@ -155,7 +159,9 @@ export const scriptRuns = (command: string): ScriptRun[] => {
     }
     if (args.some(arg => ['-h', '--help', '--test-connection', '--list-environments'].includes(arg))) continue
     const run: ScriptRun = { kind: found.kind }
+    if (token.includes('/')) run.scriptsDir = joinPath(dir, token).replace(/\/[^/]+$/, '')
     if (found.script) run.script = found.script
+    if (found.kind === 'test') run.args = args
     for (let j = 0; j < args.length; j++) {
       const arg = args[j]!
       const value = args[j + 1]
@@ -601,7 +607,16 @@ export const stages = (row: ComponentRow, runs: readonly Run[] = []): Stage[] =>
  * a failed step, `run:<execution id>` a failed run, `watch:<component id>` a
  * watched component someone else changed.
  */
-export type Attention = { key: string; level: Level; title: string; hint: string; at: number }
+export type Attention = {
+  key: string
+  level: Level
+  title: string
+  hint: string
+  at: number
+  executionId?: string
+  /** A failed test's step, when it can be run again. */
+  rerunId?: number
+}
 
 /** Runs in the window, newest first: a run from last month isn't news. */
 export const recentRuns = (runs: readonly Run[], now: number, windowMs: number): Run[] =>
@@ -621,23 +636,35 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
         a.outcome === 'blocked'
           ? a.detail
           : a.kind === 'test'
-            ? `Ask Claude to read the execution log${a.executionId ? ` (${a.executionId.replace(/^execution-/, '').slice(0, 8)}…)` : ''} and fix the process.`
+            ? `Execution ${a.executionId ? `${a.executionId.replace(/^execution-/, '').slice(0, 8)}…` : 'log'}: press Why? to read what failed.`
             : a.detail
-      items.push({ key: `step:${a.id}`, level: levelOf(a), title: describe(a), hint, at: when(a) })
+      items.push({
+        key: `step:${a.id}`,
+        level: levelOf(a),
+        title: describe(a),
+        hint,
+        at: when(a),
+        executionId: a.kind === 'test' ? a.executionId : undefined,
+        rerunId: a.kind === 'test' && a.args ? a.id : undefined,
+      })
     }
   }
   const seenRuns = new Set(dashboard.seenRuns ?? [])
+  const testRuns = new Set(dashboard.activity.filter(a => a.kind === 'test' && a.executionId).map(a => a.executionId!))
   const rows = components(dashboard.activity)
   for (const run of recentRuns(dashboard.platform.runs, now, windowMs)) {
     if (!isFailedStatus(run.status) || seenRuns.has(run.executionId)) continue
+    // A failed test Claude ran is the same execution: its step says so, or was closed.
+    if (testRuns.has(run.executionId)) continue
     const at = Date.parse(run.at)
     const row = rows.find(r => runsOf(r, [run]).length > 0)
     const noun = run.executionType === 'exec_listener' ? 'Listener run' : 'Run'
     items.push({
       key: `run:${run.executionId}`,
+      executionId: run.executionId,
       level: 'critical',
       title: row ? `${noun} of ${row.name} ended ${run.status}` : `${run.processName} ended ${run.status} in the environment`,
-      hint: `Execution ${run.executionId.replace(/^execution-/, '').slice(0, 8)}…${row ? ', a component from this session' : ''}. Ask Claude to read its log, or close this if the failure was expected.`,
+      hint: `Execution ${run.executionId.replace(/^execution-/, '').slice(0, 8)}…${row ? ', a component from this session' : ''}. Press Why? to read its log, or close this if the failure was expected.`,
       at: Number.isNaN(at) ? now : at,
     })
   }
@@ -832,11 +859,43 @@ export const statusLine = (dashboard: Dashboard, now: number, windowMs: number, 
   if (parts.length === 0) parts.push('waiting for Companion')
   const spent = [usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined, formatCost(usage.usd)].filter(Boolean)
   if (spent.length > 0) parts.push(`${spent.join(' · ')} this session`)
+  const left = budgetOf(usage.usd, usage.budgetUsd)
+  if (left && left.level !== 'healthy') parts.push(`${STATUS[left.level].icon} ${left.text}`)
   return parts.join(' · ')
+}
+
+/**
+ * Where the session's spend stands against its budget: warning from 80%,
+ * critical once it's spent. Undefined without a budget or a cost.
+ */
+export const budgetOf = (usd: number | undefined, budgetUsd: number | undefined): { level: Level; percent: number; text: string } | undefined => {
+  if (!budgetUsd || budgetUsd <= 0 || usd === undefined) return undefined
+  const percent = (usd / budgetUsd) * 100
+  const level: Level = percent >= 100 ? 'critical' : percent >= 80 ? 'warning' : 'healthy'
+  const of = `of the ${formatCost(budgetUsd)} budget`
+  return { level, percent, text: percent >= 100 ? `budget spent: ${formatCost(usd)} ${of}` : `${Math.round(percent)}% ${of}` }
+}
+
+/**
+ * The step a process still needs after this session's work: deploy what was
+ * saved, test what was deployed. Undefined while a step runs, or when the
+ * latest process is saved, deployed and tested, or failed (Why? covers that).
+ */
+export const nextStep = (activity: readonly Activity[]): string | undefined => {
+  const fresh = activity.filter(a => !a.isRestored)
+  if (fresh.some(a => a.outcome === 'running')) return undefined
+  const row = components(fresh).find(r => r.type === 'process' && (r.saved || r.deployed))
+  if (!row) return undefined
+  const after = (a: Activity | undefined, b: Activity | undefined) => !!a && (!b || a.startedAt > b.startedAt)
+  if (row.saved?.outcome === 'ok' && row.saved.kind !== 'pull' && after(row.saved, row.deployed)) return `Deploy ${row.name} and test it`
+  if (row.deployed?.outcome === 'ok' && row.deployed.kind === 'deploy' && after(row.deployed, row.tested)) return `Test ${row.name}`
+  return undefined
 }
 
 export type Usage = {
   usd?: number
+  /** The session's spend budget, from the budgetUsd setting. */
+  budgetUsd?: number
   contextPercent?: number
   /** New tokens: input, output and cache writes (newTokens). */
   tokens?: number
@@ -903,7 +962,9 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
 
   const cost = formatCost(usage.usd)
   const context = usage.contextPercent === undefined ? undefined : `context ${Math.round(usage.contextPercent)}% full`
-  if (cost || context) lines.push('', `Session: ${[cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
+  const budget = budgetOf(usage.usd, usage.budgetUsd)
+  const spentOf = budget ? `${STATUS[budget.level].icon} ${budget.text}` : undefined
+  if (cost || context) lines.push('', `Session: ${[cost && `${cost} so far`, spentOf, context].filter(Boolean).join(' · ')}`)
   if (usage.split) lines.push(`Tokens: ${usage.split}`)
   for (const line of usage.modelSplits ?? []) lines.push(`  ${line}`)
   if (usage.model && !usage.modelSplits?.length) lines.push(`Model: ${usage.model}`)
@@ -1088,4 +1149,239 @@ export const pixelCells = (pixels: readonly string[], colors: Record<string, str
     rows.push(row)
   }
   return rows
+}
+
+// --- Why a run failed ------------------------------------------------------------
+
+/** What an execution's log says went wrong. */
+export type Diagnosis = {
+  /** The log's SEVERE lines (else its last few), timestamps left off, newest last. */
+  lines: string[]
+  /** How many SEVERE and WARNING lines the log has. */
+  severe: number
+  warnings: number
+}
+
+const LEVEL = /(?:^|\s)(SEVERE|WARNING|INFO|FINE)(?:\s|$)/
+
+/**
+ * Reads a Boomi process log as boomi-execution-query.sh --logs prints it: the
+ * SEVERE lines say what failed and in which shape. Without any, the last lines
+ * are the best clue. Each line loses its timestamp and is cut at 200 characters.
+ */
+export const diagnose = (log: string): Diagnosis => {
+  const lines = log.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const strip = (line: string) => {
+    const at = line.search(LEVEL)
+    // A log's fields are tab-separated; a tab draws unevenly in a pane, so they're joined with a dot.
+    const text = (at >= 0 ? line.slice(at).trim() : line).replace(/\s*\t+\s*/g, ' · ')
+    return text.length > 200 ? `${text.slice(0, 199)}…` : text
+  }
+  const severe = lines.filter(line => LEVEL.exec(line)?.[1] === 'SEVERE')
+  const warnings = lines.filter(line => LEVEL.exec(line)?.[1] === 'WARNING').length
+  const errors = lines.filter(line => /^ERROR:/.test(line))
+  const picked = severe.length > 0 ? severe.slice(-5) : errors.length > 0 ? errors : lines.slice(-5)
+  return { lines: picked.map(strip), severe: severe.length, warnings }
+}
+
+/** The request the "Ask Claude to fix" button puts in the prompt box. */
+export const fixPrompt = (title: string, executionId: string, diagnosis: Diagnosis): string =>
+  [
+    `${title} (execution ${executionId}). Its process log says:`,
+    ...diagnosis.lines.map(line => `  ${line}`),
+    'Find the cause in the process and fix it, then push, redeploy and test it again.',
+  ].join('\n')
+
+// --- The session report ------------------------------------------------------------
+
+export type ReportFacts = {
+  session: string
+  date: string
+  repo?: string
+  usage: Usage
+}
+
+const cell = (text: string) => text.replace(/\|/g, '\\|')
+
+/**
+ * The session as Markdown, for a PR, a ticket or a hand-off: what was built and
+ * where it stands, what was deployed and tested, what failed and was closed,
+ * the environment's runs, and the spend.
+ */
+export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, windowMs: number): string => {
+  const hours = Math.round(windowMs / 3_600_000)
+  const all = spends(dashboard.activity)
+  const runs = recentRuns(dashboard.platform.runs, now, windowMs)
+  const rows = components(dashboard.activity)
+  const needs = attention(dashboard, now, windowMs)
+  const closed = closedCount(dashboard, now, windowMs)
+  const u = facts.usage
+  const lines: string[] = [
+    '# Boomi Companion session report',
+    '',
+    [
+      `Session ${facts.session}`,
+      facts.date,
+      u.startedAt === undefined ? undefined : duration(now - u.startedAt),
+      u.model,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  ]
+  if (facts.repo) lines.push(`Repository: ${facts.repo}`)
+
+  lines.push('', `## Components (${rows.length})`, '')
+  if (rows.length === 0) lines.push('None this session.')
+  else {
+    lines.push('| Component | Type | Where it stands | Tokens | Cost |', '|---|---|---|---|---|')
+    for (const row of rows) {
+      const spent = spendOf(row.ids, all)
+      const where = stages(row, runs).map(s => `${STATUS[s.level].icon} ${s.text}`).join(' · ')
+      lines.push(
+        `| ${cell(row.name)} | ${cell(friendlyType(row.type) ?? '')} | ${cell(where)} | ${spent.tokens ? formatTokens(spent.tokens) : ''} | ${formatCost(spent.usd) ?? ''} |`,
+      )
+    }
+  }
+
+  const shipped = dashboard.activity.filter(a => (a.kind === 'deploy' || a.kind === 'undeploy' || a.kind === 'test') && a.outcome !== 'running')
+  lines.push('', '## Deployments and tests', '')
+  if (shipped.length === 0) lines.push('None this session.')
+  for (const a of shipped) lines.push(`- ${STATUS[levelOf(a)].icon} ${describe(a)}${a.executionId ? ` (execution ${a.executionId})` : ''}`)
+
+  lines.push('', '## Needs attention', '')
+  if (needs.length === 0) lines.push('Nothing open.')
+  for (const n of needs) lines.push(`- ${STATUS[n.level].icon} ${n.title}`)
+  if (closed > 0) lines.push(`- ☑ ${closed} closed as expected or handled`)
+
+  lines.push('', `## Process runs in Boomi, last ${hours}h`, '')
+  if (dashboard.platform.phase !== 'ok') lines.push(dashboard.platform.message)
+  else lines.push(runsSummary(runs, hours).text)
+
+  lines.push('', '## Spend', '')
+  if (u.usd !== undefined) lines.push(`- Cost: ${formatCost(u.usd)}`)
+  if (u.split) lines.push(`- Tokens: ${u.split}`)
+  for (const line of u.modelSplits ?? []) lines.push(`  - ${line}`)
+  return lines.join('\n')
+}
+
+// --- Past sessions ---------------------------------------------------------------
+
+/** One session as scan-sessions.pl prints it. */
+export type ScannedSession = {
+  id: string
+  project?: string
+  startedAt?: string
+  endedAt?: string
+  costUsd?: number | null
+  models?: Record<string, { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }>
+  commands?: string[]
+}
+
+const fileName = (path: string) => (path.split('/').pop() ?? path).replace(/\.xml$/, '')
+
+/**
+ * The scan's sessions that ran a Companion script, newest first. A command
+ * that only names a script, as `cat` or `find` does, isn't a run: the same
+ * reading as live steps decides.
+ */
+export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession[] => {
+  const found: PastSession[] = []
+  for (const s of scan.sessions ?? []) {
+    const runs: Partial<Record<ActivityKind, number>> = {}
+    const files = new Set<string>()
+    const ids = new Set<string>()
+    for (const command of s.commands ?? []) {
+      for (const run of scriptRuns(command)) {
+        if (run.kind === 'other') continue
+        runs[run.kind] = (runs[run.kind] ?? 0) + 1
+        if (run.file) files.add(fileName(run.file))
+        else if (run.processId ?? run.componentId) ids.add((run.processId ?? run.componentId)!)
+      }
+    }
+    if (Object.keys(runs).length === 0) continue
+    const models = Object.entries(s.models ?? {})
+    const sum = (pick: (m: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }) => number) =>
+      models.reduce((n, [, m]) => n + pick(m), 0)
+    found.push({
+      id: s.id,
+      project: s.project,
+      startedAt: s.startedAt,
+      endedAt: s.endedAt,
+      costUsd: typeof s.costUsd === 'number' ? s.costUsd : undefined,
+      tokens: sum(m => (m.input ?? 0) + (m.output ?? 0) + (m.cacheWrite ?? 0)),
+      cached: sum(m => m.cacheRead ?? 0),
+      models: models.map(([id]) => modelName(id) ?? id),
+      runs,
+      // A file names a component; an ID only when the session named no file.
+      components: files.size > 0 ? [...files] : [...ids].map(id => (id.length > 12 ? `${id.slice(0, 8)}…` : id)),
+    })
+  }
+  return found.sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
+}
+
+const PAST_WORDS: [ActivityKind, string, string][] = [
+  ['create', 'create', 'creates'],
+  ['push', 'push', 'pushes'],
+  ['pull', 'pull', 'pulls'],
+  ['deploy', 'deploy', 'deploys'],
+  ['undeploy', 'undeploy', 'undeploys'],
+  ['test', 'test', 'tests'],
+]
+
+/** A past session's Companion work in words: 3 pushes · 1 deploy · 2 tests. */
+export const runWords = (runs: PastSession['runs']): string =>
+  PAST_WORDS.filter(([kind]) => runs[kind])
+    .map(([kind, one, many]) => `${runs[kind]} ${runs[kind] === 1 ? one : many}`)
+    .join(' · ')
+
+export type HistoryTotals = { sessions: number; usd: number; unpriced: number; tokens: number }
+
+/** The sessions that started within `ms` of now, added up. A session with no recorded cost counts as unpriced. */
+export const historyTotals = (sessions: readonly PastSession[], now: number, ms = Infinity): HistoryTotals => {
+  const within = sessions.filter(s => {
+    const at = Date.parse(s.startedAt ?? '')
+    return Number.isNaN(at) ? ms === Infinity : now - at <= ms
+  })
+  return {
+    sessions: within.length,
+    usd: within.reduce((n, s) => n + (s.costUsd ?? 0), 0),
+    unpriced: within.filter(s => s.costUsd === undefined).length,
+    tokens: within.reduce((n, s) => n + s.tokens, 0),
+  }
+}
+
+const totalsLine = (label: string, t: HistoryTotals) =>
+  t.sessions === 0
+    ? undefined
+    : `${label}: ${t.sessions} session${t.sessions === 1 ? '' : 's'} · ${formatCost(t.usd)}${t.unpriced ? ` (+${t.unpriced} without a recorded cost)` : ''} · ${formatTokens(t.tokens)} tokens`
+
+/** One past session on a line: when, where, what it did, what it cost. */
+export const pastLine = (s: PastSession, currentId?: string): string => {
+  const at = Date.parse(s.startedAt ?? '')
+  const when = Number.isNaN(at) ? 'unknown date' : new Date(at).toISOString().slice(0, 10)
+  const where = s.project ? (s.project.split('/').filter(Boolean).pop() ?? s.project) : undefined
+  const cost = s.costUsd === undefined ? `${formatTokens(s.tokens)} tokens, no recorded cost` : `${formatCost(s.costUsd)} · ${formatTokens(s.tokens)} tokens`
+  const names = s.components.length > 3 ? `${s.components.slice(0, 3).join(', ')} +${s.components.length - 3}` : s.components.join(', ')
+  // The cost goes first: a long line is cut at its end.
+  return [`${when}${s.id === currentId ? ' (this session)' : ''}${where ? ` · ${where}` : ''}`, cost, runWords(s.runs), names || undefined]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/** The history as text: totals for the week, the month and everything scanned, then each session. */
+export const historySummary = (sessions: readonly PastSession[], now: number, days: number, currentId?: string): string => {
+  if (sessions.length === 0) return `No Boomi Companion sessions in the transcripts on this machine from the last ${days} days.`
+  const lines = [
+    `Boomi Companion sessions on this machine, last ${days} days:`,
+    ...[
+      totalsLine('  This week', historyTotals(sessions, now, 7 * 86_400_000)),
+      totalsLine('  Last 30 days', historyTotals(sessions, now, 30 * 86_400_000)),
+      totalsLine(`  All ${days} days`, historyTotals(sessions, now)),
+    ].filter((line): line is string => !!line),
+    '',
+    ...sessions.slice(0, 20).map(s => `  ${pastLine(s, currentId)}`),
+  ]
+  if (sessions.length > 20) lines.push(`  …and ${sessions.length - 20} more`)
+  lines.push('', "Costs are Claude Code's own, from each transcript. Claude Code on the web and other machines keep their transcripts elsewhere.")
+  return lines.join('\n')
 }

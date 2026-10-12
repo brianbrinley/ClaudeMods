@@ -40,6 +40,8 @@ export type Activity = {
   model?: string
   /** Brought back from an earlier session in the same folder. */
   isRestored?: boolean
+  /** A test's arguments to its script, so Run again can repeat it. */
+  args?: string[]
 }
 
 /** Tokens by kind, as the API reports them. */
@@ -110,11 +112,48 @@ export type Dashboard = {
   closedSteps?: number[]
 }
 
+/** Reading a failed execution's log: fetching, what it says, or why it couldn't be read. */
+export type DiagnosisState = {
+  phase: 'loading' | 'ready' | 'error'
+  /** The log's SEVERE lines (else its last few), and how many SEVERE and WARNING lines it has. */
+  lines?: string[]
+  severe?: number
+  warnings?: number
+  error?: string
+}
+
 /** The pane's colors: Valence Day, Valence Night, or the terminal's own theme. */
 export type PaneTheme = 'day' | 'night' | 'terminal'
 
+/** A past Companion session, from the transcripts on this machine. */
+export type PastSession = {
+  id: string
+  project?: string
+  startedAt?: string
+  endedAt?: string
+  /** Claude Code's own cost for the session, when its transcript recorded one. */
+  costUsd?: number
+  /** New tokens (input, output, cache writes) and cache reads. */
+  tokens: number
+  cached: number
+  models: string[]
+  /** Companion script runs by kind: push 3, deploy 1, ... */
+  runs: Partial<Record<ActivityKind, number>>
+  /** The components the runs named: their file names, else their IDs. */
+  components: string[]
+}
+
+export type HistoryState = {
+  phase: 'idle' | 'loading' | 'ready' | 'error'
+  sessions?: PastSession[]
+  scannedAt?: number
+  /** How many transcripts the scan read. */
+  scanned?: number
+  error?: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean }
+    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; suggested: string; history: HistoryState }
   }
 }
