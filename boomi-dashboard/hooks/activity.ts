@@ -1,9 +1,9 @@
 // Reads Boomi Companion's work from Claude's tool calls and their output, and
-// turns it into the cockpit's views: each component's stage, what needs
+// turns it into the dashboard's views: each component's stage, what needs
 // attention, the recent feed and the live environment. Plain functions:
 // nothing here touches the engine, so the tests call them directly.
 
-import type { Activity, ActivityKind, Cockpit, Outcome, Run, Watched } from '../types'
+import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, Run, Watched } from '../types'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
@@ -352,6 +352,8 @@ export type ComponentRow = {
   deployed?: Activity
   tested?: Activity
   lastAt: number
+  /** Every activity of this component, for its total spend. */
+  ids: number[]
 }
 
 /** Each component Claude edited, saved, deployed or tested, most recent first. */
@@ -361,7 +363,8 @@ export const components = (activity: readonly Activity[]): ComponentRow[] => {
   for (const a of activity) {
     if (a.kind === 'other') continue
     const key = a.file ?? (a.componentId && byId.get(a.componentId)?.key) ?? a.componentId ?? a.subject
-    const row: ComponentRow = rows.get(key) ?? { key, name: a.subject, lastAt: a.startedAt }
+    const row: ComponentRow = rows.get(key) ?? { key, name: a.subject, lastAt: a.startedAt, ids: [] }
+    row.ids.push(a.id)
     if (!/\.xml$/.test(a.subject) || row.name === key || /\.xml$/.test(row.name)) row.name = a.subject
     row.type = a.type ?? row.type
     row.componentId = a.componentId ?? row.componentId
@@ -425,9 +428,9 @@ export const recentRuns = (runs: readonly Run[], now: number, windowMs: number):
   })
 
 /** What failed and is still failing, each with what to do about it. */
-export const attention = (cockpit: Cockpit, now: number, windowMs: number): Attention[] => {
+export const attention = (dashboard: Dashboard, now: number, windowMs: number): Attention[] => {
   const items: Attention[] = []
-  for (const row of components(cockpit.activity)) {
+  for (const row of components(dashboard.activity)) {
     for (const a of [row.saved, row.deployed, row.tested]) {
       if (!a || (a.outcome !== 'failed' && a.outcome !== 'blocked')) continue
       const hint =
@@ -439,7 +442,7 @@ export const attention = (cockpit: Cockpit, now: number, windowMs: number): Atte
       items.push({ level: levelOf(a), title: describe(a), hint, at: when(a) })
     }
   }
-  for (const run of recentRuns(cockpit.platform.runs, now, windowMs)) {
+  for (const run of recentRuns(dashboard.platform.runs, now, windowMs)) {
     if (!isFailedStatus(run.status)) continue
     const at = Date.parse(run.at)
     items.push({
@@ -449,17 +452,92 @@ export const attention = (cockpit: Cockpit, now: number, windowMs: number): Atte
       at: Number.isNaN(at) ? now : at,
     })
   }
-  for (const w of cockpit.watched) {
+  for (const w of dashboard.watched) {
     if (w.changedBy) {
       items.push({
         level: 'warning',
         title: `${w.name ?? w.componentId} was changed by ${w.changedBy}`,
-        hint: 'Pull it before you push, or you overwrite their change. /cockpit seen clears this.',
+        hint: 'Pull it before you push, or you overwrite their change. /bc-dashboard seen clears this.',
         at: w.modifiedDate ? Date.parse(w.modifiedDate) || now : now,
       })
     }
   }
   return items.sort((a, b) => b.at - a.at)
+}
+
+// --- Tokens and spend --------------------------------------------------------------
+
+export const EMPTY_LEDGER: Ledger = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 }
+
+/** Every token the session's model calls used: input, output and the prompt cache's. */
+export const totalTokens = (l: Ledger): number => l.input + l.output + l.cacheRead + l.cacheWrite
+
+/** A token count at a glance: 950, 4.2k, 312k, 1.24M. */
+export const formatTokens = (n: number): string => {
+  if (n < 1000) return String(Math.round(n))
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
+  return `${(n / 1_000_000).toFixed(2)}M`
+}
+
+export type Spend = { tokens?: number; usd?: number }
+
+/**
+ * What Claude spent getting to each step: the session's tokens and cost when
+ * the step began, less those when the step before it began.
+ */
+export const spends = (activity: readonly Activity[]): Map<number, Spend> => {
+  const out = new Map<number, Spend>()
+  let tokens = 0
+  let usd: number | undefined
+  for (const a of activity) {
+    const spend: Spend = {}
+    if (a.tokensAt !== undefined) {
+      spend.tokens = Math.max(0, a.tokensAt - tokens)
+      tokens = a.tokensAt
+    }
+    if (a.usdAt !== undefined) {
+      if (usd !== undefined) spend.usd = Math.max(0, a.usdAt - usd)
+      else spend.usd = a.usdAt
+      usd = a.usdAt
+    }
+    out.set(a.id, spend)
+  }
+  return out
+}
+
+/** A component's spend: every step it went through, summed. */
+export const spendOf = (ids: readonly number[], all: Map<number, Spend>): Spend => {
+  let tokens: number | undefined
+  let usd: number | undefined
+  for (const id of ids) {
+    const s = all.get(id)
+    if (s?.tokens !== undefined) tokens = (tokens ?? 0) + s.tokens
+    if (s?.usd !== undefined) usd = (usd ?? 0) + s.usd
+  }
+  return { tokens, usd }
+}
+
+export const formatSpend = (s: Spend | undefined): string | undefined => {
+  if (!s) return undefined
+  const parts = [s.tokens ? `${formatTokens(s.tokens)} tokens` : undefined, s.usd ? formatCost(s.usd) : undefined]
+  const text = parts.filter(Boolean).join(' · ')
+  return text || undefined
+}
+
+const BARS = '▁▂▃▄▅▆▇█'
+
+/** A sparkline of the values: one bar each, tallest for the biggest. */
+export const sparkline = (values: readonly number[]): string => {
+  const max = Math.max(...values, 0)
+  if (max <= 0) return ''
+  return values.map(v => BARS[Math.min(BARS.length - 1, Math.floor((v / max) * (BARS.length - 1) + 0.5))] ?? BARS[0]).join('')
+}
+
+/** A meter for a percentage: ▰▰▰▱▱▱▱▱▱▱. */
+export const meter = (percent: number, width = 10): string => {
+  const filled = Math.max(0, Math.min(width, Math.round((percent / 100) * width)))
+  return '▰'.repeat(filled) + '▱'.repeat(width - filled)
 }
 
 // --- The summary lines ------------------------------------------------------------
@@ -473,58 +551,72 @@ export const headline = (activity: readonly Activity[]): Activity | undefined =>
 
 /**
  * The status line: the latest thing Companion did, then what needs attention,
- * then the cost. The engine prefixes it with the mod's name.
+ * then the session's tokens and cost. The engine prefixes it with the mod's name.
  */
-export const statusLine = (cockpit: Cockpit, now: number, windowMs: number, usd?: number): string => {
+export const statusLine = (dashboard: Dashboard, now: number, windowMs: number, usage: Usage = {}): string => {
   const parts: string[] = []
-  const latest = headline(cockpit.activity)
+  const latest = headline(dashboard.activity)
   if (latest) parts.push(`${STATUS[levelOf(latest)].icon} ${describe(latest)}`)
-  const needs = attention(cockpit, now, windowMs)
+  const needs = attention(dashboard, now, windowMs)
   if (needs.length > 0) parts.push(`${STATUS[worst(needs.map(n => n.level))].icon} ${needs.length} need${needs.length === 1 ? 's' : ''} attention`)
   if (parts.length === 0) parts.push('waiting for Companion')
-  const cost = formatCost(usd)
-  if (cost) parts.push(`${cost} this session`)
+  const spent = [usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined, formatCost(usage.usd)].filter(Boolean)
+  if (spent.length > 0) parts.push(`${spent.join(' · ')} this session`)
   return parts.join(' · ')
 }
 
-export type Usage = { usd?: number; contextPercent?: number }
+export type Usage = { usd?: number; contextPercent?: number; tokens?: number; startedAt?: number }
 
-/** The whole cockpit as text: what /cockpit and Claude's summary tool show. */
-export const summary = (cockpit: Cockpit, usage: Usage, now: number, windowMs: number): string => {
+/** How long something has run: 45s, 12m, 1h 12m. */
+export const duration = (ms: number): string => {
+  const minutes = Math.floor(ms / 60_000)
+  if (minutes < 1) return `${Math.max(0, Math.round(ms / 1000))}s`
+  if (minutes < 60) return `${minutes}m`
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+/** The whole dashboard as text: what /bc-dashboard and Claude's summary tool show. */
+export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowMs: number): string => {
   const hours = Math.round(windowMs / 3_600_000)
   const lines: string[] = []
-  const needs = attention(cockpit, now, windowMs)
+  const needs = attention(dashboard, now, windowMs)
   lines.push(needs.length > 0 ? `Needs attention (${needs.length}):` : '✓ Nothing needs attention.')
   for (const n of needs) lines.push(`  ${STATUS[n.level].icon} ${n.title}`, `      ${n.hint}`)
 
-  const rows = components(cockpit.activity)
+  const all = spends(dashboard.activity)
+  const rows = components(dashboard.activity)
   lines.push('', rows.length > 0 ? 'Components this session:' : 'Components this session: none yet. They show up as Claude edits, saves, deploys and tests them.')
   for (const row of rows) {
     const type = friendlyType(row.type)
-    lines.push(`  ${row.name}${type ? ` (${type})` : ''}: ${stages(row).map(s => `${STATUS[s.level].icon} ${s.text}`).join('  ')}`)
+    const spent = formatSpend(spendOf(row.ids, all))
+    lines.push(`  ${row.name}${type ? ` (${type})` : ''}: ${stages(row).map(s => `${STATUS[s.level].icon} ${s.text}`).join('  ')}${spent ? `  [${spent}]` : ''}`)
   }
 
-  const feed = cockpit.activity.slice(-8).reverse()
+  const feed = dashboard.activity.slice(-8).reverse()
   if (feed.length > 0) {
     lines.push('', 'Recently:')
-    for (const a of feed) lines.push(`  ${STATUS[levelOf(a)].icon} ${describe(a)}, ${ago(when(a), now)}`)
+    for (const a of feed) {
+      const spent = formatSpend(all.get(a.id))
+      lines.push(`  ${STATUS[levelOf(a)].icon} ${describe(a)}, ${ago(when(a), now)}${spent ? `  [${spent}]` : ''}`)
+    }
   }
 
   lines.push('', `Live environment, last ${hours}h:`)
-  if (cockpit.platform.phase !== 'ok') lines.push(`  ${cockpit.platform.message}`)
+  if (dashboard.platform.phase !== 'ok') lines.push(`  ${dashboard.platform.message}`)
   else {
-    const runs = recentRuns(cockpit.platform.runs, now, windowMs)
+    const runs = recentRuns(dashboard.platform.runs, now, windowMs)
     if (runs.length === 0) lines.push('  No runs.')
     for (const run of runs) lines.push(`  ${runLine(run, now)}`)
   }
-  if (cockpit.watched.length > 0) {
+  if (dashboard.watched.length > 0) {
     lines.push('', 'Watched components:')
-    for (const w of cockpit.watched) lines.push(`  ${watchedLine(w)}`)
+    for (const w of dashboard.watched) lines.push(`  ${watchedLine(w)}`)
   }
 
   const cost = formatCost(usage.usd)
+  const tokens = usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined
   const context = usage.contextPercent === undefined ? undefined : `context ${Math.round(usage.contextPercent)}% full`
-  if (cost || context) lines.push('', `Session: ${[cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
+  if (cost || tokens || context) lines.push('', `Session: ${[tokens, cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
   return lines.join('\n')
 }
 
@@ -561,7 +653,7 @@ export const watchedLine = (w: Watched): string => `${STATUS[watchedLevel(w)].ic
 
 /**
  * The watched component as the platform now has it, compared with what the
- * cockpit last saw. `changedBy` is set when the version moved and someone other
+ * dashboard last saw. `changedBy` is set when the version moved and someone other
  * than `me` (Companion's API user) made the change.
  */
 export const compareWatched = (
