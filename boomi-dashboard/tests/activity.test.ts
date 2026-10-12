@@ -20,6 +20,8 @@ import {
   friendlyType,
   meter,
   modelMix,
+  modelSplits,
+  tokenSplit,
   modelName,
   pixelCells,
   newFailures,
@@ -343,4 +345,16 @@ test('new tokens leave out cache reads, which are counted apart', () => {
   expect(newTokens(l)).toBe(8_000)
   expect(cachedTokens(l)).toBe(300_000)
   expect(totalTokens(l)).toBe(308_000)
+})
+
+test('the token split names each kind, and each model gets its own line when there are several', () => {
+  const opus = { input: 18_000, output: 44_000, cacheRead: 3_300_000, cacheWrite: 350_000 }
+  expect(tokenSplit(opus)).toBe('412k new (18k in · 44k out · 350k cache writes) · 3.30M cache reads')
+  const ledger = { ...opus, calls: 60, byModel: { 'claude-opus-5-5': opus } }
+  expect(modelSplits(ledger)).toEqual([])
+  const haiku = { input: 2_000, output: 1_000, cacheRead: 40_000, cacheWrite: 9_000 }
+  expect(modelSplits({ ...ledger, byModel: { 'claude-haiku-5-5': haiku, 'claude-opus-5-5': opus } })).toEqual([
+    'Opus 5.5: 412k new (18k in · 44k out · 350k cache writes) · 3.30M cache reads',
+    'Haiku 5.5: 12k new (2.0k in · 1.0k out · 9.0k cache writes) · 40k cache reads',
+  ])
 })

@@ -82,11 +82,23 @@ Status is shown with an icon and a label, never color alone:
 ## Tokens and spend
 
 - **Running token count.** Every model call reports its tokens, and the dashboard adds them up, once per call. That covers Claude's own calls and those of the agents it starts. The headline counts **new tokens**: fresh input, output, and what's written to the prompt cache.
-- **Cache reads, apart.** On every call, Claude sends the conversation so far again, and the prompt cache serves most of it. Those cache reads are real, and they're billed at a fraction of the price of new input. But they grow with every call: a session with 60k tokens of context that has made 55 calls has read about 3.3M tokens from the cache. Counted in the headline, they'd dwarf the work actually done. So the gauge shows them as `+3.3M cached`, and `/bc-dashboard` lists them after the new tokens.
+- **Cache reads, apart.** On every call, Claude sends the conversation so far again, and the prompt cache serves most of it. Those cache reads are real, and they're billed at a fraction of the price of new input. But they grow with every call: a session with 60k tokens of context that has made 55 calls has read about 3.3M tokens from the cache. Counted in the headline, they'd dwarf the work actually done. So the gauge shows them as `+3.3M cached`.
+- **The split, in `/bc-dashboard`.** One line breaks the session's tokens down by kind:
+
+  ```text
+  Tokens: 412k new (18k in · 44k out · 350k cache writes) · 3.30M cache reads
+  ```
+
+  - **Input:** new text Claude reads, such as your messages and tool output.
+  - **Output:** what Claude writes, including code, XML and replies. It costs the most per token, and it's the best measure of how much work Claude did.
+  - **Cache writes:** the conversation being saved to the prompt cache. A jump usually means a new or compacted conversation, or a cache that lapsed during a pause.
+  - **Cache reads:** the conversation re-read on every call.
+
+  When Claude used more than one model, each model gets its own line under it.
 - **Spend** is the session's cost, as `/cost` reports it.
 - **Each step's share** is the new tokens Claude used between the previous step and this one: the thinking, reading and writing that led to it. A component's share is all its steps added up.
 
-- **Models.** The pane names the model that answered last. If Claude used more than one, for example a smaller model for agents, `/bc-dashboard` lists each with its new tokens: `Models: Opus 5.5 312k · Haiku 5.5 26k`.
+- **Models.** The pane names the model that answered last. If Claude used more than one, for example a smaller model for agents, `/bc-dashboard` gives each its own token split.
 
 /bc-dashboard and the `summary` tool show the same figures in brackets, for example `[61k tokens · $0.21]`.
 

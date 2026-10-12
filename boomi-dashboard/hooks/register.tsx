@@ -34,6 +34,7 @@ import {
   meter,
   modelMix,
   modelName,
+  modelSplits,
   pixelCells,
   newFailures,
   readOutput,
@@ -47,6 +48,7 @@ import {
   stages,
   statusLine,
   summary,
+  tokenSplit,
   cachedTokens,
   newTokens,
   watchedLevel,
@@ -127,7 +129,12 @@ const usageOf = async ($: Engine): Promise<Usage> => {
   const l = await read($, ledger)
   const tokens = newTokens(l) || undefined
   const cached = cachedTokens(l) || undefined
-  const models = { model: modelName(l.lastModel), models: modelMix(l) || undefined }
+  const models = {
+    model: modelName(l.lastModel),
+    models: modelMix(l) || undefined,
+    split: l.calls > 0 ? tokenSplit(l) : undefined,
+    modelSplits: modelSplits(l),
+  }
   try {
     const usage = await $.session.usage()
     return { usd: usage.cost?.usd, contextPercent: usage.context.percent, tokens, cached, startedAt: usage.startedAt, ...models }
@@ -646,6 +653,15 @@ export const register: Register = (on, options) => {
         cacheWrite: l.cacheWrite + used.cache_creation_input_tokens,
         calls: l.calls + 1,
         models: { ...l.models, [used.model]: (l.models?.[used.model] ?? 0) + total },
+        byModel: {
+          ...l.byModel,
+          [used.model]: {
+            input: (l.byModel?.[used.model]?.input ?? 0) + used.input_tokens,
+            output: (l.byModel?.[used.model]?.output ?? 0) + used.output_tokens,
+            cacheRead: (l.byModel?.[used.model]?.cacheRead ?? 0) + used.cache_read_input_tokens,
+            cacheWrite: (l.byModel?.[used.model]?.cacheWrite ?? 0) + used.cache_creation_input_tokens,
+          },
+        },
         lastModel: used.model,
       })).catch(() => undefined)
     }

@@ -100,7 +100,8 @@ test('the running token count adds up new tokens, keeps cache reads apart, and e
   // 8k tokens in all: 2k input, 2k output and 4k read from the cache.
   expect(status.text).toContain('Saved Orders Sync to Boomi (v4), just now  [4.0k tokens · $1.25]')
   expect(status.text).toContain('Orders Sync (process): ✓ saved v4  [4.0k tokens · $1.25]')
-  expect(status.text).toContain('Session: 4.0k tokens (plus 4.0k read from the prompt cache) · $1.25 so far')
+  expect(status.text).toContain('Session: $1.25 so far')
+  expect(status.text).toContain('Tokens: 4.0k new (2.0k in · 2.0k out · 0 cache writes) · 4.0k cache reads')
 })
 
 test('Claude editing a component XML shows it as edited, not in Boomi yet', async ($, on) => {
