@@ -175,7 +175,7 @@ flowchart LR
     classDef error fill:#FFFFFF,stroke:#D03B3B,stroke-width:2px,color:#0B0B0B
 ```
 
-The dashboard follows Claude's tool calls, so tracking the session costs no Platform API calls. It never stops a script.
+The dashboard follows Claude's tool calls, so tracking the session costs no Platform API calls. It never stops a script. The output it reads was last checked against Companion **v1.0.83**, whose own output lines are in the tests.
 
 | Companion script | What the dashboard records |
 |---|---|
@@ -183,7 +183,7 @@ The dashboard follows Claude's tool calls, so tracking the session costs no Plat
 | `boomi-component-push.sh <file>` | Saved, with the new version |
 | `boomi-component-pull.sh` | Pulled |
 | `boomi-deploy.sh` / `boomi-undeploy.sh` | Deployed or undeployed, or the error |
-| `boomi-test-execute.sh --process-id <id>` | The execution's status; `ERROR`, `ABORTED` or `DISCARDED` is a failure |
+| `boomi-test-execute.sh --process-id <id>` | The execution's status; `ERROR`, `ABORTED` or `DISCARDED` is a failure. With `--no-wait`, ◐ submitted |
 | Any other Companion script | A line under **Claude's latest steps** |
 
 | Engine call | Used for |

@@ -18,8 +18,12 @@ export const tokenSource = (secure: string, envValues: Record<string, string>, i
 export const hasTokenLine = (envText: string): boolean =>
   envText.split(/\r?\n/).some(line => new RegExp(`^\\s*(export\\s+)?${TOKEN_KEY}\\s*=`).test(line))
 
-/** Whether a shell command runs one of Companion's scripts, which need the token. */
-export const runsCompanionScript = (command: string): boolean => /(^|[\s/'"])boomi-[a-z-]+\.sh\b/.test(command)
+/**
+ * Whether a shell command runs one of Companion's scripts, which need the
+ * token: every boomi-*.sh, and event-streams-setup.sh, which isn't named so.
+ */
+export const runsCompanionScript = (command: string): boolean =>
+  /(^|[\s/'"])(boomi-[a-z-]+|event-streams-setup)\.sh\b/.test(command)
 
 /** What to tell someone whose .env still assigns the token while the secure setting holds it. */
 export const TOKEN_LINE_ADVICE =

@@ -10,6 +10,7 @@ const KEY = 'BOOMI_API_TOKEN'
 test('a Companion script run is told apart from other commands', () => {
   expect(runsCompanionScript('bash /x/skills/boomi-integration/scripts/boomi-deploy.sh a.xml')).toBe(true)
   expect(runsCompanionScript('cd ws && bash "$S/boomi-test-execute.sh" --process-id 1')).toBe(true)
+  expect(runsCompanionScript('bash /x/scripts/event-streams-setup.sh create-topic orders')).toBe(true)
   expect(runsCompanionScript('git status')).toBe(false)
   expect(runsCompanionScript('ls my-boomi-deploy.shelf')).toBe(false)
 })

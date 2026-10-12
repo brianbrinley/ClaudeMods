@@ -1,6 +1,6 @@
 {
   "name": "boomi-runtime",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Provisions a temporary Boomi runtime in the session and hands its ID to Boomi Companion",
   "types": "./types/index.d.ts",
   "userConfig": {

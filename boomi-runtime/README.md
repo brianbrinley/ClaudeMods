@@ -108,7 +108,7 @@ Use `/boomi env` and `/boomi set` to see and change `.env` without exposing the 
 
 A token in `.env` or an environment variable sits in plain text all session. Keep it in Claude Code's secure storage instead, and the mod hands it to Companion only while one of Companion's scripts runs.
 
-This works because Companion's scripts (`boomi-common.sh` in [OfficialBoomi/bc-integration](https://github.com/OfficialBoomi/bc-integration)) `source ./.env` and then require the token: one `.env` doesn't set is taken from the environment the script started in. So for a Bash command that runs a Companion script, the mod puts the token in the environment, and takes it out when the command ends.
+This works because Companion's scripts (`boomi-common.sh` in [OfficialBoomi/bc-integration](https://github.com/OfficialBoomi/bc-integration)) `source ./.env` and then require the token: one `.env` doesn't set is taken from the environment the script started in. So for a Bash command that runs a Companion script (any `boomi-*.sh`, and `event-streams-setup.sh`), the mod puts the token in the environment, and takes it out when the command ends.
 
 1. **Use a dedicated API user** with a role that has API access and only what the work needs: building and deploying components, executing processes, and for this mod, managing runtimes and environments. Privilege names vary by account (**Settings → User Management → Roles**). Generate its token under **Settings → Account Information and Setup → AtomSphere API Tokens**.
 2. **Save the token from a terminal**, never in the chat, for each mod by the ID `claude plugin list` shows (`<name>@inline` for a mod loaded from a folder):
