@@ -40,6 +40,14 @@ export type Activity = {
   model?: string
 }
 
+/** Tokens by kind, as the API reports them. */
+export type TokenSplit = {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+}
+
 /** Every token the session's model calls used, summed as the API reported them. */
 export type Ledger = {
   input: number
@@ -52,6 +60,8 @@ export type Ledger = {
   models?: Record<string, number>
   /** The model that answered the latest call. */
   lastModel?: string
+  /** Each model's tokens by kind; absent in a ledger from an older version. */
+  byModel?: Record<string, TokenSplit>
 }
 
 export type Run = {

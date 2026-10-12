@@ -34,6 +34,7 @@ import {
   meter,
   modelMix,
   modelName,
+  modelSplits,
   pixelCells,
   newFailures,
   readOutput,
@@ -47,7 +48,9 @@ import {
   stages,
   statusLine,
   summary,
-  totalTokens,
+  tokenSplit,
+  cachedTokens,
+  newTokens,
   watchedLevel,
   watchedLine,
   watchedText,
@@ -124,13 +127,19 @@ const toast = ($: Engine, settings: Settings, text: string) => {
 
 const usageOf = async ($: Engine): Promise<Usage> => {
   const l = await read($, ledger)
-  const tokens = totalTokens(l) || undefined
-  const models = { model: modelName(l.lastModel), models: modelMix(l) || undefined }
+  const tokens = newTokens(l) || undefined
+  const cached = cachedTokens(l) || undefined
+  const models = {
+    model: modelName(l.lastModel),
+    models: modelMix(l) || undefined,
+    split: l.calls > 0 ? tokenSplit(l) : undefined,
+    modelSplits: modelSplits(l),
+  }
   try {
     const usage = await $.session.usage()
-    return { usd: usage.cost?.usd, contextPercent: usage.context.percent, tokens, startedAt: usage.startedAt, ...models }
+    return { usd: usage.cost?.usd, contextPercent: usage.context.percent, tokens, cached, startedAt: usage.startedAt, ...models }
   } catch {
-    return { tokens, ...models }
+    return { tokens, cached, ...models }
   }
 }
 
@@ -635,7 +644,8 @@ export const register: Register = (on, options) => {
     const response = yield* next(e)
     const used = response.usage
     if (used) {
-      const total = used.input_tokens + used.output_tokens + used.cache_read_input_tokens + used.cache_creation_input_tokens
+      // A model's share counts new tokens, as the headline does.
+      const total = used.input_tokens + used.output_tokens + used.cache_creation_input_tokens
       await update($, ledger, l => ({
         input: l.input + used.input_tokens,
         output: l.output + used.output_tokens,
@@ -643,6 +653,15 @@ export const register: Register = (on, options) => {
         cacheWrite: l.cacheWrite + used.cache_creation_input_tokens,
         calls: l.calls + 1,
         models: { ...l.models, [used.model]: (l.models?.[used.model] ?? 0) + total },
+        byModel: {
+          ...l.byModel,
+          [used.model]: {
+            input: (l.byModel?.[used.model]?.input ?? 0) + used.input_tokens,
+            output: (l.byModel?.[used.model]?.output ?? 0) + used.output_tokens,
+            cacheRead: (l.byModel?.[used.model]?.cacheRead ?? 0) + used.cache_read_input_tokens,
+            cacheWrite: (l.byModel?.[used.model]?.cacheWrite ?? 0) + used.cache_creation_input_tokens,
+          },
+        },
         lastModel: used.model,
       })).catch(() => undefined)
     }
@@ -796,7 +815,13 @@ export const register: Register = (on, options) => {
         <Box>
           <Box flexDirection="column" flexGrow={1} flexShrink={1}>
             <Box flexWrap="wrap" columnGap={1}>
-              {gauge('TOKENS', usage.tokens ? formatTokens(usage.tokens) : '—', last?.tokens ? `last step ${formatTokens(last.tokens)}` : undefined)}
+              {gauge(
+                'TOKENS',
+                usage.tokens ? formatTokens(usage.tokens) : '—',
+                [last?.tokens ? `last step ${formatTokens(last.tokens)}` : undefined, usage.cached ? `+${formatTokens(usage.cached)} cached` : undefined]
+                  .filter(Boolean)
+                  .join(' · ') || undefined,
+              )}
               {gauge('SPEND', formatCost(usage.usd) ?? '—', last?.usd ? `last step ${formatCost(last.usd)}` : undefined)}
               {gauge(
                 'CONTEXT',

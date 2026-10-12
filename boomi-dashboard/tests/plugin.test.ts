@@ -91,15 +91,17 @@ test('a Companion push shows the component saved with its version, and the comma
   expect(status.text).toContain('Session: $1.25 so far')
 })
 
-test('the running token count adds up every model call, and each step shows what it took', async ($, on) => {
+test('the running token count adds up new tokens, keeps cache reads apart, and each step shows what it took', async ($, on) => {
   world(on, { [FILE]: ORDERS })
   shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
   await modelCall($, on, 8_000)
   await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
   const status = await $.command.run(dashboard())
-  expect(status.text).toContain('Saved Orders Sync to Boomi (v4), just now  [8.0k tokens · $1.25]')
-  expect(status.text).toContain('Orders Sync (process): ✓ saved v4  [8.0k tokens · $1.25]')
-  expect(status.text).toContain('Session: 8.0k tokens · $1.25 so far')
+  // 8k tokens in all: 2k input, 2k output and 4k read from the cache.
+  expect(status.text).toContain('Saved Orders Sync to Boomi (v4), just now  [4.0k tokens · $1.25]')
+  expect(status.text).toContain('Orders Sync (process): ✓ saved v4  [4.0k tokens · $1.25]')
+  expect(status.text).toContain('Session: $1.25 so far')
+  expect(status.text).toContain('Tokens: 4.0k new (2.0k in · 2.0k out · 0 cache writes) · 4.0k cache reads')
 })
 
 test('Claude editing a component XML shows it as edited, not in Boomi yet', async ($, on) => {
@@ -263,11 +265,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const names = await pane.findAll({ type: 'Text', text: 'Orders Sync' })
     expect(names.some(n => n.props.color === '#0B0B0B' && n.props.backgroundColor === '#FBF6EE')).toBe(true)
     expect(await pane.find({ text: 'TOKENS' })).toBeDefined()
-    expect(await pane.find({ text: '12k' })).toBeDefined()
+    expect(await pane.find({ text: '6.0k' })).toBeDefined()
+    expect(await pane.find({ text: 'last step 6.0k · +6.0k cached' })).toBeDefined()
     expect(await pane.find({ text: '$1.25' })).toBeDefined()
     expect(await pane.find({ text: /▰▱+ 12%/ })).toBeDefined()
     expect(await pane.find({ text: /saved v4/ })).toBeDefined()
-    expect(await pane.find({ text: /12k tokens · \$1\.25/ })).toBeDefined()
+    expect(await pane.find({ text: /6\.0k tokens · \$1\.25/ })).toBeDefined()
     expect(await pane.find({ text: 'NEEDS ATTENTION' })).toBeDefined()
   })
 

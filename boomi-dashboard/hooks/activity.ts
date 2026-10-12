@@ -3,7 +3,7 @@
 // attention, the recent feed and the live environment. Plain functions:
 // nothing here touches the engine, so the tests call them directly.
 
-import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, Run, Watched } from '../types'
+import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, Run, TokenSplit, Watched } from '../types'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
@@ -547,7 +547,38 @@ export const modelMix = (l: Ledger): string =>
     .join(' · ')
 
 /** Every token the session's model calls used: input, output and the prompt cache's. */
-export const totalTokens = (l: Ledger): number => l.input + l.output + l.cacheRead + l.cacheWrite
+/**
+ * The session's new tokens: fresh input, output and what was written to the
+ * prompt cache. Cache reads are left out: each call re-reads the conversation
+ * so far from the cache, so in a long session they grow with every call and
+ * would dwarf the work done; they're reported beside this, by cachedTokens.
+ */
+export const newTokens = (l: Ledger): number => l.input + l.output + l.cacheWrite
+
+/** Tokens the prompt cache served: the conversation re-read on every call, billed at a fraction of new input. */
+export const cachedTokens = (l: Ledger): number => l.cacheRead
+
+/**
+ * Tokens by kind in one line:
+ * 412k new (18k in · 44k out · 350k cache writes) · 3.3M cache reads.
+ */
+export const tokenSplit = (t: TokenSplit): string => {
+  const fresh = t.input + t.output + t.cacheWrite
+  const parts = `${formatTokens(t.input)} in · ${formatTokens(t.output)} out · ${formatTokens(t.cacheWrite)} cache writes`
+  return `${formatTokens(fresh)} new (${parts}) · ${formatTokens(t.cacheRead)} cache reads`
+}
+
+/** Each model's split, biggest first, when the session used more than one. */
+export const modelSplits = (l: Ledger): string[] => {
+  const entries = Object.entries(l.byModel ?? {})
+  if (entries.length < 2) return []
+  return entries
+    .sort((a, b) => newTokens({ ...b[1], calls: 0 }) - newTokens({ ...a[1], calls: 0 }))
+    .map(([id, split]) => `${modelName(id)}: ${tokenSplit(split)}`)
+}
+
+/** Every token the API counted, cache reads included. */
+export const totalTokens = (l: Ledger): number => newTokens(l) + cachedTokens(l)
 
 /** A token count at a glance: 950, 4.2k, 312k, 1.24M. */
 export const formatTokens = (n: number): string => {
@@ -645,7 +676,13 @@ export const statusLine = (dashboard: Dashboard, now: number, windowMs: number, 
 export type Usage = {
   usd?: number
   contextPercent?: number
+  /** New tokens: input, output and cache writes (newTokens). */
   tokens?: number
+  /** Tokens read from the prompt cache (cachedTokens). */
+  cached?: number
+  /** The session's tokens by kind, in words (tokenSplit), and each model's when there are several. */
+  split?: string
+  modelSplits?: string[]
   startedAt?: number
   /** The model that answered the latest call, and each model's tokens in words. */
   model?: string
@@ -699,10 +736,11 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   }
 
   const cost = formatCost(usage.usd)
-  const tokens = usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined
   const context = usage.contextPercent === undefined ? undefined : `context ${Math.round(usage.contextPercent)}% full`
-  if (cost || tokens || context) lines.push('', `Session: ${[tokens, cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
-  if (usage.models) lines.push(`Models: ${usage.models}`)
+  if (cost || context) lines.push('', `Session: ${[cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
+  if (usage.split) lines.push(`Tokens: ${usage.split}`)
+  for (const line of usage.modelSplits ?? []) lines.push(`  ${line}`)
+  if (usage.model && !usage.modelSplits?.length) lines.push(`Model: ${usage.model}`)
   return lines.join('\n')
 }
 
