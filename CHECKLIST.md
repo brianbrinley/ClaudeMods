@@ -15,7 +15,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **A2. Take it out of `.env`.** Delete or comment out the `BOOMI_API_TOKEN` line in Companion's `.env`, and remove any `BOOMI_API_TOKEN` environment variable. Keep the rest of the file.
 - [ ] **A3. Doctor.** Start a new session and run `/boomi doctor`.
   **Pass:** a line reads `✓ API token in Claude Code's secure storage; Companion's scripts get it only while they run`, and no toast warns about `.env`. **Fail:** the line says `API token from the .env file`, `from an environment variable`, or `but Delete the BOOMI_API_TOKEN line`.
-- [ ] **A4. Companion uses it.** Ask Claude to run Companion's connection test (`boomi-folder-create.sh --test-connection`), then to push one component.
+- [ ] **A4. Companion uses it.** *(Mechanism proven 2026-10-12 with a fake token: in a fresh Claude Code with boomi-runtime 0.2.0, a script named like a Companion script saw the token through Claude's Bash tool and another command didn't. Still to do: one run with the real token and a real push.)* Ask Claude to run Companion's connection test (`boomi-folder-create.sh --test-connection`), then to push one component.
   **Pass:** both end with `SUCCESS`. **Fail:** `ERROR: Missing required environment variables: BOOMI_API_TOKEN`. This is the one the tests can't cover; if it fails, the token isn't reaching Companion's scripts.
 - [ ] **A5. The guard still holds.** Ask Claude to run `printenv`.
   **Pass:** refused with `boomi-runtime: this command could show the Boomi API token`. **Fail:** it runs.
@@ -46,6 +46,9 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** it lists earlier Companion sessions on this machine, and one session's cost is within a few cents of what `/cost` showed in it. **Fail:** `History needs Perl`, an empty list when you know there were sessions, or a cost far off; send the line.
 - [ ] **B9. Pane basics.** Theme buttons switch Day, Night and Terminal; **☐** closes an item and **Reopen** brings it back; **Hide** folds **Process runs in Boomi**.
   **Pass:** all three. **Fail:** say which.
+
+- [ ] **B10. Guardrails.** With boomi-standards loaded, have Claude push a component with a password typed into a password field.
+  **Pass:** the push is refused, and the dashboard's **Guardrails** section shows `⚠ Standards blocked the last push:` with the reason. After `/boomi up`, it shows `◐ Runtime … installing`, then `✓ Runtime … online`. **Fail:** no **Guardrails** section, or it doesn't change.
 
 ## C. Windows (WSL)
 

@@ -22,6 +22,7 @@ A Claude Code mod that shows where your [Boomi Companion](https://github.com/Off
 - **Components this session:** each component's stages, tokens and cost.
 - **Claude's latest steps:** what Claude just did with Companion.
 - **Process runs in Boomi:** every execution in the environment in the last 24 hours. **Hide** folds it to one line.
+- **Guardrails:** with [boomi-standards](../boomi-standards/README.md) or [boomi-runtime](../boomi-runtime/README.md) loaded, the last standards check (what it blocked, and why) and the runtime's state and smoke test.
 - **Past Companion sessions:** what earlier sessions on this machine cost.
 - **Themes:** **Day**, **Night** or **Terminal** (your terminal's colors), from the buttons or `/bc-dashboard theme night`. The choice is kept.
 
@@ -193,7 +194,7 @@ The dashboard follows Claude's tool calls, so tracking the session costs no Plat
 | `$.http.fetch` | Read-only Platform API queries |
 | `$.process.run` | **Why?**, **Run again** and the session scan |
 | `$.prompt.fill`, `$.prompt.suggest` | **Ask Claude to fix** and the next-step suggestion |
-| `$.state`, `$.store` | What the views draw, and what's kept across sessions |
+| `$.state`, `$.store` | What the views draw, what's kept across sessions, and the other Boomi mods' state for **Guardrails** |
 | `ui.render`, `$.ui.status`, `$.ui.toast` | The banner, pane, status line and toasts |
 
 ## To do

@@ -1,7 +1,8 @@
 {
   "name": "boomi-standards",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Checks Boomi Companion's components against the team's standards before they are created, pushed or deployed",
+  "types": "./types/index.d.ts",
   "userConfig": {
     "enforce": {
       "type": "boolean",
