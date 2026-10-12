@@ -79,6 +79,8 @@ export type ScriptRun = {
   deploymentId?: string
   /** For `other`: the script's name without `boomi-` and `.sh`. */
   script?: string
+  /** The folder the script ran from, when the command names it: where Companion's scripts are. */
+  scriptsDir?: string
 }
 
 const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefined => {
@@ -155,6 +157,7 @@ export const scriptRuns = (command: string): ScriptRun[] => {
     }
     if (args.some(arg => ['-h', '--help', '--test-connection', '--list-environments'].includes(arg))) continue
     const run: ScriptRun = { kind: found.kind }
+    if (token.includes('/')) run.scriptsDir = joinPath(dir, token).replace(/\/[^/]+$/, '')
     if (found.script) run.script = found.script
     for (let j = 0; j < args.length; j++) {
       const arg = args[j]!
@@ -601,7 +604,7 @@ export const stages = (row: ComponentRow, runs: readonly Run[] = []): Stage[] =>
  * a failed step, `run:<execution id>` a failed run, `watch:<component id>` a
  * watched component someone else changed.
  */
-export type Attention = { key: string; level: Level; title: string; hint: string; at: number }
+export type Attention = { key: string; level: Level; title: string; hint: string; at: number; executionId?: string }
 
 /** Runs in the window, newest first: a run from last month isn't news. */
 export const recentRuns = (runs: readonly Run[], now: number, windowMs: number): Run[] =>
@@ -621,9 +624,9 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
         a.outcome === 'blocked'
           ? a.detail
           : a.kind === 'test'
-            ? `Ask Claude to read the execution log${a.executionId ? ` (${a.executionId.replace(/^execution-/, '').slice(0, 8)}…)` : ''} and fix the process.`
+            ? `Execution ${a.executionId ? `${a.executionId.replace(/^execution-/, '').slice(0, 8)}…` : 'log'}: press Why? to read what failed.`
             : a.detail
-      items.push({ key: `step:${a.id}`, level: levelOf(a), title: describe(a), hint, at: when(a) })
+      items.push({ key: `step:${a.id}`, level: levelOf(a), title: describe(a), hint, at: when(a), executionId: a.kind === 'test' ? a.executionId : undefined })
     }
   }
   const seenRuns = new Set(dashboard.seenRuns ?? [])
@@ -635,9 +638,10 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
     const noun = run.executionType === 'exec_listener' ? 'Listener run' : 'Run'
     items.push({
       key: `run:${run.executionId}`,
+      executionId: run.executionId,
       level: 'critical',
       title: row ? `${noun} of ${row.name} ended ${run.status}` : `${run.processName} ended ${run.status} in the environment`,
-      hint: `Execution ${run.executionId.replace(/^execution-/, '').slice(0, 8)}…${row ? ', a component from this session' : ''}. Ask Claude to read its log, or close this if the failure was expected.`,
+      hint: `Execution ${run.executionId.replace(/^execution-/, '').slice(0, 8)}…${row ? ', a component from this session' : ''}. Press Why? to read its log, or close this if the failure was expected.`,
       at: Number.isNaN(at) ? now : at,
     })
   }
@@ -1088,4 +1092,116 @@ export const pixelCells = (pixels: readonly string[], colors: Record<string, str
     rows.push(row)
   }
   return rows
+}
+
+// --- Why a run failed ------------------------------------------------------------
+
+/** What an execution's log says went wrong. */
+export type Diagnosis = {
+  /** The log's SEVERE lines (else its last few), timestamps left off, newest last. */
+  lines: string[]
+  /** How many SEVERE and WARNING lines the log has. */
+  severe: number
+  warnings: number
+}
+
+const LEVEL = /(?:^|\s)(SEVERE|WARNING|INFO|FINE)(?:\s|$)/
+
+/**
+ * Reads a Boomi process log as boomi-execution-query.sh --logs prints it: the
+ * SEVERE lines say what failed and in which shape. Without any, the last lines
+ * are the best clue. Each line loses its timestamp and is cut at 200 characters.
+ */
+export const diagnose = (log: string): Diagnosis => {
+  const lines = log.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const strip = (line: string) => {
+    const at = line.search(LEVEL)
+    const text = at >= 0 ? line.slice(at).trim() : line
+    return text.length > 200 ? `${text.slice(0, 199)}…` : text
+  }
+  const severe = lines.filter(line => LEVEL.exec(line)?.[1] === 'SEVERE')
+  const warnings = lines.filter(line => LEVEL.exec(line)?.[1] === 'WARNING').length
+  const errors = lines.filter(line => /^ERROR:/.test(line))
+  const picked = severe.length > 0 ? severe.slice(-5) : errors.length > 0 ? errors : lines.slice(-5)
+  return { lines: picked.map(strip), severe: severe.length, warnings }
+}
+
+/** The request the "Ask Claude to fix" button puts in the prompt box. */
+export const fixPrompt = (title: string, executionId: string, diagnosis: Diagnosis): string =>
+  [
+    `${title} (execution ${executionId}). Its process log says:`,
+    ...diagnosis.lines.map(line => `  ${line}`),
+    'Find the cause in the process and fix it, then push, redeploy and test it again.',
+  ].join('\n')
+
+// --- The session report ------------------------------------------------------------
+
+export type ReportFacts = {
+  session: string
+  date: string
+  repo?: string
+  usage: Usage
+}
+
+const cell = (text: string) => text.replace(/\|/g, '\\|')
+
+/**
+ * The session as Markdown, for a PR, a ticket or a hand-off: what was built and
+ * where it stands, what was deployed and tested, what failed and was closed,
+ * the environment's runs, and the spend.
+ */
+export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, windowMs: number): string => {
+  const hours = Math.round(windowMs / 3_600_000)
+  const all = spends(dashboard.activity)
+  const runs = recentRuns(dashboard.platform.runs, now, windowMs)
+  const rows = components(dashboard.activity)
+  const needs = attention(dashboard, now, windowMs)
+  const closed = closedCount(dashboard, now, windowMs)
+  const u = facts.usage
+  const lines: string[] = [
+    '# Boomi Companion session report',
+    '',
+    [
+      `Session ${facts.session}`,
+      facts.date,
+      u.startedAt === undefined ? undefined : duration(now - u.startedAt),
+      u.model,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  ]
+  if (facts.repo) lines.push(`Repository: ${facts.repo}`)
+
+  lines.push('', `## Components (${rows.length})`, '')
+  if (rows.length === 0) lines.push('None this session.')
+  else {
+    lines.push('| Component | Type | Where it stands | Tokens | Cost |', '|---|---|---|---|---|')
+    for (const row of rows) {
+      const spent = spendOf(row.ids, all)
+      const where = stages(row, runs).map(s => `${STATUS[s.level].icon} ${s.text}`).join(' · ')
+      lines.push(
+        `| ${cell(row.name)} | ${cell(friendlyType(row.type) ?? '')} | ${cell(where)} | ${spent.tokens ? formatTokens(spent.tokens) : ''} | ${formatCost(spent.usd) ?? ''} |`,
+      )
+    }
+  }
+
+  const shipped = dashboard.activity.filter(a => (a.kind === 'deploy' || a.kind === 'undeploy' || a.kind === 'test') && a.outcome !== 'running')
+  lines.push('', '## Deployments and tests', '')
+  if (shipped.length === 0) lines.push('None this session.')
+  for (const a of shipped) lines.push(`- ${STATUS[levelOf(a)].icon} ${describe(a)}${a.executionId ? ` (execution ${a.executionId})` : ''}`)
+
+  lines.push('', '## Needs attention', '')
+  if (needs.length === 0) lines.push('Nothing open.')
+  for (const n of needs) lines.push(`- ${STATUS[n.level].icon} ${n.title}`)
+  if (closed > 0) lines.push(`- ☑ ${closed} closed as expected or handled`)
+
+  lines.push('', `## Process runs in Boomi, last ${hours}h`, '')
+  if (dashboard.platform.phase !== 'ok') lines.push(dashboard.platform.message)
+  else lines.push(runsSummary(runs, hours).text)
+
+  lines.push('', '## Spend', '')
+  if (u.usd !== undefined) lines.push(`- Cost: ${formatCost(u.usd)}`)
+  if (u.split) lines.push(`- Tokens: ${u.split}`)
+  for (const line of u.modelSplits ?? []) lines.push(`  - ${line}`)
+  return lines.join('\n')
 }

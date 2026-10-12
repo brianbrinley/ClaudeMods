@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
-import type { Activity, Dashboard, Ledger, PaneTheme, Platform, Watched } from '../types'
+import type { Activity, Dashboard, DiagnosisState, Ledger, PaneTheme, Platform, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -19,6 +19,9 @@ import {
   attention,
   closeItem,
   closedCount,
+  diagnose,
+  fixPrompt,
+  report,
   compareWatched,
   componentOf,
   componentPath,
@@ -91,6 +94,9 @@ const pickedTheme = atom({ plugin: 'boomi-dashboard', key: 'theme' } as const, n
 /** Whether the Process runs in Boomi section is folded to one line, for this session. */
 const isRunsCollapsed = atom({ plugin: 'boomi-dashboard', key: 'isRunsCollapsed' } as const, false)
 
+/** What each failed execution's log says, by execution ID, once someone asks Why?. */
+const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const, {} as Record<string, DiagnosisState>)
+
 /** The flamingo's animation frame, moved on while Claude works. */
 const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
 
@@ -118,6 +124,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
 
 const PANE = 'boomi-dashboard'
 const WATCH_KEY = 'watched'
+const SCRIPTS_KEY = 'scriptsDir'
 const THEME_KEY = 'theme'
 
 /** How often the flamingo's frame moves on while Claude works. */
@@ -257,6 +264,7 @@ const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun
     started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found })
   }
   if (!current.activity.some(a => a.kind !== 'other')) openPane($)
+  void rememberScripts($, runs)
   await record($, list => [...list, ...started])
   void refreshStatus($, settings)
   return started
@@ -516,6 +524,111 @@ const seen = async ($: Engine): Promise<string> => {
   return `Marked as seen: ${failedRuns.length} failed run${failedRuns.length === 1 ? '' : 's'} and ${changed} watched change${changed === 1 ? '' : 's'}. They leave Needs attention; the runs stay listed under Process runs in Boomi.`
 }
 
+// --- Why a run failed ------------------------------------------------------------
+
+/** Notes where Companion's scripts are, from a command that ran one by its path. */
+const rememberScripts = async ($: Engine, runs: readonly ScriptRun[]) => {
+  const dir = runs.find(run => run.scriptsDir)?.scriptsDir
+  if (!dir) return
+  const absolute = dir.startsWith('/') ? dir : `${await $.session.cwd()}/${dir}`
+  await $.store.set(SCRIPTS_KEY, absolute).catch(() => undefined)
+}
+
+/**
+ * Companion's scripts folder: the one Claude last ran a script from, else the
+ * newest bc-integration in the plugin cache. Undefined when neither is there.
+ */
+const findScripts = async ($: Engine): Promise<string | undefined> => {
+  const known = await $.store.get(SCRIPTS_KEY).catch(() => undefined)
+  if (typeof known === 'string' && (await $.fs.exists(`${known}/boomi-execution-query.sh`).catch(() => false))) return known
+  const found = await $.process
+    .run(['bash', '-c', 'ls -d "$HOME"/.claude/plugins/cache/*/bc-integration/*/skills/boomi-integration/scripts 2>/dev/null | sort -V | tail -1'], { timeoutMs: 10_000 })
+    .catch(() => undefined)
+  const dir = found?.stdout.trim()
+  return dir ? dir : undefined
+}
+
+const setDiagnosis = ($: Engine, executionId: string, state: DiagnosisState) =>
+  update($, diagnoses, all => ({ ...all, [executionId]: state }))
+
+/**
+ * Reads a failed execution's log with Companion's own boomi-execution-query.sh
+ * --logs, run in the workspace so it finds Companion's .env, and keeps what the
+ * log says went wrong. The API token never reaches the result: the script
+ * doesn't print it, and any copy of it is masked anyway.
+ */
+const explain = async ($: Engine, settings: Settings, executionId: string): Promise<DiagnosisState> => {
+  await setDiagnosis($, executionId, { phase: 'loading' })
+  let state: DiagnosisState
+  try {
+    const scripts = await findScripts($)
+    if (!scripts) {
+      state = { phase: 'error', error: "Couldn't find Boomi Companion's scripts. Run any Companion script once, then try again." }
+    } else {
+      const ran = await $.process.run(['bash', `${scripts}/boomi-execution-query.sh`, '--execution-id', executionId, '--logs'], {
+        cwd: await $.session.cwd(),
+        timeoutMs: 240_000,
+      })
+      const loaded = await loadCredentials($, settings).catch(() => 'unavailable')
+      const mask = (text: string) => (typeof loaded === 'string' || !loaded.apiToken ? text : text.split(loaded.apiToken).join('‹redacted›'))
+      if (ran.exitCode !== 0) {
+        const why = `${ran.stderr}\n${ran.stdout}`.split(/\r?\n/).find(line => /^ERROR:/.test(line.trim()))
+        state = { phase: 'error', error: mask(why?.trim() ?? `The log script exited with ${ran.exitCode}.`) }
+      } else {
+        const found = diagnose(mask(ran.stdout))
+        state = { phase: 'ready', lines: found.lines, severe: found.severe, warnings: found.warnings }
+      }
+    }
+  } catch (error) {
+    state = { phase: 'error', error: messageOf(error) }
+  }
+  await setDiagnosis($, executionId, state)
+  return state
+}
+
+/** Puts a fix request for a failed execution in the prompt box, after whatever is typed there. */
+const askToFix = async ($: Engine, title: string, executionId: string) => {
+  const state = (await read($, diagnoses))[executionId]
+  if (state?.phase !== 'ready') return
+  const draft = await $.prompt.read().catch(() => ({ text: '', cursor: 0 }))
+  const text = fixPrompt(title, executionId, { lines: state.lines ?? [], severe: state.severe ?? 0, warnings: state.warnings ?? 0 })
+  await $.prompt.fill({ text: draft.text.trim() ? `\n${text}` : text, mode: draft.text.trim() ? 'append' : 'replace' }).catch(() => undefined)
+}
+
+/** /bc-dashboard why <number>: reads the log of a Needs attention item, by its number. */
+const whyByNumber = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const needs = attention(await read($, dashboard), await $.clock.now(), settings.windowMs)
+  const item = needs[Number(target) - 1]
+  if (!item) return `Usage: /bc-dashboard why <1-${needs.length}>, a number from /bc-dashboard text.`
+  if (!item.executionId) return `${item.title} has no execution log to read.`
+  const state = await explain($, settings, item.executionId)
+  if (state.phase !== 'ready') return `Couldn't read the log of ${item.executionId}: ${state.error}`
+  return [`${item.title} (execution ${item.executionId}):`, ...(state.lines ?? []).map(line => `  ${line}`)].join('\n')
+}
+
+// --- The session report ------------------------------------------------------------
+
+const reportNow = async ($: Engine, settings: Settings) => {
+  const now = await $.clock.now()
+  const footer = await footerOf($)
+  return report(
+    await read($, dashboard),
+    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await usageOf($) },
+    now,
+    settings.windowMs,
+  )
+}
+
+/** /bc-dashboard report [save]: the report as text, and with save, as a file in the workspace too. */
+const reportCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const text = await reportNow($, settings)
+  if (target !== 'save') return text
+  const stamp = new Date(await $.clock.now()).toISOString().slice(0, 16).replace(/[-:T]/g, '')
+  const path = `${await $.session.cwd()}/boomi-session-report-${stamp}.md`
+  await $.fs.write(path, `${text}\n`)
+  return `Saved to ${path}.\n\n${text}`
+}
+
 /** Closes one Needs attention item by its key, and keeps that for later sessions. */
 const close = async ($: Engine, key: string) => {
   await update($, dashboard, c => closeItem(c, key))
@@ -568,6 +681,8 @@ const USAGE = [
   '/bc-dashboard unwatch <id>    stop watching it',
   '/bc-dashboard close <n|all>   close a Needs attention item by its number, or all of them',
   '/bc-dashboard reopen          bring closed items back',
+  '/bc-dashboard why <n>         read the log of a failed run or test and show what failed',
+  '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
   '/bc-dashboard seen            mark failed runs and watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
@@ -603,6 +718,10 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return seen($)
     case 'close':
       return closeByNumber($, settings, target)
+    case 'why':
+      return whyByNumber($, settings, target)
+    case 'report':
+      return reportCommand($, settings, target)
     case 'reopen':
       return reopen($)
     case 'theme':
@@ -690,12 +809,17 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
+      argumentHint: 'text | poll | why <n> | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
     })
     await $.tool.register({
       name: 'summary',
       description:
         "The Boomi Companion session at a glance: what failed and needs attention (with what to do), each component's stage (edited, saved to Boomi with its version, deployed, tested), recent Companion activity, the live environment's recent runs, watched components and the session's cost. Use it to report progress or to find what to fix next.",
+    })
+    await $.tool.register({
+      name: 'report',
+      description:
+        "The Boomi Companion session as a Markdown report: each component and where it stands, deployments and tests, what needs attention and what was closed, the environment's runs, and the session's cost and tokens. Use it for a PR description, a ticket or a hand-off.",
     })
     await $.tool.register({
       name: 'watch',
@@ -761,6 +885,10 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: 'mcp__boomi-dashboard__summary' }, async $ => ({
     result: await summaryNow($, settings).catch(error => `The dashboard couldn't build its summary: ${messageOf(error)}`),
+  }))
+
+  on('tool.call', { tool: 'mcp__boomi-dashboard__report' }, async $ => ({
+    result: await reportNow($, settings).catch(error => `The dashboard couldn't build its report: ${messageOf(error)}`),
   }))
 
   on('tool.call', { tool: 'mcp__boomi-dashboard__watch' }, async ($, e) => ({
@@ -874,6 +1002,7 @@ export const register: Register = (on, options) => {
     const hours = Math.round(settings.windowMs / 3_600_000)
     const needs = attention(current, now, settings.windowMs)
     const closedItems = closedCount(current, now, settings.windowMs)
+    const whys = await read($, diagnoses)
     const rows = components(current.activity)
     const runs = recentRuns(current.platform.runs, now, settings.windowMs)
     const feed = current.activity.slice(-6).reverse()
@@ -994,20 +1123,36 @@ export const register: Register = (on, options) => {
 
         {heading('Needs attention')}
         {needs.length === 0 && line('healthy', 'All clear.')}
-        {needs.map((n, i) => (
-          <Box flexDirection="column">
-            <Box>
-              <Box flexShrink={0}>
-                <Button key={`close-${i}`} label="☐" onPress={() => close($, n.key)} />
-                {t(' ')}
+        {needs.map((n, i) => {
+          const why = n.executionId ? whys[n.executionId] : undefined
+          return (
+            <Box flexDirection="column">
+              <Box>
+                <Box flexShrink={0}>
+                  <Button key={`close-${i}`} label="☐" onPress={() => close($, n.key)} />
+                  {t(' ')}
+                </Box>
+                <Box flexGrow={1} flexShrink={1}>
+                  {line(n.level, n.title, ago(n.at, now))}
+                </Box>
               </Box>
-              <Box flexGrow={1} flexShrink={1}>
-                {line(n.level, n.title, ago(n.at, now))}
-              </Box>
+              {!why && t(`      ${n.hint}`, { color: p.muted })}
+              {why?.phase === 'loading' && t('      Reading the execution log…', { color: p.muted })}
+              {why?.phase === 'error' && t(`      ${why.error}`, { color: p.muted })}
+              {why?.phase === 'ready' && t(`      The log (${why.severe ?? 0} severe, ${why.warnings ?? 0} warnings):`, { color: p.muted })}
+              {why?.phase === 'ready' && (why.lines ?? []).map(text => t(`        ${text}`))}
+              {n.executionId && (
+                <Box>
+                  {t('      ')}
+                  {why?.phase !== 'ready' && why?.phase !== 'loading' && (
+                    <Button key={`why-${i}`} label="Why?" onPress={() => void explain($, settings, n.executionId!)} />
+                  )}
+                  {why?.phase === 'ready' && <Button key={`fix-${i}`} label="Ask Claude to fix" onPress={() => askToFix($, n.title, n.executionId!)} />}
+                </Box>
+              )}
             </Box>
-            {t(`      ${n.hint}`, { color: p.muted })}
-          </Box>
-        ))}
+          )
+        })}
         {closedItems > 0 && (
           <Box>
             {t(`☑ ${closedItems} closed  `, { color: p.muted })}

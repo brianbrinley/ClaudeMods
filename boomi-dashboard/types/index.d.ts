@@ -110,11 +110,21 @@ export type Dashboard = {
   closedSteps?: number[]
 }
 
+/** Reading a failed execution's log: fetching, what it says, or why it couldn't be read. */
+export type DiagnosisState = {
+  phase: 'loading' | 'ready' | 'error'
+  /** The log's SEVERE lines (else its last few), and how many SEVERE and WARNING lines it has. */
+  lines?: string[]
+  severe?: number
+  warnings?: number
+  error?: string
+}
+
 /** The pane's colors: Valence Day, Valence Night, or the terminal's own theme. */
 export type PaneTheme = 'day' | 'night' | 'terminal'
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean }
+    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean; diagnoses: Record<string, DiagnosisState> }
   }
 }

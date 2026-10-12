@@ -136,7 +136,7 @@ test('a failed test needs attention, with what to do, and is toasted', async ($,
   const status = await $.command.run(dashboard())
   expect(status.text).toContain('Needs attention (1):')
   expect(status.text).toContain('✗ Test of')
-  expect(status.text).toContain('Ask Claude to read the execution log (0490202b…)')
+  expect(status.text).toContain('Execution 0490202b…: press Why? to read what failed.')
   expect(toasts.some(t => t.includes('ended ERROR'))).toBe(true)
 })
 
@@ -397,6 +397,40 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await pane.find({ type: 'Button', key: 'close-0' })).toBeDefined()
     await pane.press({ key: 'close-0' })
   })
+
+  test(`on ${surface}, Why? reads a failed run's log, and Ask Claude to fix drafts the request`, async ($, on) => {
+    world(on)
+    mock.store(on)
+    mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-test' })
+    on('http.fetch', async (_$, e) => {
+      const result = e.url.endsWith('EnvironmentAtomAttachment/query') ? [{ atomId: 'atom-1' }] : RUNS
+      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
+    })
+    const ran: string[][] = []
+    on('process.run', async (_$, e) => {
+      ran.push([...e.argv])
+      if (e.argv[0] === 'bash' && e.argv[1] === '-c') return { value: { exitCode: 0, stdout: `${SKILL}/scripts\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      const log = `2026-10-12T11:05:01Z\tSEVERE\tParse Order\tBad JSON near secret-token-value`
+      return { value: { exitCode: 0, stdout: log, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+    const fills: string[] = []
+    on('prompt.read', async () => ({ value: { text: 'half typed', cursor: 10 } }))
+    on('prompt.fill', async (_$, e) => {
+      fills.push(`${e.mode}:${e.text}`)
+      return { isFilled: true }
+    })
+    await $.command.run(dashboard('poll'))
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
+    expect((await pane.find({ type: 'Button', key: 'why-0' }))?.props.label).toBe('Why?')
+    await pane.press({ key: 'why-0' })
+    expect(ran.at(-1)).toEqual(['bash', `${SKILL}/scripts/boomi-execution-query.sh`, '--execution-id', 'execution-81f61084-fd93-4565-9bda-9bf0d4b4f102', '--logs'])
+    expect(await pane.find({ text: /1 severe, 0 warnings/ })).toBeDefined()
+    expect(await pane.find({ text: /Bad JSON near ‹redacted›/ })).toBeDefined()
+    expect(await pane.find({ text: /secret-token-value/ })).toBeUndefined()
+    await pane.press({ key: 'fix-0' })
+    expect(fills.at(-1)).toContain('append:\n')
+    expect(fills.at(-1)).toContain('ended ERROR in the environment (execution execution-81f61084-fd93-4565-9bda-9bf0d4b4f102)')
+  })
 }
 
 
@@ -500,4 +534,43 @@ test('/bc-dashboard close takes an item by its number, and reopen brings it back
   expect(after.text).toContain('1 closed: /bc-dashboard reopen brings them back')
   await $.command.run(dashboard('reopen'))
   expect((await $.command.run(dashboard('text'))).text).toContain('Needs attention (1):')
+})
+
+test('/bc-dashboard why <n> reads the log in text, and says why when it can\'t', async ($, on) => {
+  world(on, { [FILE]: ORDERS, 'scripts/boomi-execution-query.sh': '' })
+  mock.store(on)
+  shell(on, 'Execution completed: status=ERROR, executionId=execution-0490202b-2e2f')
+  on('process.run', async (_$, e) =>
+    e.argv[1] === '-c'
+      ? { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      : { value: { exitCode: 0, stdout: 'SEVERE\tx\ty', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } },
+  )
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
+  const why = await $.command.run(dashboard('why 1'))
+  expect(why.text).toContain('(execution execution-0490202b-2e2f):')
+  expect(why.text).toContain('SEVERE\tx\ty')
+  expect((await $.command.run(dashboard('why 5'))).text).toContain('Usage: /bc-dashboard why <1-1>')
+})
+
+test('/bc-dashboard report prints the session as Markdown, saves it, and Claude can ask for it', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  mock.store(on)
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  const written: { path: string; text: string }[] = []
+  on('fs.write', async (_$, e) => {
+    written.push({ path: e.path, text: e.text })
+    return { value: undefined }
+  })
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  const text = await $.command.run(dashboard('report'))
+  expect(text.text).toContain('# Boomi Companion session report')
+  expect(text.text).toContain('| Orders Sync | process | ✓ saved v4 |')
+  expect(text.text).toContain('Repository: https://github.com/brianbrinley/ClaudeMods')
+  expect(written).toEqual([])
+  const saved = await $.command.run(dashboard('report save'))
+  expect(saved.text).toContain('Saved to /work/boomi-session-report-')
+  expect(written[0]!.path).toMatch(/^\/work\/boomi-session-report-\d{12}\.md$/)
+  expect(written[0]!.text).toContain('# Boomi Companion session report')
+  const tool = await $.tool.call({ tool: 'mcp__boomi-dashboard__report' } as never)
+  expect(JSON.stringify(tool)).toContain('Boomi Companion session report')
 })

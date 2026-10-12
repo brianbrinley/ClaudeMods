@@ -3,6 +3,9 @@ import { expect, test } from 'claude-code/testing'
 import {
   attention,
   closeItem,
+  diagnose,
+  fixPrompt,
+  report,
   closedCount,
   reopenAll,
   compareWatched,
@@ -71,30 +74,33 @@ const act = (kind: Activity['kind'], outcome: Activity['outcome'], subject: stri
 
 const FILE = 'active-development/processes/Orders.xml'
 
+/** The script runs in a command, without the folder each ran from (its own test checks that). */
+const runsIn = (command: string) => scriptRuns(command).map(({ scriptsDir: _dir, ...run }) => run)
+
 test('scriptRuns finds the Companion scripts a command runs and what they name', () => {
   expect(
-    scriptRuns(
+    runsIn(
       `cd work && bash scripts/boomi-component-push.sh ${FILE} --branch dev && bash scripts/boomi-deploy.sh ${FILE} --deployment-notes "first cut"`,
     ),
   ).toEqual([
     { kind: 'push', file: `work/${FILE}` },
     { kind: 'deploy', file: `work/${FILE}` },
   ])
-  expect(scriptRuns(`bash scripts/boomi-test-execute.sh --process-id ${ID} --test-data in.json`)).toEqual([{ kind: 'test', processId: ID }])
-  expect(scriptRuns('bash scripts/boomi-undeploy.sh dep-123')).toEqual([{ kind: 'undeploy', deploymentId: 'dep-123' }])
-  expect(scriptRuns(`bash scripts/boomi-component-pull.sh --component-id ${ID}`)).toEqual([{ kind: 'pull', componentId: ID }])
+  expect(runsIn(`bash scripts/boomi-test-execute.sh --process-id ${ID} --test-data in.json`)).toEqual([{ kind: 'test', processId: ID }])
+  expect(runsIn('bash scripts/boomi-undeploy.sh dep-123')).toEqual([{ kind: 'undeploy', deploymentId: 'dep-123' }])
+  expect(runsIn(`bash scripts/boomi-component-pull.sh --component-id ${ID}`)).toEqual([{ kind: 'pull', componentId: ID }])
 })
 
 test("scriptRuns notes Companion's other scripts, and finds scripts inside bash -c", () => {
-  expect(scriptRuns('bash scripts/boomi-component-search.sh --name Orders')).toEqual([{ kind: 'other', script: 'component-search' }])
-  expect(scriptRuns(`bash -c 'cd x && bash scripts/boomi-deploy.sh ${FILE}'`)).toEqual([{ kind: 'deploy', file: `x/${FILE}` }])
+  expect(runsIn('bash scripts/boomi-component-search.sh --name Orders')).toEqual([{ kind: 'other', script: 'component-search' }])
+  expect(runsIn(`bash -c 'cd x && bash scripts/boomi-deploy.sh ${FILE}'`)).toEqual([{ kind: 'deploy', file: `x/${FILE}` }])
 })
 
 test('scriptRuns leaves out help, connection tests, the shared library and other commands', () => {
-  expect(scriptRuns('bash scripts/boomi-component-push.sh --test-connection')).toEqual([])
-  expect(scriptRuns('bash scripts/boomi-deploy.sh --list-environments')).toEqual([])
-  expect(scriptRuns('source scripts/boomi-common.sh')).toEqual([])
-  expect(scriptRuns('git status')).toEqual([])
+  expect(runsIn('bash scripts/boomi-component-push.sh --test-connection')).toEqual([])
+  expect(runsIn('bash scripts/boomi-deploy.sh --list-environments')).toEqual([])
+  expect(runsIn('source scripts/boomi-common.sh')).toEqual([])
+  expect(runsIn('git status')).toEqual([])
 })
 
 test('componentPath names a component file the same way from a script and from an edit', () => {
@@ -165,7 +171,8 @@ test('needs attention lists current failures with a next step, and a later fix c
   const failing = dashboard([act('test', 'failed', 'Orders Sync', NOW, { componentId: ID, executionStatus: 'ERROR', executionId: 'execution-0490202b-2e2f' })])
   const [item] = attention(failing, NOW, 24 * HOUR)
   expect(item!.title).toBe('Test of Orders Sync ended ERROR')
-  expect(item!.hint).toContain('execution log (0490202b…)')
+  expect(item!.hint).toContain('Execution 0490202b…: press Why?')
+  expect(item!.executionId).toBe('execution-0490202b-2e2f')
 
   const fixed = dashboard([...failing.activity, act('test', 'ok', 'Orders Sync', NOW + 1, { componentId: ID, executionStatus: 'COMPLETE' })])
   expect(attention(fixed, NOW, 24 * HOUR)).toEqual([])
@@ -291,18 +298,18 @@ test('pixelCells packs two pixel rows into each cell with half blocks', () => {
 })
 
 test("a script that's only read or searched isn't a run", () => {
-  expect(scriptRuns('cat scripts/boomi-deploy.sh')).toEqual([])
-  expect(scriptRuns('grep -n SUCCESS scripts/boomi-deploy.sh | head')).toEqual([])
-  expect(scriptRuns('sed -n 1,40p skills/boomi-integration/scripts/boomi-deploy.sh')).toEqual([])
-  expect(scriptRuns(`BOOMI_X=1 timeout 60 bash -x scripts/boomi-deploy.sh ${FILE}`)).toEqual([{ kind: 'deploy', file: FILE }])
-  expect(scriptRuns(`./scripts/boomi-deploy.sh ${FILE}; echo done`)).toEqual([{ kind: 'deploy', file: FILE }])
+  expect(runsIn('cat scripts/boomi-deploy.sh')).toEqual([])
+  expect(runsIn('grep -n SUCCESS scripts/boomi-deploy.sh | head')).toEqual([])
+  expect(runsIn('sed -n 1,40p skills/boomi-integration/scripts/boomi-deploy.sh')).toEqual([])
+  expect(runsIn(`BOOMI_X=1 timeout 60 bash -x scripts/boomi-deploy.sh ${FILE}`)).toEqual([{ kind: 'deploy', file: FILE }])
+  expect(runsIn(`./scripts/boomi-deploy.sh ${FILE}; echo done`)).toEqual([{ kind: 'deploy', file: FILE }])
 })
 
 test('a file named after a cd is read from that folder', () => {
-  const [run] = scriptRuns('cd active-development && bash ../scripts/boomi-deploy.sh processes/Listener.xml')
+  const [run] = runsIn('cd active-development && bash ../scripts/boomi-deploy.sh processes/Listener.xml')
   expect(run!.file).toBe('active-development/processes/Listener.xml')
   expect(componentPath(run!.file!)).toBe('active-development/processes/Listener.xml')
-  expect(scriptRuns('cd /w/active-development/processes && bash /w/scripts/boomi-deploy.sh ./Listener.xml')[0]!.file).toBe(
+  expect(runsIn('cd /w/active-development/processes && bash /w/scripts/boomi-deploy.sh ./Listener.xml')[0]!.file).toBe(
     '/w/active-development/processes/Listener.xml',
   )
 })
@@ -383,7 +390,7 @@ test('a multi-line command runs each script, each with its own file', () => {
     `bash ${SKILL}/scripts/boomi-component-create.sh active-development/profiles/OrderRequest.xml`,
     `bash ${SKILL}/scripts/boomi-component-create.sh active-development/processes/Listener.xml`,
   ].join('\n')
-  expect(scriptRuns(command)).toEqual([
+  expect(runsIn(command)).toEqual([
     { kind: 'create', file: 'active-development/profiles/OrderRequest.xml' },
     { kind: 'create', file: 'active-development/processes/Listener.xml' },
   ])
@@ -391,8 +398,8 @@ test('a multi-line command runs each script, each with its own file', () => {
 
 test('a script run in a loop is a run', () => {
   const command = `for f in active-development/profiles/*.xml; do bash ${SKILL}/scripts/boomi-component-create.sh "$f"; done`
-  expect(scriptRuns(command).map(run => run.kind)).toEqual(['create'])
-  expect(scriptRuns(`if true; then bash ${SKILL}/scripts/boomi-deploy.sh ${FILE}; fi`)).toEqual([{ kind: 'deploy', file: FILE }])
+  expect(runsIn(command).map(run => run.kind)).toEqual(['create'])
+  expect(runsIn(`if true; then bash ${SKILL}/scripts/boomi-deploy.sh ${FILE}; fi`)).toEqual([{ kind: 'deploy', file: FILE }])
 })
 
 test('each result in the output is read on its own, so a loop of creates is several components', () => {
@@ -452,6 +459,7 @@ test('a failed run of a session component needs attention with that context, unt
   const [item] = attention(state, NOW, 24 * HOUR)
   expect(item!.title).toBe(`Listener run of ${LISTENER} ended ERROR`)
   expect(item!.hint).toContain('Execution 81f61084…, a component from this session')
+  expect(item!.executionId).toBe('execution-81f61084-fd93-4565-9bda-9bf0d4b4f102')
   expect(attention({ ...state, seenRuns: ['execution-81f61084-fd93-4565-9bda-9bf0d4b4f102'] }, NOW, 24 * HOUR)).toEqual([])
 })
 
@@ -502,4 +510,51 @@ test('closing a run marks it seen, and closing a watched change clears it', () =
   expect(attention(closed, NOW, 24 * HOUR)).toEqual([])
   expect(closed.seenRuns).toEqual(['execution-e9'])
   expect(closed.watched[0]!.changedBy).toBeUndefined()
+})
+
+test("a script named by its path tells where Companion's scripts are", () => {
+  expect(scriptRuns(`bash ${SKILL}/scripts/boomi-deploy.sh ${FILE}`)[0]!.scriptsDir).toBe(`${SKILL}/scripts`)
+  expect(scriptRuns(`cd /w && bash scripts/boomi-deploy.sh ${FILE}`)[0]!.scriptsDir).toBe('/w/scripts')
+  expect(scriptRuns(`boomi-deploy.sh ${FILE}`)[0]!.scriptsDir).toBeUndefined()
+})
+
+const LOG = [
+  'Executing test for process 33333333 on atom a1',
+  '2026-10-12T11:05:00Z\tINFO\tStart\tExecuting Process OrderValidator - Listener Validate Order',
+  '2026-10-12T11:05:01Z\tWARNING\tMap\tNo data produced from map',
+  '2026-10-12T11:05:01Z\tSEVERE\tParse Order\tUnexpected character (\'}\' (code 125)) at line 1, column 18',
+  '2026-10-12T11:05:01Z\tSEVERE\tException\tOrder JSON is not valid',
+].join('\n')
+
+test('diagnose picks the SEVERE lines out of a process log, without their timestamps', () => {
+  expect(diagnose(LOG)).toEqual({
+    lines: ["SEVERE\tParse Order\tUnexpected character ('}' (code 125)) at line 1, column 18", 'SEVERE\tException\tOrder JSON is not valid'],
+    severe: 2,
+    warnings: 1,
+  })
+  expect(diagnose('a\nb\nc').lines).toEqual(['a', 'b', 'c'])
+})
+
+test('the fix request names the execution and quotes what the log said', () => {
+  const text = fixPrompt('Listener run of X ended ERROR', 'execution-81f6', { lines: ['SEVERE\tParse Order\tbad'], severe: 1, warnings: 0 })
+  expect(text).toContain('Listener run of X ended ERROR (execution execution-81f6). Its process log says:')
+  expect(text).toContain('  SEVERE\tParse Order\tbad')
+  expect(text).toContain('push, redeploy and test it again')
+})
+
+test('the session report has each section, and a pipe in a name keeps the table intact', () => {
+  const state = dashboard([
+    act('push', 'ok', 'A | B', NOW - 60_000, { file: FILE, version: '2' }),
+    act('deploy', 'ok', 'A | B', NOW - 50_000, { file: FILE }),
+    act('test', 'failed', 'A | B', NOW - 40_000, { file: FILE, executionStatus: 'ERROR', executionId: 'execution-1' }),
+  ])
+  const text = report(state, { session: '3adaec6a', date: '2026-10-12', repo: 'https://github.com/o/r', usage: { usd: 0.42, split: '12k new (…) · 80k cache reads', model: 'Opus 5.5', startedAt: NOW - 3_600_000 } }, NOW, 24 * HOUR)
+  expect(text).toContain('# Boomi Companion session report')
+  expect(text).toContain('Session 3adaec6a · 2026-10-12 · 1h 0m · Opus 5.5')
+  expect(text).toContain('Repository: https://github.com/o/r')
+  expect(text).toContain('| A \\| B |  | ✓ saved v2 · ✓ deployed · ✗ test ERROR |')
+  expect(text).toContain('- ✗ Test of A | B ended ERROR (execution execution-1)')
+  expect(text).toContain('## Needs attention')
+  expect(text).toContain('- Cost: $0.42')
+  expect(text).toContain('- Tokens: 12k new (…) · 80k cache reads')
 })
