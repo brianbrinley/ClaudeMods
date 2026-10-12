@@ -7,7 +7,28 @@
 
 A Claude Code mod that shows where your [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) build stands while Claude works: each component's stage, what failed and what to do about it, what the session has cost, and the environment's recent runs.
 
-**Install it:** paste the prompt in [INSTALL.md](INSTALL.md) into Claude Code.
+## Install
+
+Copy this prompt into a Claude Code session started from your Boomi Companion workspace (the folder with Companion's `.env`). It works for any Claude account. On Windows, run Claude Code in WSL and paste it there.
+
+```text
+Install the boomi-dashboard Claude Code mod from https://github.com/brianbrinley/ClaudeMods for my user account, so it loads in every Claude Code session on this computer.
+
+1. Clone the repo (main branch) to ~/ClaudeMods. If it's already there, run `git -C ~/ClaudeMods pull` instead.
+2. Check that ~/ClaudeMods/boomi-dashboard/.claude-plugin/plugin.json and ~/ClaudeMods/boomi-dashboard/hooks/register.tsx exist, then run `claude plugin validate ~/ClaudeMods/boomi-dashboard` and `claude plugin test ~/ClaudeMods/boomi-dashboard` and show me the results.
+3. Add the mod to the "env" block of my user settings file, ~/.claude/settings.json (not the project's settings):
+   "CLAUDE_CODE_PLUGIN_DIRS": "<absolute path to ~/ClaudeMods/boomi-dashboard>"
+   Use the absolute path, with my home folder spelled out. If CLAUDE_CODE_PLUGIN_DIRS already has a value, append to it with ":" instead of replacing it. Keep everything else in the file as it is, and show me the diff before you save.
+4. Check that Boomi Companion (bc-integration) is installed. If it isn't, tell me how to install it, but don't install it yourself.
+5. Run `perl -MJSON::PP -e 'print "ok\n"'`. If it doesn't print ok, tell me the command to install Perl for this system (on Debian or Ubuntu, including WSL: `sudo apt install perl`), but don't run it yourself.
+6. Tell me to restart Claude Code. After the restart I'll run /bc-dashboard to check it loaded.
+
+Never read, print or copy my .env or any Boomi credentials. The mod reads them itself.
+```
+
+**After the restart:** `/bc-dashboard` should open the pane with nothing needing attention, and `/bc-dashboard poll` checks the connection to Boomi (**Process runs in Boomi** says what's missing, if anything). Perl is only for **Past Companion sessions**; macOS and Linux have it.
+
+**To update:** `git -C ~/ClaudeMods pull`, then restart Claude Code.
 
 ## What you see
 
@@ -117,7 +138,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 
 ## Setup and settings
 
-- **Your own computer:** [INSTALL.md](INSTALL.md).
+- **Your own computer:** see [Install](#install).
 - **Claude Code on the web:** add the folder to `CLAUDE_CODE_PLUGIN_DIRS`, separating mods with `:`.
 - **One terminal session:** `claude --plugin-dir boomi-dashboard`.
 
