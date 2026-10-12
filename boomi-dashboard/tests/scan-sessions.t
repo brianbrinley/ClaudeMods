@@ -43,7 +43,10 @@ my $talked = 'bbbbbbbb-1111-2222-3333-444444444444';
 
 write_lines(
   "$root/-work-orders/$built.jsonl",
-  { type => 'user', sessionId => $built, message => { content => 'build it' } },
+  { type => 'user', sessionId => $built, isMeta => JSON::PP::true, message => { content => 'meta note' } },
+  { type => 'user', sessionId => $built, message => { content => '<command-name>/clear</command-name>' } },
+  { type => 'user', sessionId => $built, message => { content => [{ type => 'text', text => "Build the   orders\nsync process" }] } },
+  { type => 'user', sessionId => $built, message => { content => 'a later message' } },
   # One reply written as two lines, one per content block: counted once.
   reply(session => $built, at => '2026-10-01T10:00:00Z', id => 'msg_1', request => 'req_1', content => [{ type => 'text', text => 'Pushing' }]),
   reply(session => $built, at => '2026-10-01T10:00:00Z', id => 'msg_1', request => 'req_1',
@@ -74,8 +77,18 @@ is($s->{project}, '/work/orders', 'with its working folder');
 is($s->{costUsd}, 1.25, "takes Claude Code's latest running cost");
 is_deeply($s->{models}{'claude-opus-5-5'}, { input => 20, output => 40, cacheRead => 600, cacheWrite => 80, calls => 2 }, 'counts each reply once');
 is(scalar @{ $s->{commands} }, 2, "keeps the commands that name a script, the subagent's too");
+is($s->{firstPrompt}, 'Build the orders sync process', 'its first request, on one line, past meta notes and command echoes');
+is($s->{title}, undef, 'no title unless the session has one');
 is($s->{startedAt}, '2026-10-01T10:00:00Z', 'from its first reply');
 is($s->{endedAt}, '2026-10-01T11:00:00Z', 'to its last');
+
+# A title the session was given wins.
+write_lines("$root/-work-orders/$built.jsonl",
+  { type => 'custom-title', sessionId => $built, customTitle => 'Orders sync build' },
+  reply(session => $built, at => '2026-10-01T10:00:00Z', id => 'msg_9', request => 'req_9',
+    content => [$bash->('bash scripts/boomi-component-push.sh active-development/processes/Orders.xml')]));
+my ($titled) = @{ $json->decode(`perl $script --root $root`)->{sessions} };
+is($titled->{title}, 'Orders sync build', "keeps the session's own title");
 
 my $later = `perl $script --root $root --since 99999999999999`;
 is(scalar @{ $json->decode($later)->{sessions} }, 0, '--since skips older transcripts');
