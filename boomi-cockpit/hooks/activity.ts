@@ -1,16 +1,21 @@
-// Reads Boomi Companion's script runs from Claude's shell commands and their
-// output, and turns the session's activity into the cockpit's summary. Plain
-// functions: nothing here touches the engine, so the tests call them directly.
+// Reads Boomi Companion's work from Claude's tool calls and their output, and
+// turns it into the cockpit's views: each component's stage, what needs
+// attention, the recent feed and the live environment. Plain functions:
+// nothing here touches the engine, so the tests call them directly.
 
 import type { Activity, ActivityKind, Cockpit, Outcome, Run, Watched } from '../types'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
   'boomi-component-push.sh': 'push',
+  'boomi-component-pull.sh': 'pull',
   'boomi-deploy.sh': 'deploy',
   'boomi-undeploy.sh': 'undeploy',
   'boomi-test-execute.sh': 'test',
 }
+
+/** Companion's shared library, sourced by every script: never a run of its own. */
+const NOT_A_RUN = new Set(['boomi-common.sh'])
 
 /** Splits a shell command into words and separators, honoring quotes. */
 const words = (command: string): string[] => {
@@ -52,37 +57,64 @@ const words = (command: string): string[] => {
 const SEPARATOR = /^[;&|()]$/
 
 /** Options whose next word is their value, not a file. */
-const TAKES_VALUE = new Set(['--branch', '--deployment-notes', '--test-data', '--process-id', '--by-component'])
+const TAKES_VALUE = new Set([
+  '--branch',
+  '--deployment-notes',
+  '--test-data',
+  '--process-id',
+  '--by-component',
+  '--component-id',
+  '--execution-id',
+])
 
 export type ScriptRun = {
   kind: ActivityKind
   file?: string
   processId?: string
+  componentId?: string
   deploymentId?: string
+  /** For `other`: the script's name without `boomi-` and `.sh`. */
+  script?: string
+}
+
+const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefined => {
+  const name = word.split('/').pop() ?? ''
+  if (NOT_A_RUN.has(name)) return undefined
+  const kind = SCRIPTS[name]
+  if (kind) return { kind }
+  const other = name.match(/^boomi-([a-z0-9-]+)\.sh$/)
+  return other ? { kind: 'other', script: other[1] } : undefined
 }
 
 /**
- * The Companion scripts a shell command runs that the cockpit reports on, with
- * what each names. `--help`, `--test-connection` and `--list-environments`
- * don't touch a component, so they're left out.
+ * The Companion scripts a shell command runs, with what each names. Help and
+ * connection checks touch nothing, so they're left out. A script inside a
+ * quoted `bash -c '...'` is found too.
  */
 export const scriptRuns = (command: string): ScriptRun[] => {
   const runs: ScriptRun[] = []
   const tokens = words(command)
   for (let i = 0; i < tokens.length; i++) {
-    const kind = SCRIPTS[tokens[i]!.split('/').pop() ?? '']
-    if (!kind) continue
+    const token = tokens[i]!
+    if (/\s/.test(token) && token.includes('boomi-')) {
+      runs.push(...scriptRuns(token))
+      continue
+    }
+    const found = kindOf(token)
+    if (!found) continue
     const args: string[] = []
     for (const arg of tokens.slice(i + 1)) {
       if (SEPARATOR.test(arg)) break
       args.push(arg)
     }
     if (args.some(arg => ['-h', '--help', '--test-connection', '--list-environments'].includes(arg))) continue
-    const run: ScriptRun = { kind }
+    const run: ScriptRun = { kind: found.kind }
+    if (found.script) run.script = found.script
     for (let j = 0; j < args.length; j++) {
       const arg = args[j]!
       const value = args[j + 1]
       if (arg === '--process-id' && value) run.processId = value
+      else if (arg === '--component-id' && value) run.componentId = value
       else if (arg === '--by-component' && value) run.file = value
       if (TAKES_VALUE.has(arg)) {
         j++
@@ -90,11 +122,27 @@ export const scriptRuns = (command: string): ScriptRun[] => {
       }
       if (arg.startsWith('-')) continue
       if (arg.endsWith('.xml')) run.file = arg
-      else if (kind === 'undeploy') run.deploymentId = arg
+      else if (found.kind === 'undeploy') run.deploymentId = arg
     }
     runs.push(run)
   }
   return runs
+}
+
+/**
+ * A component file's path from the components folder on, so a relative path
+ * from a script and an absolute one from an edit name the same component.
+ * Undefined for a file that isn't component XML under that folder.
+ */
+export const componentPath = (path: string, dir = 'active-development'): string | undefined => {
+  if (!path.endsWith('.xml')) return undefined
+  const folder = dir.replace(/^\.?\/+|\/+$/g, '')
+  const parts = path.split('/')
+  const at = parts.lastIndexOf(folder)
+  if (at < 0) return undefined
+  const rest = parts.slice(at + 1)
+  if (rest.length === 0 || rest[0] === 'inventories') return undefined
+  return [folder, ...rest].join('/')
 }
 
 export type Reading = {
@@ -123,17 +171,19 @@ const shorten = (text: string, max = 160): string => {
 }
 
 /**
- * What a Companion script's output says happened. The scripts end with a
- * `SUCCESS:` or `ERROR:` line; a test also prints its execution's status.
+ * What a Companion script's output says happened. Most scripts end with a
+ * `SUCCESS:` or `ERROR:` line; a test prints its execution's status instead.
  */
 export const readOutput = (kind: ActivityKind, output: string, isError: boolean): Reading => {
   const success = firstLine(output, /^\s*SUCCESS:/)
   const error = firstLine(output, /^\s*ERROR:/)
   const already = kind === 'create' ? firstLine(output, /already exists with ID:/) : undefined
   const unchanged = kind === 'push' ? firstLine(output, /nothing sent to the platform/) : undefined
+  // Scripts that only read report no SUCCESS line: no error is success.
+  const reads = kind === 'pull' || kind === 'other'
   const reading: Reading = {
-    outcome: !isError && !error && (success || already || unchanged) ? 'ok' : 'failed',
-    detail: shorten(error ?? success ?? already ?? unchanged ?? (isError ? 'failed' : 'finished')),
+    outcome: !isError && !error && (reads || success || already || unchanged) ? 'ok' : 'failed',
+    detail: shorten(error ?? success ?? already ?? unchanged ?? (isError ? 'failed' : 'done')),
   }
 
   const name = output.match(/[Cc]omponent '([^']+)'|Deployed '([^']+)'/)
@@ -158,7 +208,40 @@ export const readOutput = (kind: ActivityKind, output: string, isError: boolean)
   return reading
 }
 
-// --- The summary -----------------------------------------------------------
+/** The ID, name and type on a component XML's root element. */
+export const componentOf = (xml: string): { componentId?: string; name?: string; type?: string } => {
+  const root = xml.match(/<(?:[A-Za-z]+:)?Component\b[^>]*>/)?.[0] ?? ''
+  const attr = (name: string) => root.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1] || undefined
+  return { componentId: attr('componentId'), name: attr('name'), type: attr('type') }
+}
+
+const TYPE_NAMES: Record<string, string> = {
+  process: 'process',
+  'connector-settings': 'connection',
+  'connector-action': 'operation',
+  'transform.map': 'map',
+  'transform.function': 'map function',
+  processproperty: 'process property',
+  certificate: 'certificate',
+  crossref: 'cross reference',
+  'documentcache': 'document cache',
+  webservice: 'API service',
+  'webservice.external': 'API proxy',
+  flowservice: 'flow service',
+  script: 'script',
+  'script.processing': 'script',
+  'script.mapping': 'map script',
+}
+
+/** A component type in plain words: `connector-settings` is a connection. */
+export const friendlyType = (type: string | undefined): string | undefined => {
+  if (!type) return undefined
+  if (TYPE_NAMES[type]) return TYPE_NAMES[type]
+  if (type.startsWith('profile.')) return `${type.slice('profile.'.length).toUpperCase()} profile`
+  return type
+}
+
+// --- Status --------------------------------------------------------------------
 
 export const STATUS = {
   healthy: { icon: '✓', color: '#0CA30C' },
@@ -169,172 +252,312 @@ export const STATUS = {
 
 export type Level = keyof typeof STATUS
 
-export const LEVEL_OF: Record<Outcome, Level> = {
-  ok: 'healthy',
-  running: 'warning',
-  failed: 'critical',
-  blocked: 'serious',
-}
-
 const RANK: Level[] = ['healthy', 'warning', 'serious', 'critical']
-const worst = (levels: Level[]): Level =>
+export const worst = (levels: readonly Level[]): Level =>
   levels.reduce<Level>((a, b) => (RANK.indexOf(b) > RANK.indexOf(a) ? b : a), 'healthy')
+
+const LEVEL_OF: Record<Outcome, Level> = { ok: 'healthy', running: 'warning', failed: 'critical', blocked: 'serious' }
+
+export const levelOf = (a: Activity): Level =>
+  a.outcome === 'ok' && isWarnStatus(a.executionStatus) ? 'warning' : LEVEL_OF[a.outcome]
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
-export const VERB: Record<ActivityKind, string> = {
-  create: 'created',
-  push: 'pushed',
-  deploy: 'deployed',
-  undeploy: 'undeployed',
-  test: 'tested',
+/** How long ago, in words a person reads at a glance. */
+export const ago = (then: number, now: number): string => {
+  const seconds = Math.max(0, Math.round((now - then) / 1000))
+  if (seconds < 45) return 'just now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
 }
 
-/** Each activity's level: a test that ran but warned is a warning, not a pass. */
-export const levelOf = (activity: Activity): Level =>
-  activity.outcome === 'ok' && isWarnStatus(activity.executionStatus) ? 'warning' : LEVEL_OF[activity.outcome]
-
-/** The latest run of each subject and kind: a later fix supersedes a failure. */
-export const latest = (activity: readonly Activity[]): Activity[] => {
-  const seen = new Map<string, Activity>()
-  for (const a of activity) seen.set(`${a.kind}:${a.file ?? a.subject}`, a)
-  return [...seen.values()]
+const SCRIPT_WORDS: Record<string, string> = {
+  'component-search': 'Searched components',
+  'component-diff': 'Compared a component',
+  'execution-query': 'Read execution results',
+  'env-check': 'Checked the Boomi connection',
+  'folder-create': 'Created a folder',
+  'folder-list': 'Listed folders',
+  extensions: 'Read environment extensions',
+  branch: 'Worked with branches',
+  'version-history': 'Read version history',
+  'shared-server-info': 'Read shared server info',
+  'wss-test': 'Tested a web service listener',
 }
 
-export type Tile = { label: string; level: Level; text: string }
-
-/** The cockpit's four areas, each with its worst current state. */
-export const tiles = (cockpit: Cockpit): Tile[] => {
-  const current = latest(cockpit.activity)
-  const area = (label: string, kinds: ActivityKind[], noun: string): Tile => {
-    const runs = current.filter(a => kinds.includes(a.kind))
-    if (runs.length === 0) return { label, level: 'healthy', text: 'none yet' }
-    const failed = runs.filter(a => a.outcome === 'failed').length
-    const blocked = runs.filter(a => a.outcome === 'blocked').length
-    const running = runs.filter(a => a.outcome === 'running').length
-    const warned = runs.filter(a => levelOf(a) === 'warning' && a.outcome === 'ok').length
-    const ok = runs.length - failed - blocked - running - warned
-    const parts = [
-      failed && `${failed} failed`,
-      blocked && `${blocked} blocked`,
-      running && `${running} running`,
-      warned && `${warned} warned`,
-      ok && `${ok} ok`,
-    ].filter(Boolean)
-    return { label, level: worst(runs.map(levelOf)), text: `${plural(runs.length, noun)}: ${parts.join(', ')}` }
+/** One activity as a sentence: "Saved Orders Sync to Boomi (v4)". */
+export const describe = (a: Activity): string => {
+  if (a.outcome === 'running') {
+    const doing: Record<ActivityKind, string> = {
+      edit: 'Editing',
+      create: 'Creating',
+      push: 'Saving',
+      pull: 'Pulling',
+      deploy: 'Deploying',
+      undeploy: 'Undeploying',
+      test: 'Testing',
+      other: 'Running',
+    }
+    return `${doing[a.kind]} ${a.kind === 'other' ? (SCRIPT_WORDS[a.script ?? ''] ?? a.script ?? 'a Companion script').toLowerCase() : a.subject}…`
   }
-  const platform = cockpit.platform
-  const errors = platform.runs.filter(run => isFailedStatus(run.status)).length
-  const changed = cockpit.watched.filter(w => w.changedBy).length
-  const platformTile: Tile =
-    platform.phase === 'off'
-      ? { label: 'Platform', level: 'healthy', text: platform.message }
-      : platform.phase === 'error'
-        ? { label: 'Platform', level: 'serious', text: platform.message }
-        : {
-            label: 'Platform',
-            level: errors ? 'critical' : changed ? 'warning' : 'healthy',
-            text: [
-              `${plural(platform.runs.length, 'recent run')}, ${plural(errors, 'error')}`,
-              cockpit.watched.length > 0 && `${changed} of ${cockpit.watched.length} watched changed`,
-            ]
-              .filter(Boolean)
-              .join(' · '),
-          }
-  return [
-    area('Builds', ['create', 'push'], 'component'),
-    area('Tests', ['test'], 'process'),
-    area('Deploys', ['deploy', 'undeploy'], 'deployment'),
-    platformTile,
-  ]
+  if (a.outcome === 'blocked') return `Blocked: ${a.kind === 'other' ? a.script : `${a.kind} of ${a.subject}`}`
+  if (a.outcome === 'failed') {
+    const what: Record<ActivityKind, string> = {
+      edit: 'Edit',
+      create: 'Create',
+      push: 'Save',
+      pull: 'Pull',
+      deploy: 'Deploy',
+      undeploy: 'Undeploy',
+      test: 'Test',
+      other: SCRIPT_WORDS[a.script ?? ''] ?? `boomi-${a.script}`,
+    }
+    if (a.kind === 'test' && a.executionStatus) return `Test of ${a.subject} ended ${a.executionStatus}`
+    return `${what[a.kind]}${a.kind === 'other' ? '' : ` of ${a.subject}`} failed`
+  }
+  const version = a.version ? ` (v${a.version})` : ''
+  switch (a.kind) {
+    case 'edit':
+      return `Edited ${a.subject}`
+    case 'create':
+      return `Created ${a.subject} in Boomi`
+    case 'push':
+      return /nothing sent/.test(a.detail) ? `${a.subject} already up to date in Boomi` : `Saved ${a.subject} to Boomi${version}`
+    case 'pull':
+      return `Pulled ${a.subject} from Boomi`
+    case 'deploy':
+      return `Deployed ${a.subject}`
+    case 'undeploy':
+      return `Undeployed ${a.subject}`
+    case 'test':
+      return a.executionStatus ? `Test of ${a.subject} ${a.executionStatus === 'COMPLETE' ? 'passed' : `ended ${a.executionStatus}`}` : `Test of ${a.subject} ${a.detail}`
+    case 'other':
+      return SCRIPT_WORDS[a.script ?? ''] ?? `Ran boomi-${a.script}`
+  }
 }
+
+// --- Components ------------------------------------------------------------------
+
+/** One component this session, with the latest of each step it went through. */
+export type ComponentRow = {
+  key: string
+  name: string
+  type?: string
+  componentId?: string
+  edited?: Activity
+  saved?: Activity
+  deployed?: Activity
+  tested?: Activity
+  lastAt: number
+}
+
+/** Each component Claude edited, saved, deployed or tested, most recent first. */
+export const components = (activity: readonly Activity[]): ComponentRow[] => {
+  const rows = new Map<string, ComponentRow>()
+  const byId = new Map<string, ComponentRow>()
+  for (const a of activity) {
+    if (a.kind === 'other') continue
+    const key = a.file ?? (a.componentId && byId.get(a.componentId)?.key) ?? a.componentId ?? a.subject
+    const row: ComponentRow = rows.get(key) ?? { key, name: a.subject, lastAt: a.startedAt }
+    if (!/\.xml$/.test(a.subject) || row.name === key || /\.xml$/.test(row.name)) row.name = a.subject
+    row.type = a.type ?? row.type
+    row.componentId = a.componentId ?? row.componentId
+    row.lastAt = Math.max(row.lastAt, a.endedAt ?? a.startedAt)
+    if (a.kind === 'edit') row.edited = a
+    else if (a.kind === 'create' || a.kind === 'push' || a.kind === 'pull') row.saved = a
+    else if (a.kind === 'deploy' || a.kind === 'undeploy') row.deployed = a
+    else if (a.kind === 'test') row.tested = a
+    rows.set(key, row)
+    if (row.componentId) byId.set(row.componentId, row)
+  }
+  return [...rows.values()].sort((a, b) => b.lastAt - a.lastAt)
+}
+
+export type Stage = { level: Level; text: string }
+
+const when = (a: Activity) => a.endedAt ?? a.startedAt
+
+/** A component's journey as short steps, each with an icon and a label. */
+export const stages = (row: ComponentRow): Stage[] => {
+  const out: Stage[] = []
+  const { edited, saved, deployed, tested } = row
+  const savedOk = saved && saved.outcome === 'ok' && saved.kind !== 'pull'
+
+  if (edited && (!saved || when(edited) > when(saved))) {
+    out.push({ level: 'warning', text: saved ? 'edited since last save' : 'edited, not in Boomi yet' })
+  }
+  if (saved) {
+    if (saved.outcome === 'running') out.push({ level: 'warning', text: 'saving…' })
+    else if (saved.outcome === 'blocked') out.push({ level: 'serious', text: 'save blocked' })
+    else if (saved.outcome === 'failed') out.push({ level: 'critical', text: 'save failed' })
+    else if (saved.kind === 'pull') out.push({ level: 'healthy', text: 'pulled from Boomi' })
+    else out.push({ level: 'healthy', text: saved.version ? `saved v${saved.version}` : saved.kind === 'create' ? 'created in Boomi' : 'saved' })
+  }
+  if (deployed) {
+    if (deployed.outcome === 'running') out.push({ level: 'warning', text: 'deploying…' })
+    else if (deployed.outcome === 'blocked') out.push({ level: 'serious', text: 'deploy blocked' })
+    else if (deployed.outcome === 'failed') out.push({ level: 'critical', text: `${deployed.kind} failed` })
+    else if (deployed.kind === 'undeploy') out.push({ level: 'healthy', text: 'undeployed' })
+    else if (savedOk && saved && when(saved) > when(deployed)) out.push({ level: 'warning', text: 'redeploy needed' })
+    else out.push({ level: 'healthy', text: 'deployed' })
+  }
+  if (tested) {
+    if (tested.outcome === 'running') out.push({ level: 'warning', text: 'testing…' })
+    else if (tested.outcome === 'failed') out.push({ level: 'critical', text: `test ${tested.executionStatus ?? 'failed'}` })
+    else if (tested.outcome === 'blocked') out.push({ level: 'serious', text: 'test blocked' })
+    else out.push({ level: levelOf(tested), text: tested.executionStatus === 'COMPLETE' || !tested.executionStatus ? 'test passed' : `test ${tested.executionStatus}` })
+  }
+  return out
+}
+
+// --- What needs attention --------------------------------------------------------
+
+export type Attention = { level: Level; title: string; hint: string; at: number }
+
+/** Runs in the window, newest first: a run from last month isn't news. */
+export const recentRuns = (runs: readonly Run[], now: number, windowMs: number): Run[] =>
+  runs.filter(run => {
+    const at = Date.parse(run.at)
+    return Number.isNaN(at) || now - at <= windowMs
+  })
+
+/** What failed and is still failing, each with what to do about it. */
+export const attention = (cockpit: Cockpit, now: number, windowMs: number): Attention[] => {
+  const items: Attention[] = []
+  for (const row of components(cockpit.activity)) {
+    for (const a of [row.saved, row.deployed, row.tested]) {
+      if (!a || (a.outcome !== 'failed' && a.outcome !== 'blocked')) continue
+      const hint =
+        a.outcome === 'blocked'
+          ? a.detail
+          : a.kind === 'test'
+            ? `Ask Claude to read the execution log${a.executionId ? ` (${a.executionId.replace(/^execution-/, '').slice(0, 8)}…)` : ''} and fix the process.`
+            : a.detail
+      items.push({ level: levelOf(a), title: describe(a), hint, at: when(a) })
+    }
+  }
+  for (const run of recentRuns(cockpit.platform.runs, now, windowMs)) {
+    if (!isFailedStatus(run.status)) continue
+    const at = Date.parse(run.at)
+    items.push({
+      level: 'critical',
+      title: `${run.processName} ended ${run.status} in the environment`,
+      hint: `Ask Claude to look at execution ${run.executionId.replace(/^execution-/, '').slice(0, 8)}…`,
+      at: Number.isNaN(at) ? now : at,
+    })
+  }
+  for (const w of cockpit.watched) {
+    if (w.changedBy) {
+      items.push({
+        level: 'warning',
+        title: `${w.name ?? w.componentId} was changed by ${w.changedBy}`,
+        hint: 'Pull it before you push, or you overwrite their change. /cockpit seen clears this.',
+        at: w.modifiedDate ? Date.parse(w.modifiedDate) || now : now,
+      })
+    }
+  }
+  return items.sort((a, b) => b.at - a.at)
+}
+
+// --- The summary lines ------------------------------------------------------------
 
 export const formatCost = (usd: number | undefined): string | undefined =>
   usd === undefined ? undefined : `$${usd < 10 ? usd.toFixed(2) : usd.toFixed(0)}`
 
-/** The status line: an icon and a label per area that has something, then the cost. */
-export const statusLine = (cockpit: Cockpit, usd?: number): string => {
-  const current = latest(cockpit.activity)
-  const count = (kinds: ActivityKind[], outcome: Outcome) =>
-    current.filter(a => kinds.includes(a.kind) && a.outcome === outcome).length
+/** The newest finished activity worth a headline: edits and reads don't make news. */
+export const headline = (activity: readonly Activity[]): Activity | undefined =>
+  [...activity].reverse().find(a => a.kind !== 'other' && a.kind !== 'edit') ?? activity[activity.length - 1]
+
+/**
+ * The status line: the latest thing Companion did, then what needs attention,
+ * then the cost. The engine prefixes it with the mod's name.
+ */
+export const statusLine = (cockpit: Cockpit, now: number, windowMs: number, usd?: number): string => {
   const parts: string[] = []
-  const built = count(['create', 'push'], 'ok')
-  const buildFails = count(['create', 'push'], 'failed') + count(['create', 'push', 'deploy'], 'blocked')
-  if (built) parts.push(`✓ ${built} built`)
-  if (buildFails) parts.push(`✗ ${buildFails} build failed`)
-  const testsFailed = count(['test'], 'failed')
-  const testsPassed = count(['test'], 'ok')
-  if (testsFailed) parts.push(`✗ ${testsFailed} test${testsFailed === 1 ? '' : 's'} failed`)
-  else if (testsPassed) parts.push(`✓ ${testsPassed} test${testsPassed === 1 ? '' : 's'} passed`)
-  const deployFails = count(['deploy', 'undeploy'], 'failed')
-  const deployed = count(['deploy'], 'ok')
-  if (deployFails) parts.push(`✗ ${deployFails} deploy failed`)
-  else if (deployed) parts.push(`✓ ${deployed} deployed`)
-  const running = current.filter(a => a.outcome === 'running').length
-  if (running) parts.push(`◐ ${running} running`)
-  const errors = cockpit.platform.runs.filter(run => isFailedStatus(run.status)).length
-  if (errors) parts.push(`⚠ ${plural(errors, 'platform error')}`)
-  const changed = cockpit.watched.filter(w => w.changedBy).length
-  if (changed) parts.push(`◐ ${changed} watched changed`)
-  if (parts.length === 0) parts.push('no Companion activity yet')
+  const latest = headline(cockpit.activity)
+  if (latest) parts.push(`${STATUS[levelOf(latest)].icon} ${describe(latest)}`)
+  const needs = attention(cockpit, now, windowMs)
+  if (needs.length > 0) parts.push(`${STATUS[worst(needs.map(n => n.level))].icon} ${needs.length} need${needs.length === 1 ? 's' : ''} attention`)
+  if (parts.length === 0) parts.push('waiting for Companion')
   const cost = formatCost(usd)
-  if (cost) parts.push(cost)
-  return `Cockpit ${parts.join(' · ')}`
-}
-
-const time = (ms: number): string => new Date(ms).toISOString().slice(11, 19)
-
-const activityLine = (a: Activity): string => {
-  const level = STATUS[levelOf(a)]
-  const what = a.outcome === 'blocked' ? 'blocked' : a.outcome === 'running' ? 'running' : VERB[a.kind]
-  const version = a.version ? ` v${a.version}` : ''
-  return `${level.icon} ${time(a.startedAt)} ${a.kind.padEnd(8)} ${a.subject}${version}: ${what === VERB[a.kind] ? a.detail : `${what}, ${a.detail}`}`
+  if (cost) parts.push(`${cost} this session`)
+  return parts.join(' · ')
 }
 
 export type Usage = { usd?: number; contextPercent?: number }
 
 /** The whole cockpit as text: what /cockpit and Claude's summary tool show. */
-export const summary = (cockpit: Cockpit, usage: Usage, recent = 10): string => {
-  const lines = [statusLine(cockpit, usage.usd), '']
-  for (const tile of tiles(cockpit)) {
-    lines.push(`${STATUS[tile.level].icon} ${tile.label.padEnd(9)} ${tile.text}`)
-  }
-  const cost = formatCost(usage.usd)
-  const context = usage.contextPercent === undefined ? undefined : `context ${Math.round(usage.contextPercent)}% full`
-  if (cost || context) lines.push(`  Session   ${[cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
+export const summary = (cockpit: Cockpit, usage: Usage, now: number, windowMs: number): string => {
+  const hours = Math.round(windowMs / 3_600_000)
+  const lines: string[] = []
+  const needs = attention(cockpit, now, windowMs)
+  lines.push(needs.length > 0 ? `Needs attention (${needs.length}):` : '✓ Nothing needs attention.')
+  for (const n of needs) lines.push(`  ${STATUS[n.level].icon} ${n.title}`, `      ${n.hint}`)
 
-  if (cockpit.activity.length > 0) {
-    lines.push('', 'Recent Companion activity:')
-    for (const a of cockpit.activity.slice(-recent).reverse()) lines.push(`  ${activityLine(a)}`)
+  const rows = components(cockpit.activity)
+  lines.push('', rows.length > 0 ? 'Components this session:' : 'Components this session: none yet. They show up as Claude edits, saves, deploys and tests them.')
+  for (const row of rows) {
+    const type = friendlyType(row.type)
+    lines.push(`  ${row.name}${type ? ` (${type})` : ''}: ${stages(row).map(s => `${STATUS[s.level].icon} ${s.text}`).join('  ')}`)
   }
-  if (cockpit.platform.runs.length > 0) {
-    lines.push('', `Recent runs in environment ${cockpit.platform.environmentId ?? ''}:`.replace(' :', ':'))
-    for (const run of cockpit.platform.runs) lines.push(`  ${runLine(run)}`)
+
+  const feed = cockpit.activity.slice(-8).reverse()
+  if (feed.length > 0) {
+    lines.push('', 'Recently:')
+    for (const a of feed) lines.push(`  ${STATUS[levelOf(a)].icon} ${describe(a)}, ${ago(when(a), now)}`)
+  }
+
+  lines.push('', `Live environment, last ${hours}h:`)
+  if (cockpit.platform.phase !== 'ok') lines.push(`  ${cockpit.platform.message}`)
+  else {
+    const runs = recentRuns(cockpit.platform.runs, now, windowMs)
+    if (runs.length === 0) lines.push('  No runs.')
+    for (const run of runs) lines.push(`  ${runLine(run, now)}`)
   }
   if (cockpit.watched.length > 0) {
     lines.push('', 'Watched components:')
     for (const w of cockpit.watched) lines.push(`  ${watchedLine(w)}`)
   }
+
+  const cost = formatCost(usage.usd)
+  const context = usage.contextPercent === undefined ? undefined : `context ${Math.round(usage.contextPercent)}% full`
+  if (cost || context) lines.push('', `Session: ${[cost && `${cost} so far`, context].filter(Boolean).join(' · ')}`)
   return lines.join('\n')
 }
 
 export const runLevel = (run: Run): Level =>
   isFailedStatus(run.status) ? 'critical' : isWarnStatus(run.status) ? 'warning' : /COMPLETE/i.test(run.status) ? 'healthy' : 'warning'
 
-export const runLine = (run: Run): string =>
-  `${STATUS[runLevel(run)].icon} ${run.status} ${run.processName} (${run.at}, ${run.executionId})`
+const RUN_WORDS: Record<string, string> = {
+  COMPLETE: 'completed',
+  COMPLETE_WARN: 'completed with warnings',
+  ERROR: 'failed',
+  ABORTED: 'aborted',
+  DISCARDED: 'discarded',
+  INPROCESS: 'running',
+  STARTED: 'started',
+}
+
+export const runText = (run: Run, now: number): string => {
+  const at = Date.parse(run.at)
+  return `${run.processName} ${RUN_WORDS[run.status] ?? run.status.toLowerCase()}${Number.isNaN(at) ? '' : `, ${ago(at, now)}`}`
+}
+
+export const runLine = (run: Run, now: number): string => `${STATUS[runLevel(run)].icon} ${runText(run, now)}`
 
 export const watchedLevel = (w: Watched): Level => (w.error ? 'serious' : w.changedBy ? 'warning' : 'healthy')
 
-export const watchedLine = (w: Watched): string => {
-  const icon = STATUS[watchedLevel(w)].icon
+export const watchedText = (w: Watched): string => {
   const name = w.name ?? w.componentId
-  if (w.error) return `${icon} ${name}: ${w.error}`
+  if (w.error) return `${name}: ${w.error}`
   const version = w.version ? ` v${w.version}` : ''
-  const by = w.modifiedBy ? ` by ${w.modifiedBy}` : ''
-  const when = w.modifiedDate ? ` on ${w.modifiedDate}` : ''
-  return `${icon} ${name}${version}${w.changedBy ? `, changed${by}${when}` : `, unchanged since watched (last edit${by}${when})`}`
+  return w.changedBy ? `${name}${version}, changed by ${w.changedBy}` : `${name}${version}, no changes by others`
 }
+
+export const watchedLine = (w: Watched): string => `${STATUS[watchedLevel(w)].icon} ${watchedText(w)}`
 
 /**
  * The watched component as the platform now has it, compared with what the
@@ -363,11 +586,4 @@ export const compareWatched = (
 export const newFailures = (known: readonly Run[], fresh: readonly Run[]): Run[] => {
   const ids = new Set(known.map(run => run.executionId))
   return fresh.filter(run => !ids.has(run.executionId) && isFailedStatus(run.status))
-}
-
-/** The ID and name on a component XML's root element. */
-export const componentOf = (xml: string): { componentId?: string; name?: string } => {
-  const root = xml.match(/<(?:[A-Za-z]+:)?Component\b[^>]*>/)?.[0] ?? ''
-  const attr = (name: string) => root.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1] || undefined
-  return { componentId: attr('componentId'), name: attr('name') }
 }

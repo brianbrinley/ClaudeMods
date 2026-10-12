@@ -1,10 +1,13 @@
-/** Which Companion script ran. */
-export type ActivityKind = 'create' | 'push' | 'deploy' | 'undeploy' | 'test'
+/**
+ * What happened: a Companion script run, or Claude editing a component's XML.
+ * `other` is any other Companion script (search, pull's siblings, env check, ...).
+ */
+export type ActivityKind = 'edit' | 'create' | 'push' | 'pull' | 'deploy' | 'undeploy' | 'test' | 'other'
 
 /** How it went: `blocked` is a call another mod refused before it ran. */
 export type Outcome = 'running' | 'ok' | 'failed' | 'blocked'
 
-/** One Companion script run this session, read from its command and output. */
+/** One thing that happened to a component this session. */
 export type Activity = {
   id: number
   kind: ActivityKind
@@ -15,8 +18,13 @@ export type Activity = {
   detail: string
   startedAt: number
   endedAt?: number
+  /** The component file, from `active-development/` on, when there is one. */
   file?: string
   componentId?: string
+  /** The component's type as its XML has it: process, connector-settings, ... */
+  type?: string
+  /** For `other`: the script's name without `boomi-` and `.sh`. */
+  script?: string
   /** A pushed component's new version. */
   version?: string
   /** A test's execution status (COMPLETE, ERROR, ...) and ID. */
