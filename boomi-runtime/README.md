@@ -113,6 +113,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-runtime"].
 | `installerArgs` | | Extra quiet-install arguments, such as proxy settings. |
 | `ephemeral` | `true` | Tear down when the session ends. |
 | `guard` | `true` | Guard the API token: see [Protecting the API token](#protecting-the-api-token). |
+| `apiToken` | | The API token in Claude Code's secure storage. Set it from a terminal: see [Secure the API token](#secure-the-api-token). It isn't in `/config`. |
 
 ## Protecting the API token
 
@@ -124,6 +125,32 @@ The mod keeps the Platform API token out of what Claude reads, in two layers:
 To see or change `.env` without exposing the token, use `/boomi env` (token masked) and `/boomi set KEY=VALUE`.
 
 The guard protects the conversation, not the machine: a process in the container can still read the environment. Turn it off with the `guard` setting if it gets in the way.
+
+### Secure the API token
+
+The guard keeps the token out of the chat, but a token in `.env` or an environment variable still sits in plain text all session. Keep it in Claude Code's secure storage instead, and the mod hands it to Companion only while one of Companion's scripts runs.
+
+This works because of how Companion's scripts read their settings (checked against [OfficialBoomi/bc-integration](https://github.com/OfficialBoomi/bc-integration), `skills/boomi-integration/scripts/boomi-common.sh`): they `source ./.env`, then require `BOOMI_API_TOKEN` to be set. A variable `.env` doesn't assign keeps the value the script started with. So when a Bash command runs a Companion script, the mod puts the token in the environment for that command and takes it out the moment the command ends. Every other command runs without it.
+
+1. **Use a dedicated API user.** In Boomi, create a user for Companion and these mods, with a role that has API access plus only what the work needs: building and deploying components, executing processes, and, for this mod, managing runtimes and environments (installer tokens, attach, delete). The privilege names vary by account; check them in **Settings → User Management → Roles**. Generate its token under **Settings → Account Information and Setup → AtomSphere API Tokens**.
+2. **Save the token in secure storage**, from a terminal, never in the chat. Use the ID `claude plugin list` shows for each mod (`boomi-runtime@inline` when it's loaded from a folder). The dashboard has the same setting:
+   ```bash
+   read -rs -p 'Boomi API token: ' T; echo
+   for mod in boomi-runtime@inline boomi-dashboard@inline; do
+     printf '{"apiToken":"%s"}' "$T" | claude plugin configure "$mod" --values-stdin
+   done
+   unset T
+   ```
+   `read -s` keeps the token off the screen and out of your shell history, and `--values-stdin` keeps it out of the command line.
+3. **Delete the `BOOMI_API_TOKEN` line from Companion's `.env`**, and the environment variable if you set one. Keep the rest of `.env`: Companion's scripts still need the file. A token line left in `.env`, even an empty one, overrides the secure one. The mod says so when a session starts and in `/boomi doctor`.
+4. Start a new session and run `/boomi doctor`. It should say *API token in Claude Code's secure storage*.
+
+**Rotating the token:** generate a new one for the API user, run step 2 again, start a new session, then revoke the old token in Boomi.
+
+What this doesn't cover:
+- While a Companion script runs, the token is in the environment of that command, as it is today for the whole session. The guard still refuses commands that print the environment.
+- **Why?** and **Run again** in the [dashboard](../boomi-dashboard/README.md) run Companion's scripts themselves, and hand them the dashboard's own copy of the token the same way, for that one process.
+- Claude Code on the web can also add credentials to requests in its network proxy (*network secrets* in the environment's settings), which would keep the token out of the session entirely. Companion's scripts always send their own `Authorization` header, so whether that works with them is untested.
 
 ## How it works
 
@@ -165,7 +192,7 @@ What the mod uses, and why each one matters here:
 | Network | `$.http.fetch` | Every Platform API call: installer token, environment, attach, package, deploy, execute, poll, delete. |
 | Processes | `$.process.spawn`, `$.process.run` | Downloads and runs the installer, finds `bin/atom`, stops the runtime and cleans up. |
 | Files | `$.fs` | Reads and writes Companion's `.env`, and reads the runtime's logs. |
-| Environment | `$.env` | Reads the `BOOMI_*` credentials from the cloud environment's variables, so they never appear in the chat. |
+| Environment | `$.env` | Reads the `BOOMI_*` credentials from the cloud environment's variables, so they never appear in the chat, and sets the token from secure storage only while a Companion script runs. |
 | Timers | `$.clock` | Polls until the runtime is online and the execution is complete. |
 | Session state | `$.state` | Holds the runtime's phase, IDs and smoke test result, so `/boomi status` and `/boomi down` always know what exists and what to clean up. |
 | Lifecycle | `session.start`, `session.end` | Registers the commands and tools when the session starts, and tears everything down when it ends. |
@@ -184,18 +211,14 @@ Limits:
 
 ## To do
 
-**Secure the Platform API credentials.** Today the API token can leak in more ways than it should:
+**Secure the Platform API credentials.** Done so far: the guard, redaction, and [the token in secure storage](#secure-the-api-token), handed to Companion's scripts only while they run.
 
-- Environment variables are visible to every process in the session's container, including commands Claude runs (`env`, `printenv`), so the token could end up in the transcript.
-- `.env` is plain text in the working directory. Companion steers Claude away from reading it, but nothing enforces that.
-
-Ideas to work through:
-
-- [ ] Store `BOOMI_API_TOKEN` in the environment's protected credentials, where the cloud environment offers that, instead of a plain variable.
-- [ ] Declare the token as a `sensitive` setting in `plugin.json`, which Claude Code keeps in secure storage, and stop reading it from the environment or `.env`.
-- [x] Add a guard to the mod (a `tool.call` hook) that refuses tool calls that would show the token: reading or searching `.env`, and shell commands such as `env`, `printenv` or `cat .env`.
-- [x] Redact the token from everything the mod logs or returns (the pane's log, tool results, process output), with a test that proves it.
-- [ ] Use a dedicated API user with only the permissions the mod needs, and document rotating its token.
+- [x] Add a guard to the mod (a `tool.call` hook) that refuses tool calls that would show the token.
+- [x] Redact the token from everything the mod logs or returns, with a test that proves it.
+- [x] Declare the token as a `sensitive` setting, which Claude Code keeps in secure storage, and stop needing it in `.env`.
+- [x] Document a dedicated API user with only the permissions the mods need, and rotating its token.
+- [ ] Try the cloud environment's network secrets, which add credentials in the proxy, with Companion's scripts. They send their own `Authorization` header, so it's untested whether the proxy's wins.
+- [ ] A full broker: the mod holds the token and makes allow-listed Platform API calls for other mods and skills ([IDEAS](../IDEAS.md#credential-broker)).
 
 **Windows.** A native Windows runtime, with WSL2 and a container as fallbacks.
 

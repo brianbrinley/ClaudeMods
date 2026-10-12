@@ -171,7 +171,7 @@ With Companion's credentials, the dashboard also checks Boomi. It only reads. It
 
 The dashboard reads the credentials from Companion's `.env`, falling back to environment variables for any that are missing: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID` and `BOOMI_ENVIRONMENT_ID`.
 
-The token is used only in the requests' `Authorization` header. The dashboard never stores, shows or logs it, and its error messages carry only the HTTP status, never Boomi's reply. Without credentials, everything else still works, and the **Process runs in Boomi** section says what's missing.
+With the `apiToken` setting, the token comes from Claude Code's secure storage instead, and `.env` doesn't need it: see [Secure the API token](../boomi-runtime/README.md#secure-the-api-token). The token is used only in the requests' `Authorization` header. The dashboard never stores, shows or logs it, and its error messages carry only the HTTP status, never Boomi's reply. Without credentials, everything else still works, and the **Process runs in Boomi** section says what's missing.
 
 ## Past Companion sessions
 
@@ -234,6 +234,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 | `banner` | `true` | Show the banner above the prompt. |
 | `budgetUsd` | `0` | The session's spend budget in US dollars. The dashboard warns at 80% and when it's spent. `0` turns it off. |
 | `historyDays` | `90` | How far back **Past Companion sessions** reads the transcripts. |
+| `apiToken` | | The Platform API token in Claude Code's secure storage, instead of `.env`. Set it from a terminal, never in the chat: see [Secure the API token](../boomi-runtime/README.md#secure-the-api-token). **Why?** and **Run again** hand it to Companion's script for that one process. |
 | `suggestions` | `true` | Suggest the next step (deploy, then test) in the prompt box when Claude finishes a turn. |
 
 ## Limits
