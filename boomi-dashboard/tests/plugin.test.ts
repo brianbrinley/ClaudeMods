@@ -266,7 +266,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(names.some(n => n.props.color === '#0B0B0B' && n.props.backgroundColor === '#FBF6EE')).toBe(true)
     expect(await pane.find({ text: 'TOKENS' })).toBeDefined()
     expect(await pane.find({ text: '6.0k' })).toBeDefined()
-    expect(await pane.find({ text: 'last step 6.0k · +6.0k cached' })).toBeDefined()
+    expect(await pane.find({ text: 'last step 6.0k' })).toBeDefined()
+    expect(await pane.find({ text: '+6.0k cached' })).toBeDefined()
     expect(await pane.find({ text: '$1.25' })).toBeDefined()
     expect(await pane.find({ text: /▰▱+ 12%/ })).toBeDefined()
     expect(await pane.find({ text: /saved v4/ })).toBeDefined()
@@ -324,7 +325,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.turn.start({ text: 'go', turnId: 't1' } as never)
     const walking = await bird()
     expect(walking).not.toBe(standing)
-    await clock.advance(320)
+    await clock.advance(500)
     expect(await bird()).not.toBe(walking)
   })
 

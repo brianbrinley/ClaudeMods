@@ -807,9 +807,11 @@ export const newFailures = (known: readonly Run[], fresh: readonly Run[]): Run[]
 }
 
 // --- The flamingo ---------------------------------------------------------------
-// An 8-bit flamingo, 12 pixels wide and 16 tall. Each letter is a pixel:
-// P is the flamingo's pink, L its pastel (wing and beak), K ink (eye and beak
-// tip), and a dot is clear. Two pixel rows make one row of terminal cells.
+// An 8-bit flamingo, 12 pixels wide and 16 tall, facing right. Each letter is
+// a pixel: P is the flamingo's pink, L its pastel (wing and beak), K ink (eye
+// and beak tip), and a dot is clear. Two pixel rows make one row of terminal
+// cells. The long S-shaped neck and the bent, dark-tipped beak are what make it
+// read as a flamingo, so the sprite keeps the room for them.
 
 const HEAD = [
   '....PPP.....',
@@ -825,7 +827,8 @@ const HEAD = [
 const WING_DOWN = ['....PPPPPP..', '...PPLLLLPPP', '...PPPLLLPP.', '.....PPPP...']
 const WING_UP = ['....PPLLLP..', '...PPLLLLPPP', '...PPPPPPPP.', '.....PPPP...']
 
-const ONE_LEG = ['......PPP...', '......P.....', '......P.....', '.....PP.....']
+/** Resting: one straight leg down to its foot, the other folded up beside it, knee out. */
+const ONE_LEG = ['......P.PPP.', '......P..P..', '......P.....', '.....PP.....']
 const STRIDE = ['......P.....', '.....P.P....', '....P...P...', '...PP...PP..']
 const STEP = ['......P.....', '......PP....', '.....P..P...', '....PP...PP.']
 
@@ -843,6 +846,9 @@ export const FLAMINGO_WALK: readonly (readonly string[])[] = [
 /** The flamingo's pixels for a frame: walking while working, else standing. */
 export const flamingo = (isWorking: boolean, frame: number): readonly string[] =>
   isWorking ? FLAMINGO_WALK[frame % FLAMINGO_WALK.length]! : FLAMINGO_IDLE
+
+/** How many animation frames it takes the flamingo to move one column: it steps in place between moves. */
+export const FRAMES_PER_STEP = 2
 
 /** How many columns the flamingo paces across while Claude works. */
 export const FLAMINGO_TRAVEL = 6
@@ -866,7 +872,7 @@ export const pace = (frame: number, travel = FLAMINGO_TRAVEL): { offset: number;
  * the spot and the way it faced when Claude stopped.
  */
 export const flamingoView = (isWorking: boolean, frame: number, travel = FLAMINGO_TRAVEL) => {
-  const { offset, facing } = pace(frame, travel)
+  const { offset, facing } = pace(Math.floor(frame / FRAMES_PER_STEP), travel)
   const pixels = flamingo(isWorking, frame)
   return { pixels: facing === 'right' ? [...pixels] : mirror(pixels), offset, facing }
 }
