@@ -2,6 +2,8 @@
 // Companion's component XML to them. Plain functions: nothing here touches the
 // engine, so every rule is unit-tested on its own.
 
+import type { StandardsCheck } from '../types'
+
 export type Severity = 'error' | 'warning' | 'off'
 
 export type RuleId =
@@ -361,3 +363,21 @@ export const formatReports = (reports: readonly FileReport[]): string => {
   lines.push(statusLine(reports))
   return lines.join('\n')
 }
+
+/** One check as the session keeps it: counts, whether it blocked, and its first findings. */
+export const checkRecord = (
+  script: CheckMode,
+  reports: readonly FileReport[],
+  isBlocked: boolean,
+  at: number,
+): StandardsCheck => ({
+  at,
+  script,
+  files: reports.length,
+  errors: errorsIn(reports),
+  warnings: warningsIn(reports),
+  isBlocked,
+  findings: reports
+    .flatMap(r => r.findings.map(f => `${r.path.split('/').pop() ?? r.path}: ${f.message}`))
+    .slice(0, 3),
+})

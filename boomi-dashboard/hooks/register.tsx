@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
-import type { Activity, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, Watched } from '../types'
+import type { Activity, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, RuntimeSeen, StandardsSeen, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -26,6 +26,8 @@ import {
   pastLine,
   historySummary,
   historyTotals,
+  guardrails,
+  guardrailText,
   budgetOf,
   nextStep,
   compareWatched,
@@ -861,8 +863,33 @@ const USAGE = [
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
 ].join('\n')
 
+/**
+ * What boomi-standards and boomi-runtime say about the session, when they're
+ * loaded and have written it. Only the owner writes; reading it here also
+ * redraws the pane when it changes. The engine wants each reference spelled
+ * out where it's read.
+ */
+const guardLines = async ($: Engine) => {
+  const valueOf = async (got: Promise<unknown>) => {
+    try {
+      return ((await got) as { value?: unknown }).value
+    } catch {
+      return undefined
+    }
+  }
+  return guardrails(
+    (await valueOf($.state.get({ plugin: 'boomi-standards', key: 'activity' } as never))) as StandardsSeen | undefined,
+    (await valueOf($.state.get({ plugin: 'boomi-runtime', key: 'runtime' } as never))) as RuntimeSeen | undefined,
+  )
+}
+
 const summaryNow = async ($: Engine, settings: Settings) =>
-  summary(await read($, dashboard), { ...(await usageOf($)), budgetUsd: settings.budgetUsd }, await $.clock.now(), settings.windowMs)
+  [
+    summary(await read($, dashboard), { ...(await usageOf($)), budgetUsd: settings.budgetUsd }, await $.clock.now(), settings.windowMs),
+    guardrailText(await guardLines($)),
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 
 const runCommand = async ($: Engine, settings: Settings, args: string): Promise<string> => {
   const [action = 'status', ...rest] = args.trim().split(/\s+/).filter(Boolean)
@@ -1184,6 +1211,7 @@ export const register: Register = (on, options) => {
     const { Box, Button, Link, Text } = $.ui.resolve(e)
     const themeNow = await themeOf($, settings)
     const collapsed = await read($, isRunsCollapsed)
+    const guards = await guardLines($)
     const past = await read($, history)
     const sessionId = await $.session.id().catch(() => undefined)
     const footer = await footerOf($)
@@ -1397,6 +1425,9 @@ export const register: Register = (on, options) => {
           const spent = all.get(a.id)?.tokens
           return line(levelOf(a), describe(a), [ago(a.endedAt ?? a.startedAt, now), spent ? `${formatTokens(spent)} tok` : undefined].filter(Boolean).join(' · '))
         })}
+
+        {guards.length > 0 && heading('Guardrails')}
+        {guards.map(g => (g.level ? line(g.level, g.text) : note(g.text)))}
 
         <Box marginTop={1} justifyContent="space-between">
           <Box>

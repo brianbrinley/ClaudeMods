@@ -5,12 +5,14 @@
 // Everything that touches the engine lives in this file because the engine
 // follows $ only within it; the rules themselves are in ./rules.
 
+import { atom, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
 import {
   DEFAULT_STANDARDS,
   RULES,
   checkComponent,
+  checkRecord,
   companionCalls,
   errorsIn,
   formatReports,
@@ -19,8 +21,20 @@ import {
   warningsIn,
 } from './rules'
 import type { CheckMode, FileReport, RuleId, Standards } from './rules'
+import type { StandardsActivity } from '../types'
 
 type Engine = EngineInterface
+
+/** What the checks found this session; the boomi-dashboard mod shows it. */
+const activity = atom({ plugin: 'boomi-standards', key: 'activity' } as const, { checks: 0, blocked: 0 } as StandardsActivity)
+
+// Keeping the record is a side line: if it fails, the check and the guard go on.
+const record = async ($: Engine, script: CheckMode, reports: readonly FileReport[], isBlocked: boolean) => {
+  try {
+    const last = checkRecord(script, reports, isBlocked, await $.clock.now())
+    await update($, activity, a => ({ checks: a.checks + 1, blocked: a.blocked + (isBlocked ? 1 : 0), last }))
+  } catch {}
+}
 
 type Settings = { isEnforced: boolean; rulesFile: string; componentsDir: string }
 
@@ -79,7 +93,10 @@ const check = async ($: Engine, settings: Settings, paths: readonly string[]): P
   const loaded = await loadStandards($, settings)
   const targets = paths.length > 0 ? paths : await componentFiles($, settings.componentsDir)
   const reports = await checkFiles($, targets, 'check', loaded.standards)
-  if (reports.length > 0) $.ui.status(statusLine(reports))
+  if (reports.length > 0) {
+    $.ui.status(statusLine(reports))
+    await record($, 'check', reports, false)
+  }
   return [
     loaded.problem,
     `Standards: ${loaded.source}`,
@@ -149,7 +166,9 @@ export const register: Register = (on, options) => {
     $.ui.status(statusLine(reports))
 
     const report = [loaded.problem, formatReports(reports)].filter(Boolean).join('\n')
-    if (settings.isEnforced && errorsIn(reports) > 0) {
+    const isBlocked = settings.isEnforced && errorsIn(reports) > 0
+    await record($, calls[0]!.script, reports, isBlocked)
+    if (isBlocked) {
       return {
         deny: `boomi-standards: refused, because these components break the team's standards (${loaded.source}). Fix them and run the command again.\n${report}`,
       }

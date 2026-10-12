@@ -98,7 +98,7 @@ A file with a mistake in it, such as an invalid pattern or an unknown rule, does
 | `/standards check [file...]` | `check` | Checks the files, or every component under `active-development/`. |
 | `/standards rules` | | The rules in force and where they come from. |
 
-The tool is listed to Claude as `mcp__boomi-standards__check`, so Claude can check components before it tries to push them. A status line shows the last result with an icon and a label: ✓ pass, ⚠ warnings, ✗ errors.
+The tool is listed to Claude as `mcp__boomi-standards__check`, so Claude can check components before it tries to push them. A status line shows the last result with an icon and a label: ✓ pass, ⚠ warnings, ✗ errors. With the [dashboard](../boomi-dashboard/README.md) loaded, its **Guardrails** section shows the last check too.
 
 ## Setup
 
@@ -134,6 +134,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-standards"
 | Slash command | `$.command.register` | `/standards check` and `/standards rules`. |
 | Tool for Claude | `$.tool.register` | `check`, so Claude can check components before pushing them. |
 | Display | `$.ui.status` | The last result, with an icon and a label. |
+| Session state | `$.state` | Each check's counts and first findings, which the dashboard reads. Keeping it never gets in the way of a check. |
 
 ## Development
 

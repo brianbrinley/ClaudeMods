@@ -3,7 +3,7 @@
 // attention, the recent feed and the live environment. Plain functions:
 // nothing here touches the engine, so the tests call them directly.
 
-import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, PastSession, Run, TokenSplit, Watched } from '../types'
+import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, PastSession, Run, RuntimeSeen, StandardsSeen, TokenSplit, Watched } from '../types'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
@@ -1385,3 +1385,44 @@ export const historySummary = (sessions: readonly PastSession[], now: number, da
   lines.push('', "Costs are Claude Code's own, from each transcript. Claude Code on the web and other machines keep their transcripts elsewhere.")
   return lines.join('\n')
 }
+
+// --- Guardrails: the other Boomi mods ---------------------------------------------
+
+/** A guardrail line: a status (icon and label) or, without one, a plain note. */
+export type GuardLine = { level?: Level; text: string }
+
+const SCRIPT_NOUN: Record<string, string> = { create: 'create', push: 'push', deploy: 'deploy', check: '/standards check' }
+
+/**
+ * What boomi-standards and boomi-runtime say about the session, as lines.
+ * A mod that isn't loaded (undefined) adds nothing.
+ */
+export const guardrails = (standards: StandardsSeen | undefined, runtime: RuntimeSeen | undefined): GuardLine[] => {
+  const lines: GuardLine[] = []
+  if (standards) {
+    const last = standards.last
+    const tally = `${standards.checks} check${standards.checks === 1 ? '' : 's'}, ${standards.blocked} blocked`
+    const noun = last ? (SCRIPT_NOUN[last.script] ?? last.script) : ''
+    const more = last && last.findings.length > 1 ? ` (+${last.findings.length - 1} more)` : ''
+    if (!last) lines.push({ text: 'Standards: nothing checked yet. Each create, push and deploy is checked first.' })
+    else if (last.isBlocked) lines.push({ level: 'serious', text: `Standards blocked the last ${noun}: ${last.findings[0] ?? 'see the refusal'}${more}` })
+    else if (last.errors > 0) lines.push({ level: 'critical', text: `Standards: ${last.errors} error${last.errors === 1 ? '' : 's'} in the last ${noun}, not enforced: ${last.findings[0]}${more}` })
+    else if (last.warnings > 0) lines.push({ level: 'warning', text: `Standards: ${last.warnings} warning${last.warnings === 1 ? '' : 's'} in the last ${noun}: ${last.findings[0]}${more}` })
+    else lines.push({ level: 'healthy', text: `Standards: the last ${noun} passed (${tally})` })
+  }
+  if (runtime) {
+    const name = runtime.name ? ` ${runtime.name}` : ''
+    if (runtime.phase === 'idle') lines.push({ text: 'Runtime: none in this session. /boomi up starts one.' })
+    else if (runtime.phase === 'online') {
+      const smoke = runtime.smoke?.phase === 'passed' ? ', smoke test passed' : runtime.smoke?.phase === 'running' ? ', smoke test running' : ''
+      lines.push({ level: 'healthy', text: `Runtime${name} online${smoke}` })
+      if (runtime.smoke?.phase === 'failed') lines.push({ level: 'critical', text: `Smoke test failed: ${runtime.smoke.message}` })
+    } else if (runtime.phase === 'error') lines.push({ level: 'critical', text: `Runtime error: ${runtime.message}` })
+    else lines.push({ level: 'warning', text: `Runtime${name} ${runtime.phase}: ${runtime.message}` })
+  }
+  return lines
+}
+
+/** The guardrail lines as text, for /bc-dashboard text. */
+export const guardrailText = (lines: readonly GuardLine[]): string =>
+  lines.length === 0 ? '' : ['Guardrails:', ...lines.map(l => `  ${l.level ? `${STATUS[l.level].icon} ` : ''}${l.text}`)].join('\n')

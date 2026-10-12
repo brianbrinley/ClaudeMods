@@ -152,6 +152,24 @@ export type HistoryState = {
   error?: string
 }
 
+/**
+ * What the dashboard reads of the other Boomi mods' state, when they're
+ * loaded: the shapes boomi-standards (`activity`) and boomi-runtime
+ * (`runtime`) keep, cut to the fields shown here.
+ */
+export type StandardsSeen = {
+  checks: number
+  blocked: number
+  last?: { script: string; files: number; errors: number; warnings: number; isBlocked: boolean; findings: string[] }
+}
+
+export type RuntimeSeen = {
+  phase: 'idle' | 'installing' | 'starting' | 'online' | 'stopping' | 'error'
+  message: string
+  name?: string
+  smoke?: { phase: 'running' | 'passed' | 'failed'; message: string }
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; suggested: string; history: HistoryState }

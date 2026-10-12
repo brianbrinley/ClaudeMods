@@ -1,5 +1,7 @@
 import type { CommandRunInput, On } from 'claude-code'
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
+
+import type { StandardsActivity } from '../types'
 
 const standards = (args: string) => ({ command: 'standards', args }) as CommandRunInput
 
@@ -126,4 +128,24 @@ test('/standards rules shows the rules in force and a broken standards file', as
   const answer = await $.command.run(standards('rules'))
   expect(answer.text).toContain("couldn't be used")
   expect(answer.text).toContain('password-in-xml')
+})
+
+test('each check is kept for the session: a blocked push, then a clean one', async ($, on) => {
+  const files = { 'active-development/connector-settings/Orders.xml': LEAKY }
+  workspace(on, files)
+  shell(on)
+  mock.clock(on, { now: Date.parse('2026-10-12T12:00:00Z') })
+  // What the mod writes to its state, as the dashboard would read it.
+  const kept: StandardsActivity[] = []
+  on('state.set', { plugin: 'boomi-standards', key: 'activity' }, async (_$, e, next) => {
+    kept.push(e.value as StandardsActivity)
+    return next(e)
+  })
+  await $.tool.call({ tool: 'Bash', command: PUSH })
+  expect(kept.at(-1)).toMatchObject({ checks: 1, blocked: 1, last: { script: 'push', files: 1, errors: 1, isBlocked: true } })
+  expect(kept.at(-1)?.last?.findings[0]).toContain('Orders.xml: ')
+  expect(JSON.stringify(kept)).not.toContain('hunter2')
+  files['active-development/connector-settings/Orders.xml'] = CLEAN
+  await $.tool.call({ tool: 'Bash', command: PUSH })
+  expect(kept.at(-1)).toMatchObject({ checks: 2, blocked: 1, last: { script: 'push', errors: 0, isBlocked: false, findings: [] } })
 })

@@ -718,3 +718,27 @@ test('a Perl without its JSON module (a minimal Ubuntu or WSL) says what to inst
     "The transcript scan failed: Perl's JSON module is missing. On Debian or Ubuntu (WSL too): sudo apt install perl",
   )
 })
+
+test('the pane and the text show what the standards and runtime mods report, when they are loaded', async ($, on) => {
+  world(on)
+  on('state.get', { plugin: 'boomi-standards', key: 'activity' } as never, async () => ({
+    value: { version: 2, value: { checks: 2, blocked: 1, last: { script: 'push', files: 1, errors: 1, warnings: 0, isBlocked: true, findings: ['Orders.xml: a password is typed into a password field'] } } },
+  }) as never)
+  on('state.get', { plugin: 'boomi-runtime', key: 'runtime' } as never, async () => ({
+    value: { version: 5, value: { phase: 'online', message: 'Online', name: 'cc-20261012-abc', executions: [], log: [], smoke: { phase: 'passed', message: 'COMPLETE' } } },
+  }) as never)
+  const text = await $.command.run(dashboard('text'))
+  expect(text.text).toContain('Guardrails:\n  ⚠ Standards blocked the last push: Orders.xml: a password is typed into a password field')
+  expect(text.text).toContain('  ✓ Runtime cc-20261012-abc online, smoke test passed')
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /GUARDRAILS/ })).toBeDefined()
+  expect(await pane.find({ text: /Runtime cc-20261012-abc online/ })).toBeDefined()
+})
+
+test('without the other mods, there is no Guardrails section', async ($, on) => {
+  world(on)
+  const text = await $.command.run(dashboard('text'))
+  expect(text.text).not.toContain('Guardrails')
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /GUARDRAILS/ })).toBeUndefined()
+})

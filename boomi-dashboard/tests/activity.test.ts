@@ -6,6 +6,8 @@ import {
   diagnose,
   fixPrompt,
   report,
+  guardrails,
+  guardrailText,
   pastSessions,
   historyTotals,
   historySummary,
@@ -647,4 +649,30 @@ test("a failed test's execution is one item, not a second one for its run in Boo
   const state = dashboard([tested], { platform: { phase: 'ok', message: '', runs } })
   expect(attention(state, NOW, 24 * HOUR).map(item => item.key)).toEqual([`step:${tested.id}`])
   expect(attention(closeItem(state, `step:${tested.id}`), NOW, 24 * HOUR)).toEqual([])
+})
+
+test('guardrails: what the standards and runtime mods say, each with an icon and a label', () => {
+  expect(guardrails(undefined, undefined)).toEqual([])
+  const blocked = { checks: 3, blocked: 1, last: { script: 'push', files: 1, errors: 2, warnings: 0, isBlocked: true, findings: ['Orders.xml: a password is typed into a password field', 'Orders.xml: x'] } }
+  expect(guardrails(blocked, undefined)).toEqual([
+    { level: 'serious', text: 'Standards blocked the last push: Orders.xml: a password is typed into a password field (+1 more)' },
+  ])
+  const passed = { checks: 4, blocked: 1, last: { script: 'deploy', files: 1, errors: 0, warnings: 0, isBlocked: false, findings: [] } }
+  expect(guardrails(passed, undefined)[0]).toEqual({ level: 'healthy', text: 'Standards: the last deploy passed (4 checks, 1 blocked)' })
+  expect(guardrails({ ...passed, last: { ...passed.last, warnings: 1, findings: ['A.xml: name'] } }, undefined)[0]!.level).toBe('warning')
+  expect(guardrails({ ...passed, last: { ...passed.last, errors: 1, findings: ['A.xml: bad'] } }, undefined)[0]!.text).toContain('not enforced')
+  expect(guardrails({ checks: 0, blocked: 0 }, undefined)[0]!.level).toBeUndefined()
+
+  expect(guardrails(undefined, { phase: 'online', message: '', name: 'cc-1', smoke: { phase: 'passed', message: '' } })).toEqual([
+    { level: 'healthy', text: 'Runtime cc-1 online, smoke test passed' },
+  ])
+  expect(guardrails(undefined, { phase: 'online', message: '', name: 'cc-1', smoke: { phase: 'failed', message: 'ERROR' } })[1]).toEqual({ level: 'critical', text: 'Smoke test failed: ERROR' })
+  expect(guardrails(undefined, { phase: 'installing', message: 'Downloading', name: 'cc-1' })[0]).toEqual({ level: 'warning', text: 'Runtime cc-1 installing: Downloading' })
+  expect(guardrails(undefined, { phase: 'error', message: 'did not come online' })[0]!.level).toBe('critical')
+  expect(guardrails(undefined, { phase: 'idle', message: '' })[0]!.level).toBeUndefined()
+
+  expect(guardrailText(guardrails(passed, { phase: 'idle', message: '' }))).toBe(
+    'Guardrails:\n  ✓ Standards: the last deploy passed (4 checks, 1 blocked)\n  Runtime: none in this session. /boomi up starts one.',
+  )
+  expect(guardrailText([])).toBe('')
 })

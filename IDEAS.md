@@ -7,6 +7,7 @@ Ideas for mods we could build next, starting with Boomi and integration work. Th
 - The deployment watcher, folded into the [boomi-dashboard](boomi-dashboard/README.md) mod: a live summary of a Companion session that also polls the environment's runs and watches components for changes.
 - The first half of the execution debugger, in the dashboard: **Why?** reads a failed run's process log and **Ask Claude to fix** drafts the request. A session report (`/bc-dashboard report`) came with it.
 - Dashboard follow-ups: **Run again** for a failed test, a spend budget (`budgetUsd`), and the next step (deploy, then test) suggested in the prompt box.
+- Guardrails at a glance: the dashboard's **Guardrails** section shows what boomi-standards blocked and the runtime's state.
 - The credential broker's quick wins, in [boomi-runtime](boomi-runtime/README.md#secure-the-api-token): the API token in Claude Code's secure storage, given to Companion's scripts only while one runs, and a dedicated API user.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
@@ -129,7 +130,6 @@ quadrantChart
 
 Smaller additions to the [boomi-dashboard](boomi-dashboard/README.md) mod that build on what it already tracks:
 
-- **Guardrails at a glance.** Show what [boomi-standards](boomi-standards/README.md) blocked or flagged and the state of the [boomi-runtime](boomi-runtime/README.md) in the pane, so one place shows the whole session.
 - **Promotion diff and mock endpoints** would each show up as a section in the pane once they exist.
 
 ## Add an idea or claim one

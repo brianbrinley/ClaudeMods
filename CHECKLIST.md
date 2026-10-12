@@ -47,6 +47,9 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **B9. Pane basics.** Theme buttons switch Day, Night and Terminal; **☐** closes an item and **Reopen** brings it back; **Hide** folds **Process runs in Boomi**.
   **Pass:** all three. **Fail:** say which.
 
+- [ ] **B10. Guardrails.** With boomi-standards loaded, have Claude push a component with a password typed into a password field.
+  **Pass:** the push is refused, and the dashboard's **Guardrails** section shows `⚠ Standards blocked the last push:` with the reason. After `/boomi up`, it shows `◐ Runtime … installing`, then `✓ Runtime … online`. **Fail:** no **Guardrails** section, or it doesn't change.
+
 ## C. Windows (WSL)
 
 - [ ] **C1.** In Claude Code inside WSL, install the dashboard with [INSTALL.md](boomi-dashboard/INSTALL.md), then press **Scan**.
