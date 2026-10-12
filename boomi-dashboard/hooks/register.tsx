@@ -17,6 +17,8 @@ import {
   ago,
   duration,
   attention,
+  closeItem,
+  closedCount,
   compareWatched,
   componentOf,
   componentPath,
@@ -43,6 +45,7 @@ import {
   newFailures,
   readOutput,
   recentRuns,
+  reopenAll,
   restoredNote,
   runsSummary,
   runLevel,
@@ -180,7 +183,8 @@ const activityKey = async ($: Engine) => `activity:${await $.session.cwd()}`
 const saveActivity = async ($: Engine) => {
   try {
     const list = (await read($, dashboard)).activity.filter(a => a.outcome !== 'running')
-    await $.store.set(await activityKey($), { savedAt: await $.clock.now(), activity: list.slice(-100) })
+    const { closedSteps, seenRuns } = await read($, dashboard)
+    await $.store.set(await activityKey($), { savedAt: await $.clock.now(), activity: list.slice(-100), closedSteps, seenRuns })
   } catch {}
 }
 
@@ -188,13 +192,19 @@ const saveActivity = async ($: Engine) => {
 const restoreActivity = async ($: Engine, settings: Settings) => {
   try {
     if ((await read($, dashboard)).activity.length > 0) return
-    const saved = (await $.store.get(await activityKey($))) as { activity?: Activity[] } | undefined
+    const saved = (await $.store.get(await activityKey($))) as
+      | { activity?: Activity[]; closedSteps?: number[]; seenRuns?: string[] }
+      | undefined
     const now = await $.clock.now()
     const kept = (saved?.activity ?? [])
       .filter(a => now - (a.endedAt ?? a.startedAt) <= settings.windowMs)
       .map(a => ({ ...a, isRestored: true }))
     if (kept.length === 0) return
-    await update($, dashboard, c => (c.activity.length > 0 ? c : { ...c, activity: kept, restored: kept.length }))
+    await update($, dashboard, c =>
+      c.activity.length > 0
+        ? c
+        : { ...c, activity: kept, restored: kept.length, closedSteps: saved?.closedSteps, seenRuns: saved?.seenRuns },
+    )
   } catch {}
 }
 
@@ -506,6 +516,28 @@ const seen = async ($: Engine): Promise<string> => {
   return `Marked as seen: ${failedRuns.length} failed run${failedRuns.length === 1 ? '' : 's'} and ${changed} watched change${changed === 1 ? '' : 's'}. They leave Needs attention; the runs stay listed under Process runs in Boomi.`
 }
 
+/** Closes one Needs attention item by its key, and keeps that for later sessions. */
+const close = async ($: Engine, key: string) => {
+  await update($, dashboard, c => closeItem(c, key))
+  void saveActivity($)
+}
+
+/** /bc-dashboard close <number|all>: closes items by their number in the text summary. */
+const closeByNumber = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const needs = attention(await read($, dashboard), await $.clock.now(), settings.windowMs)
+  if (needs.length === 0) return 'Nothing needs attention.'
+  const picked = target === 'all' ? needs : needs.filter((_, i) => String(i + 1) === target)
+  if (picked.length === 0) return `Usage: /bc-dashboard close <1-${needs.length} | all>`
+  for (const item of picked) await close($, item.key)
+  return `Closed: ${picked.map(item => item.title).join('; ')}. /bc-dashboard reopen brings closed items back.`
+}
+
+const reopen = async ($: Engine): Promise<string> => {
+  await update($, dashboard, reopenAll)
+  void saveActivity($)
+  return 'Closed items are back under Needs attention, where they still apply.'
+}
+
 /** Picks the pane's theme, now and for later sessions. */
 const pickTheme = async ($: Engine, theme: PaneTheme) => {
   await update($, pickedTheme, () => theme)
@@ -534,6 +566,8 @@ const USAGE = [
   '/bc-dashboard poll            check Boomi now',
   '/bc-dashboard watch <id|file> watch a component for changes someone else makes',
   '/bc-dashboard unwatch <id>    stop watching it',
+  '/bc-dashboard close <n|all>   close a Needs attention item by its number, or all of them',
+  '/bc-dashboard reopen          bring closed items back',
   '/bc-dashboard seen            mark failed runs and watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
@@ -567,6 +601,10 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return unwatch($, target)
     case 'seen':
       return seen($)
+    case 'close':
+      return closeByNumber($, settings, target)
+    case 'reopen':
+      return reopen($)
     case 'theme':
       return theme($, settings, target)
     case 'banner':
@@ -652,7 +690,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
+      argumentHint: 'text | poll | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
     })
     await $.tool.register({
       name: 'summary',
@@ -835,6 +873,7 @@ export const register: Register = (on, options) => {
     const flamingoFrame = await read($, frame)
     const hours = Math.round(settings.windowMs / 3_600_000)
     const needs = attention(current, now, settings.windowMs)
+    const closedItems = closedCount(current, now, settings.windowMs)
     const rows = components(current.activity)
     const runs = recentRuns(current.platform.runs, now, settings.windowMs)
     const feed = current.activity.slice(-6).reverse()
@@ -955,12 +994,26 @@ export const register: Register = (on, options) => {
 
         {heading('Needs attention')}
         {needs.length === 0 && line('healthy', 'All clear.')}
-        {needs.map(n => (
+        {needs.map((n, i) => (
           <Box flexDirection="column">
-            {line(n.level, n.title, ago(n.at, now))}
-            {t(`  ${n.hint}`, { color: p.muted })}
+            <Box>
+              <Box flexShrink={0}>
+                <Button key={`close-${i}`} label="☐" onPress={() => close($, n.key)} />
+                {t(' ')}
+              </Box>
+              <Box flexGrow={1} flexShrink={1}>
+                {line(n.level, n.title, ago(n.at, now))}
+              </Box>
+            </Box>
+            {t(`      ${n.hint}`, { color: p.muted })}
           </Box>
         ))}
+        {closedItems > 0 && (
+          <Box>
+            {t(`☑ ${closedItems} closed  `, { color: p.muted })}
+            <Button key="reopen" label="Reopen" onPress={() => reopen($)} />
+          </Box>
+        )}
 
         {heading('Components this session')}
         {rows.length === 0 && t('Components show up here as Claude edits, saves, deploys and tests them.', { color: p.muted })}

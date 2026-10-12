@@ -106,6 +106,8 @@ export type Dashboard = {
   restored?: number
   /** Failed runs marked as seen (expected), by execution ID: they leave Needs attention. */
   seenRuns?: string[]
+  /** Failed steps closed from Needs attention, by activity ID. */
+  closedSteps?: number[]
 }
 
 /** The pane's colors: Valence Day, Valence Night, or the terminal's own theme. */

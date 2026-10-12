@@ -381,6 +381,22 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const link = await pane.find({ type: 'Link' })
     expect(link?.props).toMatchObject({ href: 'https://github.com/brianbrinley/ClaudeMods', label: 'github.com/brianbrinley/ClaudeMods' })
   })
+
+  test(`on ${surface}, a Needs attention item closes with its box and comes back with Reopen`, async ($, on) => {
+    world(on, { [FILE]: ORDERS })
+    mock.store(on)
+    shell(on, 'ERROR: Deployment failed (HTTP 400): no package', true)
+    await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-deploy.sh ${FILE}` })
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
+    expect((await pane.find({ type: 'Button', key: 'close-0' }))?.props.label).toBe('☐')
+    expect(await pane.find({ text: /Deploy of Orders Sync failed/ })).toBeDefined()
+    await pane.press({ key: 'close-0' })
+    expect(await pane.find({ text: /All clear/ })).toBeDefined()
+    expect(await pane.find({ text: /☑ 1 closed/ })).toBeDefined()
+    await pane.press({ key: 'reopen' })
+    expect(await pane.find({ type: 'Button', key: 'close-0' })).toBeDefined()
+    await pane.press({ key: 'close-0' })
+  })
 }
 
 
@@ -468,4 +484,20 @@ test('where no pane can be shown, /bc-dashboard prints the dashboard instead', a
   world(on, {}, { isPlaced: false })
   const answer = await $.command.run(dashboard())
   expect(answer.text).toContain('Components this session')
+})
+
+test('/bc-dashboard close takes an item by its number, and reopen brings it back', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  mock.store(on)
+  shell(on, 'ERROR: Deployment failed (HTTP 400): no package', true)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-deploy.sh ${FILE}` })
+  const listed = await $.command.run(dashboard('text'))
+  expect(listed.text).toContain('1. ✗ Deploy of Orders Sync failed')
+  expect((await $.command.run(dashboard('close 2'))).text).toContain('Usage: /bc-dashboard close <1-1 | all>')
+  expect((await $.command.run(dashboard('close 1'))).text).toContain('Closed: Deploy of Orders Sync failed')
+  const after = await $.command.run(dashboard('text'))
+  expect(after.text).toContain('✓ Nothing needs attention.')
+  expect(after.text).toContain('1 closed: /bc-dashboard reopen brings them back')
+  await $.command.run(dashboard('reopen'))
+  expect((await $.command.run(dashboard('text'))).text).toContain('Needs attention (1):')
 })
