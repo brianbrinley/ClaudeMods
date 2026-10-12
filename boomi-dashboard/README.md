@@ -23,17 +23,17 @@ You see it as a banner above the prompt, a pane, a status line and toasts. `/bc-
 
 **The pane** has the whole picture. It opens the first time Claude edits or saves a component:
 
-<img alt="The dashboard pane in the Day theme: a Flamingo title band reading BOOMI COMPANION DASHBOARD with a WORKING light, the session's length, components and model, theme buttons, gauges for tokens, spend and context beside an 8-bit flamingo, then Needs attention, Components this session, Recently, and Live environment" src="assets/pane-day.png" width="420"> <img alt="The same pane in the Night theme" src="assets/pane-night.png" width="420">
+<img alt="The dashboard pane in the Day theme: a Flamingo title band reading BOOMI COMPANION DASHBOARD with a WORKING light, the session's length, components and model, theme buttons, gauges for tokens, spend and context beside an 8-bit flamingo, then Needs attention, Components this session, Claude's latest steps, and Process runs in Boomi" src="assets/pane-day.png" width="420"> <img alt="The same pane in the Night theme" src="assets/pane-night.png" width="420">
 
 - **Title band:** shows **● WORKING** while Claude works on a turn and **◇ IDLE** between turns.
 - **Under it:** how long the session has run, how many components it has touched, and the model that answered last, such as Opus 5.5.
 - **Theme buttons:** **Day**, **Night** and **Terminal**; see [Themes](#themes).
 - **Gauges:** the session's tokens and spend, with the last step's share, and how full the context window is. Under them, a sparkline of the tokens each step took.
-- **The flamingo:** an 8-bit flamingo beside the gauges. It stands on one leg while Claude is idle, and walks with flapping wings while Claude works. The `flamingo` setting turns it off.
+- **The flamingo:** an 8-bit flamingo beside the gauges. While Claude works, it paces back and forth with flapping wings, facing the way it walks and turning at each end. While Claude is idle, it stands on one leg where it stopped. The `flamingo` setting turns it off.
 - **Needs attention:** what's still broken, each with a next step.
 - **Components this session:** each component's stages, and the tokens and spend it took across all its steps.
-- **Recently:** the latest steps, each with its tokens.
-- **Live environment:** the environment's recent runs.
+- **Claude's latest steps:** what Claude just did with Companion, newest first, each with the tokens it took.
+- **Process runs in Boomi:** every execution in your Boomi environment in the last 24 hours: this session's tests, schedules and other people's runs. If it isn't connected yet, it says what's missing.
 
 ### Themes
 
@@ -127,20 +127,20 @@ The dashboard follows Companion's work through Claude's tool calls, so the sessi
 | `boomi-deploy.sh <file>` | Deployed, or the error |
 | `boomi-undeploy.sh` | Undeployed, or the error |
 | `boomi-test-execute.sh --process-id <id>` | The execution's status. `ERROR`, `ABORTED` or `DISCARDED` is a failed test. |
-| Companion's other scripts | A line under **Recently**, such as "Searched components" |
+| Companion's other scripts | A line under **Claude's latest steps**, such as "Searched components" |
 
 The scripts run as usual: the dashboard never stops one.
 
-## The live environment
+## Process runs in Boomi
 
-With Companion's credentials, the dashboard also checks Boomi every 60 seconds. It only reads.
+With Companion's credentials, the dashboard also checks Boomi. It only reads. It checks every 60 seconds, plus about 5 seconds after Claude deploys or tests something, and every 10 seconds while a run is still in progress, so new runs show up quickly.
 
-- **Recent runs.** It shows the newest executions on the runtimes attached to `BOOMI_ENVIRONMENT_ID`, but only those from the last 24 hours (set with `recentHours`). Failures older than that aren't shown or flagged. A new failure gets a toast. Failures already there at the first check don't.
+- **Process runs.** It shows the newest executions on the runtimes attached to `BOOMI_ENVIRONMENT_ID`, but only those from the last 24 hours (set with `recentHours`). Failures older than that aren't shown or flagged. A new failure gets a toast. Failures already there at the first check don't.
 - **Watched components.** `/bc-dashboard watch <component ID or XML file>` adds a component to the watch list, which carries over to later sessions. When its version changes and Companion's API user (`BOOMI_USERNAME`) didn't make the change, it shows under **Needs attention**: pull it before you push, or you overwrite their change. `/bc-dashboard seen` clears the warning.
 
 The dashboard reads the credentials from Companion's `.env`, falling back to environment variables for any that are missing: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID` and `BOOMI_ENVIRONMENT_ID`.
 
-The token is used only in the requests' `Authorization` header. The dashboard never stores, shows or logs it, and its error messages carry only the HTTP status, never Boomi's reply. Without credentials, everything else still works, and the Live environment section says what's missing.
+The token is used only in the requests' `Authorization` header. The dashboard never stores, shows or logs it, and its error messages carry only the HTTP status, never Boomi's reply. Without credentials, everything else still works, and the **Process runs in Boomi** section says what's missing.
 
 ## Commands and tools
 
@@ -162,7 +162,7 @@ The tools are listed to Claude as `mcp__boomi-dashboard__summary` and `mcp__boom
 - **Claude Code on the web:** add the folder to the environment's `CLAUDE_CODE_PLUGIN_DIRS`, separating mods with `:`, for example `CLAUDE_CODE_PLUGIN_DIRS=/home/user/ClaudeMods/boomi-runtime:/home/user/ClaudeMods/boomi-standards:/home/user/ClaudeMods/boomi-dashboard`.
 - **One terminal session:** `claude --plugin-dir boomi-dashboard`.
 
-The session's own activity needs nothing extra. The live environment needs Companion's credentials and network access to `BOOMI_API_URL` (`api.boomi.com`).
+The session's own activity needs nothing extra. **Process runs in Boomi** needs Companion's credentials and network access to `BOOMI_API_URL` (`api.boomi.com`).
 
 ## Settings
 
@@ -172,7 +172,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 |---|---|---|
 | `paneTheme` | `day` | The pane's colors until you pick a theme: `day`, `night` or `terminal`. |
 | `flamingo` | `true` | Show the 8-bit flamingo in the pane. |
-| `recentHours` | `24` | How far back the live environment's runs count. |
+| `recentHours` | `24` | How far back **Process runs in Boomi** goes. |
 | `envFile` | `.env` | Companion's `.env`, relative to the session's working directory. |
 | `componentsDir` | `active-development` | Where Companion keeps component XML. |
 | `pollSeconds` | `60` | How often to check Boomi. `0` turns it off. |
@@ -185,7 +185,8 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 - The dashboard recognizes Companion's scripts by name in Bash commands and reads their `SUCCESS:` and `ERROR:` lines. A component sent to Boomi another way, such as `curl` straight to the Platform API, doesn't show up. A change to the scripts' output could need a change here.
 - When one command runs several scripts, each is judged from the command's whole output.
 - A call another mod refuses shows as blocked only when that mod's refusal reaches the dashboard, which depends on the order in which the mods' hooks run.
-- The live environment's runs include runs from schedules and other people, not only this session's.
+- **Process runs in Boomi** includes runs from schedules and other people, not only this session's.
+- The dashboard counts a Companion script as run only when the command runs it (`bash`, `sh`, `./`, `source`). Reading or searching a script, as with `cat` or `grep`, doesn't count.
 - The cost is the session's total so far, as `/cost` reports it, not just Companion's share.
 - Tokens are counted from when the mod loads, so in a session started without it, the count misses what came before. The first step's share includes everything before it.
 

@@ -20,7 +20,7 @@ Never read, print or copy my .env or any Boomi credentials. The mod reads them i
 
 - Run `/bc-dashboard`. It should say nothing needs attention and that no components have shown up yet.
 - Have Claude build something with Companion. Each component appears in the pane as Claude edits it, saves it to Boomi, deploys it and tests it, and the banner above the prompt shows the latest step.
-- Run `/bc-dashboard poll` to check the connection to Boomi. If credentials or `BOOMI_ENVIRONMENT_ID` are missing, the Live environment section says which.
+- Run `/bc-dashboard poll` to check the connection to Boomi. If credentials or `BOOMI_ENVIRONMENT_ID` are missing, the **Process runs in Boomi** section says which.
 - The pane starts in the Day theme. Press **Night** or **Terminal** at the top of the pane, or run `/bc-dashboard theme night`, to switch.
 
 ## Updating

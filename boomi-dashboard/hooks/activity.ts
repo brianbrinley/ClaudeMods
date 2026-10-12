@@ -86,22 +86,61 @@ const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefin
   return other ? { kind: 'other', script: other[1] } : undefined
 }
 
+/** Words that run the command after them: `bash x.sh`, `env A=1 x.sh`, `timeout 60 x.sh`. */
+const RUNNERS = new Set(['bash', 'sh', 'zsh', 'source', '.', 'exec', 'env', 'command', 'nohup', 'time', 'sudo', 'timeout', 'xargs'])
+
+/**
+ * Whether the word at `i` is what its simple command runs: the first word
+ * after the last separator, past variable assignments, runners such as
+ * `bash` or `timeout 60`, and their flags. A script named as an argument
+ * (`cat boomi-deploy.sh`, `grep x boomi-deploy.sh`) is not run.
+ */
+const isRun = (tokens: readonly string[], i: number): boolean => {
+  let start = i
+  while (start > 0 && !SEPARATOR.test(tokens[start - 1]!)) start--
+  for (let j = start; j < i; j++) {
+    const word = tokens[j]!
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) || RUNNERS.has(word) || word.startsWith('-') || /^\d+[smh]?$/.test(word)) continue
+    return false
+  }
+  return true
+}
+
+/** `dir` joined with `path`, `.` and `..` resolved; an absolute path stands alone. */
+const joinPath = (dir: string, path: string): string => {
+  const parts = (path.startsWith('/') || !dir ? path : `${dir}/${path}`).split('/')
+  const out: string[] = []
+  for (const part of parts) {
+    if (part === '.' || (part === '' && out.length > 0)) continue
+    if (part === '..' && out.length > 0 && out[out.length - 1] !== '..' && out[out.length - 1] !== '') out.pop()
+    else out.push(part)
+  }
+  return out.join('/')
+}
+
 /**
  * The Companion scripts a shell command runs, with what each names. Help and
- * connection checks touch nothing, so they're left out. A script inside a
- * quoted `bash -c '...'` is found too.
+ * connection checks touch nothing, so they're left out, as is a script only
+ * read or searched. A file named after a `cd` is taken from that folder, and
+ * a script inside a quoted `bash -c '...'` is found too.
  */
 export const scriptRuns = (command: string): ScriptRun[] => {
   const runs: ScriptRun[] = []
   const tokens = words(command)
+  let dir = ''
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!
     if (/\s/.test(token) && token.includes('boomi-')) {
-      runs.push(...scriptRuns(token))
+      runs.push(...scriptRuns(dir ? `cd ${dir} && ${token}` : token))
+      continue
+    }
+    const following = tokens[i + 1]
+    if ((token === 'cd' || token === 'pushd') && isRun(tokens, i) && following && !SEPARATOR.test(following)) {
+      dir = joinPath(dir, following)
       continue
     }
     const found = kindOf(token)
-    if (!found) continue
+    if (!found || !isRun(tokens, i)) continue
     const args: string[] = []
     for (const arg of tokens.slice(i + 1)) {
       if (SEPARATOR.test(arg)) break
@@ -115,13 +154,13 @@ export const scriptRuns = (command: string): ScriptRun[] => {
       const value = args[j + 1]
       if (arg === '--process-id' && value) run.processId = value
       else if (arg === '--component-id' && value) run.componentId = value
-      else if (arg === '--by-component' && value) run.file = value
+      else if (arg === '--by-component' && value) run.file = joinPath(dir, value)
       if (TAKES_VALUE.has(arg)) {
         j++
         continue
       }
       if (arg.startsWith('-')) continue
-      if (arg.endsWith('.xml')) run.file = arg
+      if (arg.endsWith('.xml')) run.file = joinPath(dir, arg)
       else if (found.kind === 'undeploy') run.deploymentId = arg
     }
     runs.push(run)
@@ -162,6 +201,10 @@ const firstLine = (text: string, pattern: RegExp): string | undefined =>
 export const isFailedStatus = (status: string | undefined): boolean =>
   status !== undefined && /^(ERROR|ABORTED|DISCARDED)$/i.test(status)
 
+/** Execution statuses that mean the run hasn't finished yet. */
+export const isRunningStatus = (status: string | undefined): boolean =>
+  status !== undefined && /^(INPROCESS|STARTED|PENDING|QUEUED)$/i.test(status)
+
 export const isWarnStatus = (status: string | undefined): boolean =>
   status !== undefined && /^COMPLETE_WARN$/i.test(status)
 
@@ -179,11 +222,12 @@ export const readOutput = (kind: ActivityKind, output: string, isError: boolean)
   const error = firstLine(output, /^\s*ERROR:/)
   const already = kind === 'create' ? firstLine(output, /already exists with ID:/) : undefined
   const unchanged = kind === 'push' ? firstLine(output, /nothing sent to the platform/) : undefined
-  // Scripts that only read report no SUCCESS line: no error is success.
-  const reads = kind === 'pull' || kind === 'other'
+  // A script's own ERROR line fails it, and its SUCCESS line passes it even
+  // when something else in the command exited with an error. With neither,
+  // the exit code decides.
   const reading: Reading = {
-    outcome: !isError && !error && (reads || success || already || unchanged) ? 'ok' : 'failed',
-    detail: shorten(error ?? success ?? already ?? unchanged ?? (isError ? 'failed' : 'done')),
+    outcome: error ? 'failed' : success || already || unchanged || !isError ? 'ok' : 'failed',
+    detail: shorten(error ?? success ?? already ?? unchanged ?? (isError ? 'failed' : 'finished')),
   }
 
   const name = output.match(/[Cc]omponent '([^']+)'|Deployed '([^']+)'/)
@@ -360,12 +404,19 @@ export type ComponentRow = {
 export const components = (activity: readonly Activity[]): ComponentRow[] => {
   const rows = new Map<string, ComponentRow>()
   const byId = new Map<string, ComponentRow>()
+  const byFile = new Map<string, ComponentRow>()
   for (const a of activity) {
     if (a.kind === 'other') continue
-    const key = a.file ?? (a.componentId && byId.get(a.componentId)?.key) ?? a.componentId ?? a.subject
+    // A step that names no file and no component can't be placed: it stays in Recently.
+    if (!a.file && !a.componentId && !(a.kind === 'undeploy' && /^deployment /.test(a.subject))) continue
+    // One component, however a step names it: by ID first, then by file.
+    const known = (a.componentId && byId.get(a.componentId)) || (a.file && byFile.get(a.file))
+    const key = known ? known.key : (a.file ?? a.componentId ?? a.subject)
     const row: ComponentRow = rows.get(key) ?? { key, name: a.subject, lastAt: a.startedAt, ids: [] }
     row.ids.push(a.id)
-    if (!/\.xml$/.test(a.subject) || row.name === key || /\.xml$/.test(row.name)) row.name = a.subject
+    // A real name beats a file name or a placeholder.
+    const isPlaceholder = (name: string) => /\.xml$/.test(name) || name === 'a component' || name === key
+    if (!isPlaceholder(a.subject) || isPlaceholder(row.name)) row.name = a.subject
     row.type = a.type ?? row.type
     row.componentId = a.componentId ?? row.componentId
     row.lastAt = Math.max(row.lastAt, a.endedAt ?? a.startedAt)
@@ -375,6 +426,7 @@ export const components = (activity: readonly Activity[]): ComponentRow[] => {
     else if (a.kind === 'test') row.tested = a
     rows.set(key, row)
     if (row.componentId) byId.set(row.componentId, row)
+    if (a.file) byFile.set(a.file, row)
   }
   return [...rows.values()].sort((a, b) => b.lastAt - a.lastAt)
 }
@@ -462,7 +514,16 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
       })
     }
   }
-  return items.sort((a, b) => b.at - a.at)
+  // The same failure reached twice (one component named two ways) is one item.
+  const seen = new Set<string>()
+  return items
+    .sort((a, b) => b.at - a.at)
+    .filter(item => {
+      const key = `${item.title}\n${item.hint}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
 }
 
 // --- Tokens and spend --------------------------------------------------------------
@@ -618,18 +679,18 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
 
   const feed = dashboard.activity.slice(-8).reverse()
   if (feed.length > 0) {
-    lines.push('', 'Recently:')
+    lines.push('', "Claude's latest steps (what Claude just did with Companion, newest first):")
     for (const a of feed) {
       const spent = formatSpend(all.get(a.id))
       lines.push(`  ${STATUS[levelOf(a)].icon} ${describe(a)}, ${ago(when(a), now)}${spent ? `  [${spent}]` : ''}`)
     }
   }
 
-  lines.push('', `Live environment, last ${hours}h:`)
+  lines.push('', `Process runs in Boomi, last ${hours}h (every execution in the environment, not only this session's):`)
   if (dashboard.platform.phase !== 'ok') lines.push(`  ${dashboard.platform.message}`)
   else {
     const runs = recentRuns(dashboard.platform.runs, now, windowMs)
-    if (runs.length === 0) lines.push('  No runs.')
+    if (runs.length === 0) lines.push(`  No process ran in the last ${hours}h.`)
     for (const run of runs) lines.push(`  ${runLine(run, now)}`)
   }
   if (dashboard.watched.length > 0) {
@@ -656,6 +717,8 @@ const RUN_WORDS: Record<string, string> = {
   DISCARDED: 'discarded',
   INPROCESS: 'running',
   STARTED: 'started',
+  PENDING: 'queued',
+  QUEUED: 'queued',
 }
 
 export const runText = (run: Run, now: number): string => {
@@ -742,6 +805,33 @@ export const FLAMINGO_WALK: readonly (readonly string[])[] = [
 /** The flamingo's pixels for a frame: walking while working, else standing. */
 export const flamingo = (isWorking: boolean, frame: number): readonly string[] =>
   isWorking ? FLAMINGO_WALK[frame % FLAMINGO_WALK.length]! : FLAMINGO_IDLE
+
+/** How many columns the flamingo paces across while Claude works. */
+export const FLAMINGO_TRAVEL = 6
+
+/** The sprite facing the other way: each pixel row reversed. The sprite faces right. */
+export const mirror = (pixels: readonly string[]): string[] => pixels.map(row => [...row].reverse().join(''))
+
+/**
+ * Where the flamingo is on its strip at a frame, and which way it faces: it
+ * walks one column a frame to the end of the strip, turns, and walks back.
+ */
+export const pace = (frame: number, travel = FLAMINGO_TRAVEL): { offset: number; facing: 'right' | 'left' } => {
+  const cycle = travel * 2
+  const at = ((frame % cycle) + cycle) % cycle
+  return at < travel ? { offset: at, facing: 'right' } : { offset: cycle - at, facing: 'left' }
+}
+
+/**
+ * The flamingo as drawn: its pixels, mirrored when it faces left, and how many
+ * columns in from the strip's left edge. Standing still while idle, it keeps
+ * the spot and the way it faced when Claude stopped.
+ */
+export const flamingoView = (isWorking: boolean, frame: number, travel = FLAMINGO_TRAVEL) => {
+  const { offset, facing } = pace(frame, travel)
+  const pixels = flamingo(isWorking, frame)
+  return { pixels: facing === 'right' ? [...pixels] : mirror(pixels), offset, facing }
+}
 
 /** One terminal cell: a character, its color and its background, either absent for clear. */
 export type Cell = { char: string; color?: string; bg?: string }
