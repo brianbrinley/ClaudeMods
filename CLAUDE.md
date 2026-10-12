@@ -2,7 +2,7 @@
 
 ## Layout
 
-One mod per top-level folder, each a self-contained plugin: `.claude-plugin/plugin.json`, `hooks/hooks.json`, the hooks module, `types/` for its state contract, `tests/` and a `README.md`. Add every new mod to the **Mods** table in the root README and to the docs site's `PAGES` (see below). Mod ideas that aren't built yet go in `IDEAS.md`; when one ships, move it from there to the Mods table.
+One mod per top-level folder, each a self-contained plugin: `.claude-plugin/plugin.json`, `hooks/hooks.json`, the hooks module, `types/` for its state contract, `tests/` and a `README.md`. Add every new mod to the **Mods** table in the root README and to the docs site's `PAGES` (see below). Mod ideas that aren't built yet go in `IDEAS.md`; when one ships, move it from there to the Mods table. What a change needs checked by hand (a live session, a real Boomi account) goes in `CHECKLIST.md`, with a visible pass and fail for each step; tick it off once the user confirms it.
 
 Before pushing a mod change, run `claude plugin validate <mod>` and `claude plugin test <mod>`, and type-check it with `tsc -p <mod>` once Claude Code has loaded it (that's when it lays `.claude-plugin/types/`, which is gitignored).
 
@@ -16,7 +16,7 @@ Credentials never go in a mod's files or in chat. Mods read them from the enviro
 - `site/build.py` renders the READMEs listed in its `PAGES` with `site/template.html`, `brand/valence.css` and `site/assets/`. A `PAGES` entry whose nav label is `None` is built but left out of the top nav (the Style page, `site/style.md`).
 - Mermaid diagrams render in the browser and switch to `brand/mermaid-init-night.txt` in Night mode.
 
-To publish a new mod's README, add it to `PAGES`, and its `assets/` folder to `COPY_PATHS`. `IDEAS.md` stays in the repository but isn't published on the site; links to it go to GitHub. Keep README links relative: the build rewrites them for the site and sends anything not on the site to GitHub.
+To publish a new mod's README, add it to `PAGES`, its `assets/` folder to `COPY_PATHS`, and its folder to the `paths` that trigger `.github/workflows/pages.yml`. `IDEAS.md` stays in the repository but isn't published on the site; links to it go to GitHub. Keep README links relative: the build rewrites them for the site and sends anything not on the site to GitHub.
 
 Check locally with `pip install -r site/requirements.txt && python site/build.py --out _site`, then open `_site/index.html` through a local web server.
 

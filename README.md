@@ -21,7 +21,7 @@ Mods for [Claude Code](https://claude.com/claude-code): plugins of function hook
 
 ## Plugins this repository pulls in
 
-[`.claude/settings.json`](.claude/settings.json) declares [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) (`bc-integration@boomi-companion`), which the boomi-runtime mod works with. On Claude Code on the web, install it from the environment's setup script; see the [boomi-runtime README](boomi-runtime/README.md#works-with-boomi-companion).
+[`.claude/settings.json`](.claude/settings.json) declares [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) (`bc-integration@boomi-companion`), which the boomi-runtime mod works with. On Claude Code on the web, install it from the environment's setup script; see the [boomi-runtime README](boomi-runtime/README.md#setup-on-claude-code-on-the-web).
 
 ## Loading a mod
 

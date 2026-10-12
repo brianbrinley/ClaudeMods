@@ -127,6 +127,8 @@ type Settings = {
   budgetUsd: number
   isSuggesting: boolean
   historyDays: number
+  /** The API token from Claude Code's secure storage, or '' when it isn't set there. */
+  apiToken: string
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -141,6 +143,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   budgetUsd: Math.max(0, Number(options.budgetUsd ?? 0) || 0),
   isSuggesting: options.suggestions !== false,
   historyDays: Math.max(1, Number(options.historyDays ?? 90) || 90),
+  apiToken: String(options.apiToken ?? '').trim(),
 })
 
 const PANE = 'boomi-dashboard'
@@ -420,11 +423,21 @@ const loadCredentials = async ($: Engine, settings: Settings): Promise<Credentia
   const values: Record<string, string> = {}
   for (const [key, value] of Object.entries(fromEnv)) if (value) values[key] = value
   Object.assign(values, Object.fromEntries(Object.entries(fromFile).filter(([, v]) => v)))
+  // The token in Claude Code's secure storage wins over .env and the environment.
+  if (settings.apiToken) values.BOOMI_API_TOKEN = settings.apiToken
   const found = credentialsFrom(values)
   return 'missing' in found
     ? `Not connected: Companion's Boomi credentials aren't set (${found.missing.join(', ')}). Runs show up here once they are.`
     : found.credentials
 }
+
+/**
+ * The environment a Companion script the dashboard runs itself gets: the token
+ * from secure storage, for that one process. Companion's scripts take a
+ * variable .env doesn't set from the environment they start in.
+ */
+const scriptEnv = (settings: Settings): { env?: Record<string, string> } =>
+  settings.apiToken ? { env: { BOOMI_API_TOKEN: settings.apiToken } } : {}
 
 let isPolling = false
 let isFollowUpDue = false
@@ -603,6 +616,7 @@ const explain = async ($: Engine, settings: Settings, executionId: string): Prom
       const ran = await $.process.run(['bash', `${scripts}/boomi-execution-query.sh`, '--execution-id', executionId, '--logs'], {
         cwd: await $.session.cwd(),
         timeoutMs: 240_000,
+        ...scriptEnv(settings),
       })
       const loaded = await loadCredentials($, settings).catch(() => 'unavailable')
       const mask = (text: string) => (typeof loaded === 'string' || !loaded.apiToken ? text : text.split(loaded.apiToken).join('‹redacted›'))
@@ -662,6 +676,7 @@ const rerun = async ($: Engine, settings: Settings, stepId: number): Promise<str
     const result = await $.process.run(['bash', `${scripts}/boomi-test-execute.sh`, ...step.args], {
       cwd: await $.session.cwd(),
       timeoutMs: 600_000,
+      ...scriptEnv(settings),
     })
     ran = { text: `${result.stdout}\n${result.stderr}`, isError: result.exitCode !== 0 }
   } catch (error) {

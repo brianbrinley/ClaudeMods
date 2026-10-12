@@ -1,0 +1,69 @@
+# Manual checks
+
+What the automated tests can't prove: each item needs a real Claude Code session, a real Boomi account, or both. Run them in order within a section. Each step has a **Pass** and a **Fail** you can see; nothing is "probably fine".
+
+**Reporting back:** give the item's ID and **PASS** or **FAIL**, and for a fail, the exact text you saw (a screenshot works too). For example: `A4 FAIL: ERROR: Missing required environment variables: BOOMI_API_TOKEN`. Never paste the token itself.
+
+When an item passes, tick it here. When every item in a section passes, the section's open question in the mod's README can be closed.
+
+## A. API token in secure storage
+
+*boomi-runtime 0.2.0, boomi-dashboard 0.8.0 ([#21](https://github.com/brianbrinley/ClaudeMods/pull/21)). Setup: [Secure the API token](boomi-runtime/README.md#secure-the-api-token).*
+
+- [ ] **A1. Save the token.** Run step 2 of the setup from a terminal.
+  **Pass:** each `claude plugin configure` finishes without an error. **Fail:** any error, such as `No installed plugin has the id`; then run `claude plugin list` and send me the IDs it shows.
+- [ ] **A2. Take it out of `.env`.** Delete or comment out the `BOOMI_API_TOKEN` line in Companion's `.env`, and remove any `BOOMI_API_TOKEN` environment variable. Keep the rest of the file.
+- [ ] **A3. Doctor.** Start a new session and run `/boomi doctor`.
+  **Pass:** a line reads `✓ API token in Claude Code's secure storage; Companion's scripts get it only while they run`, and no toast warns about `.env`. **Fail:** the line says `API token from the .env file`, `from an environment variable`, or `but Delete the BOOMI_API_TOKEN line`.
+- [ ] **A4. Companion uses it.** Ask Claude to run Companion's connection test (`boomi-folder-create.sh --test-connection`), then to push one component.
+  **Pass:** both end with `SUCCESS`. **Fail:** `ERROR: Missing required environment variables: BOOMI_API_TOKEN`. This is the one the tests can't cover; if it fails, the token isn't reaching Companion's scripts.
+- [ ] **A5. The guard still holds.** Ask Claude to run `printenv`.
+  **Pass:** refused with `boomi-runtime: this command could show the Boomi API token`. **Fail:** it runs.
+- [ ] **A6. The dashboard reaches Boomi.** Run `/bc-dashboard poll`.
+  **Pass:** **Process runs in Boomi** lists runs, or says no process ran. **Fail:** `Not connected: Companion's Boomi credentials aren't set (BOOMI_API_TOKEN)`.
+- [ ] **A7. Undo works.** Put the token line back in `.env` and start a new session.
+  **Pass:** Companion works as before, and `/boomi doctor` warns that the line overrides the secure token. **Fail:** anything else.
+
+## B. Dashboard features
+
+*boomi-dashboard 0.7.0 and up. Needs a Companion session with credentials.*
+
+- [ ] **B1. A failed test shows once.** Have Claude run a test that fails.
+  **Pass:** one item under **Needs attention**, not a second one for the same execution's run. **Fail:** two items with the same execution ID.
+- [ ] **B2. Why?** Press **Why?** on that item.
+  **Pass:** within 4 minutes it shows `The log (N severe, M warnings):` and the log's lines. **Fail:** an error line under the item; send its text.
+- [ ] **B3. Ask Claude to fix.** Press it.
+  **Pass:** the prompt box holds a fix request naming the execution and quoting the log, after anything you'd typed, and nothing is sent until you press Enter. **Fail:** nothing appears, or it sends by itself.
+- [ ] **B4. Run again.** After Claude's fix, press **Run again**.
+  **Pass:** a new test step appears under **Claude's latest steps**, and if it passes, the item leaves **Needs attention**. **Fail:** no new step, or `Couldn't find Boomi Companion's scripts`.
+- [ ] **B5. Next step.** Have Claude push a process and finish its turn without deploying it.
+  **Pass:** the empty prompt box shows a dim `Deploy <name> and test it`. **Fail:** nothing. (It shows once per step, and only while the box is empty.)
+- [ ] **B6. Budget.** Set `budgetUsd` to a little over the session's current cost under `/config`, and keep working.
+  **Pass:** past 80%, the status line shows `◐ NN% of the $X budget` and one toast appears; past 100%, `✗ budget spent`. **Fail:** no warning, or a toast on every refresh.
+- [ ] **B7. Session report.** Run `/bc-dashboard report save`.
+  **Pass:** it prints the report and `Saved to …/boomi-session-report-<date>.md`, and the file exists. **Fail:** an error.
+- [ ] **B8. Past sessions.** Press **Scan** under **Past Companion sessions**.
+  **Pass:** it lists earlier Companion sessions on this machine, and one session's cost is within a few cents of what `/cost` showed in it. **Fail:** `History needs Perl`, an empty list when you know there were sessions, or a cost far off; send the line.
+- [ ] **B9. Pane basics.** Theme buttons switch Day, Night and Terminal; **☐** closes an item and **Reopen** brings it back; **Hide** folds **Process runs in Boomi**.
+  **Pass:** all three. **Fail:** say which.
+
+## C. Windows (WSL)
+
+- [ ] **C1.** In Claude Code inside WSL, install the dashboard with [INSTALL.md](boomi-dashboard/INSTALL.md), then press **Scan**.
+  **Pass:** past sessions list, or `No Companion sessions`. **Fail:** `Perl's JSON module is missing` (run `sudo apt install perl`, then scan again) or anything else.
+
+## D. Docs site
+
+*After [#21](https://github.com/brianbrinley/ClaudeMods/pull/21) is merged.*
+
+- [ ] **D1.** The **Docs Site** workflow runs for the merge, under the repository's **Actions** tab.
+  **Pass:** a green run. **Fail:** no run, or a red one.
+- [ ] **D2.** On [the site](https://brianbrinley.github.io/ClaudeMods/), the Companion Dashboard page has a **Commands and tools** section, and the Boomi Runtime page has **Secure the API token**.
+  **Pass:** both. **Fail:** the old pages.
+
+## E. Runtime regression
+
+*Already verified live before 0.2.0; recheck once after it.*
+
+- [ ] **E1.** `/boomi up`, then `/boomi smoke`, then `/boomi down`.
+  **Pass:** online, `smoke test: passed`, then everything deleted. **Fail:** the phase or message where it stopped.
