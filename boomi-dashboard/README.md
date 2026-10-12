@@ -7,7 +7,7 @@
 
 A Claude Code mod that shows where your [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) build stands while Claude works. It tracks each component Claude edits, saves to Boomi, deploys and tests, and shows what failed with what to do next. It also shows what the session has cost so far. With Companion's credentials, it adds the live environment's recent runs, and warns when someone else changes a component you're working on.
 
-You see it as a banner above the prompt, a pane, a status line and toasts. `/dashboard` shows the same thing as text wherever those aren't available, including Claude Code on the web.
+You see it as a banner above the prompt, a pane, a status line and toasts. `/bc-dashboard` shows the same thing as text wherever those aren't available, including Claude Code on the web.
 
 > **Prototype.** Built and tested against Companion's scripts and their output. Not yet run against a live Boomi account.
 
@@ -70,7 +70,7 @@ Status is shown with an icon and a label, never color alone:
 - **Spend** is the session's cost, as `/cost` reports it.
 - **Each step's share** is what Claude used between the previous step and this one: the thinking, reading and writing that led to it. A component's share is all its steps added up.
 
-/dashboard and the `summary` tool show the same figures in brackets, for example `[61k tokens · $0.21]`.
+/bc-dashboard and the `summary` tool show the same figures in brackets, for example `[61k tokens · $0.21]`.
 
 ## How it works
 
@@ -81,7 +81,7 @@ flowchart LR
     A["Claude runs a Companion script<br/>create, push, deploy, test, ..."] --> D{"SUCCESS or ERROR?<br/>test status?"}
     D -- ok --> R
     D -- failed --> X["error: needs attention,<br/>with a next step"]
-    R --> S["Banner, pane,<br/>status line, /dashboard"]
+    R --> S["Banner, pane,<br/>status line, /bc-dashboard"]
     X --> S
     P[("Boomi Platform API")] -. "every 60 s: recent runs,<br/>watched components" .-> S
     U["Session cost<br/>and context"] -.-> S
@@ -119,7 +119,7 @@ The scripts run as usual: the dashboard never stops one.
 With Companion's credentials, the dashboard also checks Boomi every 60 seconds. It only reads.
 
 - **Recent runs.** It shows the newest executions on the runtimes attached to `BOOMI_ENVIRONMENT_ID`, but only those from the last 24 hours (set with `recentHours`). Failures older than that aren't shown or flagged. A new failure gets a toast. Failures already there at the first check don't.
-- **Watched components.** `/dashboard watch <component ID or XML file>` adds a component to the watch list, which carries over to later sessions. When its version changes and Companion's API user (`BOOMI_USERNAME`) didn't make the change, it shows under **Needs attention**: pull it before you push, or you overwrite their change. `/dashboard seen` clears the warning.
+- **Watched components.** `/bc-dashboard watch <component ID or XML file>` adds a component to the watch list, which carries over to later sessions. When its version changes and Companion's API user (`BOOMI_USERNAME`) didn't make the change, it shows under **Needs attention**: pull it before you push, or you overwrite their change. `/bc-dashboard seen` clears the warning.
 
 The dashboard reads the credentials from Companion's `.env`, falling back to environment variables for any that are missing: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID` and `BOOMI_ENVIRONMENT_ID`.
 
@@ -129,12 +129,12 @@ The token is used only in the requests' `Authorization` header. The dashboard ne
 
 | Command | Tool Claude calls | Does |
 |---|---|---|
-| `/dashboard` | `summary` | Everything above as text; opens the pane where the surface has one. |
-| `/dashboard poll` | | Checks Boomi now, then shows the summary. |
-| `/dashboard watch <id\|file>` | `watch` | Watches a component, given its ID or the XML file Companion created. |
-| `/dashboard unwatch <id\|name>` | | Stops watching it. |
-| `/dashboard seen` | | Clears the warnings about watched changes. |
-| `/dashboard banner` | | Shows the banner again after **Hide**. |
+| `/bc-dashboard` | `summary` | Everything above as text; opens the pane where the surface has one. |
+| `/bc-dashboard poll` | | Checks Boomi now, then shows the summary. |
+| `/bc-dashboard watch <id\|file>` | `watch` | Watches a component, given its ID or the XML file Companion created. |
+| `/bc-dashboard unwatch <id\|name>` | | Stops watching it. |
+| `/bc-dashboard seen` | | Clears the warnings about watched changes. |
+| `/bc-dashboard banner` | | Shows the banner again after **Hide**. |
 
 The tools are listed to Claude as `mcp__boomi-dashboard__summary` and `mcp__boomi-dashboard__watch`. Ask Claude "what's left to fix?" and it can answer from the summary.
 
@@ -162,7 +162,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 
 ## Limits
 
-- **The Claude Code web app doesn't show banners, panes, status lines or toasts yet.** On the web, use `/dashboard`, or ask Claude, which calls the `summary` tool.
+- **The Claude Code web app doesn't show banners, panes, status lines or toasts yet.** On the web, use `/bc-dashboard`, or ask Claude, which calls the `summary` tool.
 - The dashboard recognizes Companion's scripts by name in Bash commands and reads their `SUCCESS:` and `ERROR:` lines. A component sent to Boomi another way, such as `curl` straight to the Platform API, doesn't show up. A change to the scripts' output could need a change here.
 - When one command runs several scripts, each is judged from the command's whole output.
 - A call another mod refuses shows as blocked only when that mod's refusal reaches the dashboard, which depends on the order in which the mods' hooks run.
@@ -182,7 +182,7 @@ Set these under `/config`, or in settings under `pluginConfigs["boomi-dashboard"
 | Files | `$.fs` | Reads component XML for names, IDs and types, and Companion's `.env` for the credentials. |
 | Session state | `$.state` | The activity, Boomi's results and the watch list that the banner and pane read. |
 | Store | `$.store` | Keeps the watch list across sessions. |
-| Slash command | `$.command.register` | `/dashboard` and its actions. |
+| Slash command | `$.command.register` | `/bc-dashboard` and its actions. |
 | Tools for Claude | `$.tool.register` | `summary` and `watch`. |
 | Display | `ui.render` (`AbovePrompt`, `Pane`), `$.ui.status`, `$.ui.toast` | The banner, the pane, the status line and the toasts. |
 

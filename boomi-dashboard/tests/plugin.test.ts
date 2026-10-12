@@ -2,7 +2,7 @@ import type { CommandRunInput, On, RenderElement, RenderPropsOf } from 'claude-c
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-const dashboard = (args = '') => ({ command: 'dashboard', args }) as CommandRunInput
+const dashboard = (args = '') => ({ command: 'bc-dashboard', args }) as CommandRunInput
 
 const ID = '1a2b3c4d-1111-2222-3333-444455556666'
 const ORDERS = `<bns:Component xmlns:bns="http://api.platform.boomi.com/" componentId="${ID}" name="Orders Sync" type="process"></bns:Component>`

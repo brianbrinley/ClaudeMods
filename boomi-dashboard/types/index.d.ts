@@ -62,7 +62,7 @@ export type Watched = {
   version?: string
   modifiedBy?: string
   modifiedDate?: string
-  /** Set when its version moved since it was first seen, until /dashboard seen. */
+  /** Set when its version moved since it was first seen, until /bc-dashboard seen. */
   changedBy?: string
   error?: string
 }

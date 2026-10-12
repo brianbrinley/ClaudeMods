@@ -11,20 +11,20 @@ Install the boomi-dashboard Claude Code mod from https://github.com/brianbrinley
    "CLAUDE_CODE_PLUGIN_DIRS": "<absolute path to ~/ClaudeMods/boomi-dashboard>"
    Use the absolute path, with my home folder spelled out. If CLAUDE_CODE_PLUGIN_DIRS already has a value, append to it with ":" (";" on Windows) instead of replacing it. Keep everything else in the file as it is, and show me the diff before you save.
 4. Check that Boomi Companion (bc-integration) is installed. If it isn't, tell me how to install it, but don't install it yourself.
-5. Tell me to restart Claude Code. After the restart I'll run /dashboard to check it loaded.
+5. Tell me to restart Claude Code. After the restart I'll run /bc-dashboard to check it loaded.
 
 Never read, print or copy my .env or any Boomi credentials. The mod reads them itself.
 ```
 
 ## After the restart
 
-- Run `/dashboard`. It should say nothing needs attention and that no components have shown up yet.
+- Run `/bc-dashboard`. It should say nothing needs attention and that no components have shown up yet.
 - Have Claude build something with Companion. Each component appears in the pane as Claude edits it, saves it to Boomi, deploys it and tests it, and the banner above the prompt shows the latest step.
-- Run `/dashboard poll` to check the connection to Boomi. If credentials or `BOOMI_ENVIRONMENT_ID` are missing, the Live environment section says which.
+- Run `/bc-dashboard poll` to check the connection to Boomi. If credentials or `BOOMI_ENVIRONMENT_ID` are missing, the Live environment section says which.
 - The pane uses Valence Day colors by default. To use Valence Night or your terminal's own theme, set **Pane colors** under `/config`.
 
 ## Updating
 
 Run `git -C ~/ClaudeMods pull`, then restart Claude Code.
 
-**If you installed it as boomi-cockpit:** the mod's folder is now `boomi-dashboard` and its command is `/dashboard`. After the pull, change `boomi-cockpit` to `boomi-dashboard` in `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`, then restart. Settings you changed under `/config` and the watch list start over under the new name.
+**If you installed it as boomi-cockpit:** the mod's folder is now `boomi-dashboard` and its command is `/bc-dashboard`. After the pull, change `boomi-cockpit` to `boomi-dashboard` in `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`, then restart. Settings you changed under `/config` and the watch list start over under the new name.

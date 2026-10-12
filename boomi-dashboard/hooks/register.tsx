@@ -359,7 +359,7 @@ const saveWatchList = async ($: Engine) => {
 
 /** Watches a component by ID or by its XML file under Companion's folders. */
 const watch = async ($: Engine, settings: Settings, target: string): Promise<string> => {
-  if (!target) return 'Usage: /dashboard watch <component ID | component XML file>'
+  if (!target) return 'Usage: /bc-dashboard watch <component ID | component XML file>'
   let componentId = target
   let name: string | undefined
   if (target.endsWith('.xml')) {
@@ -396,12 +396,12 @@ const seen = async ($: Engine): Promise<string> => {
 // --- Commands and tools ------------------------------------------------------
 
 const USAGE = [
-  '/dashboard                 what needs attention, each component, recent activity, the live environment',
-  '/dashboard poll            check Boomi now',
-  '/dashboard watch <id|file> watch a component for changes someone else makes',
-  '/dashboard unwatch <id>    stop watching it',
-  '/dashboard seen            mark watched changes as seen',
-  '/dashboard banner          show the banner above the prompt again',
+  '/bc-dashboard                 what needs attention, each component, recent activity, the live environment',
+  '/bc-dashboard poll            check Boomi now',
+  '/bc-dashboard watch <id|file> watch a component for changes someone else makes',
+  '/bc-dashboard unwatch <id>    stop watching it',
+  '/bc-dashboard seen            mark watched changes as seen',
+  '/bc-dashboard banner          show the banner above the prompt again',
 ].join('\n')
 
 const summaryNow = async ($: Engine, settings: Settings) =>
@@ -484,7 +484,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await $.command.register({
-      name: 'dashboard',
+      name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
       argumentHint: 'poll | watch <id|file> | unwatch <id> | seen | banner',
     })
@@ -542,7 +542,7 @@ export const register: Register = (on, options) => {
     return ran
   })
 
-  on('command.run', { command: 'dashboard' }, async ($, e) => ({ text: await runCommand($, settings, e.args) }))
+  on('command.run', { command: 'bc-dashboard' }, async ($, e) => ({ text: await runCommand($, settings, e.args) }))
 
   on('tool.call', { tool: 'mcp__boomi-dashboard__summary' }, async $ => ({
     result: await summaryNow($, settings).catch(error => `The dashboard couldn't build its summary: ${messageOf(error)}`),
@@ -757,7 +757,7 @@ export const register: Register = (on, options) => {
             </Box>
           )
         })}
-        {rows.length > 8 && t(`…and ${rows.length - 8} more: /dashboard lists them all.`, { color: p.muted })}
+        {rows.length > 8 && t(`…and ${rows.length - 8} more: /bc-dashboard lists them all.`, { color: p.muted })}
 
         {feed.length > 0 && heading('Recently')}
         {feed.map(a => {

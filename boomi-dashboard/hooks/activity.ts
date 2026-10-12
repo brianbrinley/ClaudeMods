@@ -457,7 +457,7 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
       items.push({
         level: 'warning',
         title: `${w.name ?? w.componentId} was changed by ${w.changedBy}`,
-        hint: 'Pull it before you push, or you overwrite their change. /dashboard seen clears this.',
+        hint: 'Pull it before you push, or you overwrite their change. /bc-dashboard seen clears this.',
         at: w.modifiedDate ? Date.parse(w.modifiedDate) || now : now,
       })
     }
@@ -575,7 +575,7 @@ export const duration = (ms: number): string => {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
-/** The whole dashboard as text: what /dashboard and Claude's summary tool show. */
+/** The whole dashboard as text: what /bc-dashboard and Claude's summary tool show. */
 export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowMs: number): string => {
   const hours = Math.round(windowMs / 3_600_000)
   const lines: string[] = []
