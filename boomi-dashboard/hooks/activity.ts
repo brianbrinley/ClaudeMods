@@ -40,6 +40,10 @@ const words = (command: string): string[] => {
     } else if (ch === '\\' && i + 1 < command.length) {
       word += command[++i]!
       started = true
+    } else if (ch === '\n' || ch === '\r') {
+      // A new line starts a new command, as a semicolon does.
+      flush()
+      out.push(';')
     } else if (/\s/.test(ch)) {
       flush()
     } else if (';&|()'.includes(ch)) {
@@ -89,6 +93,9 @@ const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefin
 /** Words that run the command after them: `bash x.sh`, `env A=1 x.sh`, `timeout 60 x.sh`. */
 const RUNNERS = new Set(['bash', 'sh', 'zsh', 'source', '.', 'exec', 'env', 'command', 'nohup', 'time', 'sudo', 'timeout', 'xargs'])
 
+/** Shell words that start a command inside a loop or condition: `do bash x.sh`, `then ./x.sh`. */
+const KEYWORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', '{'])
+
 /**
  * Whether the word at `i` is what its simple command runs: the first word
  * after the last separator, past variable assignments, runners such as
@@ -100,7 +107,7 @@ const isRun = (tokens: readonly string[], i: number): boolean => {
   while (start > 0 && !SEPARATOR.test(tokens[start - 1]!)) start--
   for (let j = start; j < i; j++) {
     const word = tokens[j]!
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) || RUNNERS.has(word) || word.startsWith('-') || /^\d+[smh]?$/.test(word)) continue
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) || RUNNERS.has(word) || KEYWORDS.has(word) || word.startsWith('-') || /^\d+[smh]?$/.test(word)) continue
     return false
   }
   return true
@@ -250,6 +257,109 @@ export const readOutput = (kind: ActivityKind, output: string, isError: boolean)
     }
   }
   return reading
+}
+
+/** A result read from the output, with the kind of script that printed it when that shows. */
+export type Result = Reading & { kind?: ActivityKind }
+
+const ID = '([0-9a-f]{8}-[0-9a-f-]{27,})'
+
+/**
+ * Every result in a command's output, in order: one per SUCCESS or ERROR
+ * line, "already exists", "nothing sent" or finished test. A script run in a
+ * loop prints one per pass, so a loop over six components is six results.
+ * Each takes the component the line before it names ("Creating component
+ * 'X'", "Pushing component 'X' (id)", "Packaging 'X' (id)", "Executing test
+ * for process id"), so an ERROR line keeps its component.
+ */
+export const parseResults = (output: string): Result[] => {
+  const results: Result[] = []
+  let pending: { kind: ActivityKind; name?: string; componentId?: string } | undefined
+  const push = (result: Result) => {
+    results.push(result)
+    pending = undefined
+  }
+  for (const raw of output.split(/\r?\n/)) {
+    const line = raw.trim()
+    let m: RegExpMatchArray | null
+    if ((m = line.match(/^Creating component '([^']+)'/))) pending = { kind: 'create', name: m[1] }
+    else if ((m = line.match(new RegExp(`^Pushing component '([^']+)' \\(${ID}\\)`)))) pending = { kind: 'push', name: m[1], componentId: m[2] }
+    else if ((m = line.match(new RegExp(`^Packaging '([^']+)' \\(${ID}\\)`)))) pending = { kind: 'deploy', name: m[1], componentId: m[2] }
+    else if ((m = line.match(/^Executing test for process (\S+)/))) pending = { kind: 'test', componentId: m[1] }
+    else if ((m = line.match(/^Undeploying (\S+)/))) pending = { kind: 'undeploy' }
+    else if ((m = line.match(/^Execution completed: status=([A-Z_]+), executionId=(\S+)/))) {
+      const status = m[1]
+      push({
+        kind: 'test',
+        outcome: isFailedStatus(status) ? 'failed' : 'ok',
+        detail: `status ${status}`,
+        executionStatus: status,
+        executionId: m[2]?.replace(/[,.]$/, ''),
+        componentId: pending?.kind === 'test' ? pending.componentId : undefined,
+      })
+    } else if (/^SUCCESS:|already exists with ID:|nothing sent to the platform/.test(line)) {
+      const created = line.match(new RegExp(`[Cc]omponent '([^']+)' (?:created|already exists) with ID: ${ID}`))
+      const pushed = line.match(/Pushed component '([^']+)'(?: — now version (\d+))?/)
+      const deployed = line.match(/Deployed '([^']+)'/)
+      const kind: ActivityKind | undefined = created
+        ? 'create'
+        : pushed || /nothing sent/.test(line)
+          ? 'push'
+          : deployed || /^SUCCESS: Package /.test(line)
+            ? 'deploy'
+            : /removed from environment/.test(line)
+              ? 'undeploy'
+              : /Test submitted/.test(line)
+                ? 'test'
+                : pending?.kind
+      const unchanged = line.match(/Component '([^']+)' matches the last push/)
+      push({
+        kind,
+        outcome: 'ok',
+        detail: shorten(line),
+        name: created?.[1] ?? pushed?.[1] ?? deployed?.[1] ?? unchanged?.[1] ?? pending?.name,
+        componentId: created?.[2] ?? pending?.componentId,
+        version: pushed?.[2],
+      })
+    } else if (/^ERROR:/.test(line)) {
+      push({ kind: pending?.kind, outcome: 'failed', detail: shorten(line), name: pending?.name, componentId: pending?.componentId })
+    }
+  }
+  return results
+}
+
+/** The results of one kind of script (or of no telling kind) in a command's output. */
+export const readResults = (kind: ActivityKind, output: string, _isError: boolean): Result[] =>
+  parseResults(output).filter(result => result.kind === kind || result.kind === undefined)
+
+/**
+ * Which result belongs to which script run, in order: each run takes the next
+ * result of its kind. Results left over belong to the last run of their kind:
+ * a script in a loop ran more often than it appears in the command. A result
+ * of no telling kind goes to the command's only kind of script, if it has one.
+ */
+export const assignResults = (
+  runs: readonly { id: number; kind: ActivityKind }[],
+  results: readonly Result[],
+): { first: Map<number, Result>; extras: Map<number, Result[]> } => {
+  const kinds = [...new Set(runs.map(run => run.kind))]
+  const queues = new Map<ActivityKind, Result[]>()
+  for (const result of results) {
+    const kind = result.kind ?? (kinds.length === 1 ? kinds[0] : undefined)
+    if (!kind) continue
+    queues.set(kind, [...(queues.get(kind) ?? []), result])
+  }
+  const first = new Map<number, Result>()
+  const extras = new Map<number, Result[]>()
+  for (const run of runs) {
+    const next = queues.get(run.kind)?.shift()
+    if (next) first.set(run.id, next)
+  }
+  for (const [kind, rest] of queues) {
+    const last = [...runs].reverse().find(run => run.kind === kind)
+    if (last && rest.length > 0) extras.set(last.id, rest)
+  }
+  return { first, extras }
 }
 
 /** The ID, name and type on a component XML's root element. */
@@ -435,8 +545,14 @@ export type Stage = { level: Level; text: string }
 
 const when = (a: Activity) => a.endedAt ?? a.startedAt
 
-/** A component's journey as short steps, each with an icon and a label. */
-export const stages = (row: ComponentRow): Stage[] => {
+/** The environment's runs of a component: by its ID, else by its name. */
+export const runsOf = (row: { componentId?: string; name: string }, runs: readonly Run[]): Run[] =>
+  runs.filter(run => (row.componentId && run.processId === row.componentId) || run.processName === row.name)
+
+const runNoun = (runs: readonly Run[]) => (runs.length > 0 && runs.every(run => run.executionType === 'exec_listener') ? 'listener run' : 'run')
+
+/** A component's journey as short steps, each with an icon and a label; its runs in Boomi last. */
+export const stages = (row: ComponentRow, runs: readonly Run[] = []): Stage[] => {
   const out: Stage[] = []
   const { edited, saved, deployed, tested } = row
   const savedOk = saved && saved.outcome === 'ok' && saved.kind !== 'pull'
@@ -458,6 +574,16 @@ export const stages = (row: ComponentRow): Stage[] => {
     else if (deployed.kind === 'undeploy') out.push({ level: 'healthy', text: 'undeployed' })
     else if (savedOk && saved && when(saved) > when(deployed)) out.push({ level: 'warning', text: 'redeploy needed' })
     else out.push({ level: 'healthy', text: 'deployed' })
+  }
+  const mine = runsOf(row, runs)
+  if (mine.length > 0) {
+    const failed = mine.filter(run => isFailedStatus(run.status)).length
+    const noun = runNoun(mine)
+    out.push(
+      failed > 0
+        ? { level: 'critical', text: `${failed} of ${mine.length} ${noun}${mine.length === 1 ? '' : 's'} failed` }
+        : { level: 'healthy', text: `${mine.length} ${noun}${mine.length === 1 ? '' : 's'} ok` },
+    )
   }
   if (tested) {
     if (tested.outcome === 'running') out.push({ level: 'warning', text: 'testing…' })
@@ -494,13 +620,17 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
       items.push({ level: levelOf(a), title: describe(a), hint, at: when(a) })
     }
   }
+  const seenRuns = new Set(dashboard.seenRuns ?? [])
+  const rows = components(dashboard.activity)
   for (const run of recentRuns(dashboard.platform.runs, now, windowMs)) {
-    if (!isFailedStatus(run.status)) continue
+    if (!isFailedStatus(run.status) || seenRuns.has(run.executionId)) continue
     const at = Date.parse(run.at)
+    const row = rows.find(r => runsOf(r, [run]).length > 0)
+    const noun = run.executionType === 'exec_listener' ? 'Listener run' : 'Run'
     items.push({
       level: 'critical',
-      title: `${run.processName} ended ${run.status} in the environment`,
-      hint: `Ask Claude to look at execution ${run.executionId.replace(/^execution-/, '').slice(0, 8)}…`,
+      title: row ? `${noun} of ${row.name} ended ${run.status}` : `${run.processName} ended ${run.status} in the environment`,
+      hint: `Execution ${run.executionId.replace(/^execution-/, '').slice(0, 8)}…${row ? ', a component from this session' : ''}. Ask Claude to read its log, or /bc-dashboard seen if the failure was expected.`,
       at: Number.isNaN(at) ? now : at,
     })
   }
@@ -598,7 +728,14 @@ export const spends = (activity: readonly Activity[]): Map<number, Spend> => {
   const out = new Map<number, Spend>()
   let tokens = 0
   let usd: number | undefined
+  let wasRestored: boolean | undefined
   for (const a of activity) {
+    // Steps from an earlier session counted from that session's ledger: start over after them.
+    if (wasRestored !== undefined && Boolean(a.isRestored) !== wasRestored) {
+      tokens = 0
+      usd = undefined
+    }
+    wasRestored = Boolean(a.isRestored)
     const spend: Spend = {}
     if (a.tokensAt !== undefined) {
       spend.tokens = Math.max(0, a.tokensAt - tokens)
@@ -707,11 +844,13 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
 
   const all = spends(dashboard.activity)
   const rows = components(dashboard.activity)
+  const runs = recentRuns(dashboard.platform.runs, now, windowMs)
   lines.push('', rows.length > 0 ? 'Components this session:' : 'Components this session: none yet. They show up as Claude edits, saves, deploys and tests them.')
+  if (dashboard.restored) lines.push(`  (${restoredNote(dashboard.restored, windowMs)})`)
   for (const row of rows) {
     const type = friendlyType(row.type)
     const spent = formatSpend(spendOf(row.ids, all))
-    lines.push(`  ${row.name}${type ? ` (${type})` : ''}: ${stages(row).map(s => `${STATUS[s.level].icon} ${s.text}`).join('  ')}${spent ? `  [${spent}]` : ''}`)
+    lines.push(`  ${row.name}${type ? ` (${type})` : ''}: ${stages(row, runs).map(s => `${STATUS[s.level].icon} ${s.text}`).join('  ')}${spent ? `  [${spent}]` : ''}`)
   }
 
   const feed = dashboard.activity.slice(-8).reverse()
@@ -726,7 +865,6 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   lines.push('', `Process runs in Boomi, last ${hours}h (every execution in the environment, not only this session's):`)
   if (dashboard.platform.phase !== 'ok') lines.push(`  ${dashboard.platform.message}`)
   else {
-    const runs = recentRuns(dashboard.platform.runs, now, windowMs)
     if (runs.length === 0) lines.push(`  No process ran in the last ${hours}h.`)
     for (const run of runs) lines.push(`  ${runLine(run, now)}`)
   }
@@ -742,6 +880,26 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   for (const line of usage.modelSplits ?? []) lines.push(`  ${line}`)
   if (usage.model && !usage.modelSplits?.length) lines.push(`Model: ${usage.model}`)
   return lines.join('\n')
+}
+
+/** Says that some steps came back from an earlier session in this folder. */
+export const restoredNote = (count: number, windowMs: number): string =>
+  `${count} step${count === 1 ? '' : 's'} from an earlier session in this folder, last ${Math.round(windowMs / 3_600_000)}h`
+
+/** The runs in one line, for a collapsed section: "10 in 24h, 1 failed". */
+export const runsSummary = (runs: readonly Run[], hours: number): { level: Level; text: string } => {
+  const failed = runs.filter(run => isFailedStatus(run.status)).length
+  return {
+    level: failed > 0 ? 'critical' : 'healthy',
+    text: `${runs.length} in ${hours}h, ${failed > 0 ? `${failed} failed` : 'none failed'}`,
+  }
+}
+
+/** The GitHub page of an origin remote, for git@, ssh and https forms; undefined when it isn't GitHub. */
+export const githubUrl = (remote: string | null | undefined): string | undefined => {
+  if (!remote) return undefined
+  const m = remote.trim().match(/^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https?:\/\/(?:[^@/]+@)?github\.com\/)([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/)
+  return m ? `https://github.com/${m[1]}/${m[2]}` : undefined
 }
 
 export const runLevel = (run: Run): Level =>

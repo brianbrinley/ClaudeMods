@@ -25,8 +25,12 @@ import {
   formatCost,
   formatSpend,
   formatTokens,
+  assignResults,
+  parseResults,
+  isFailedStatus,
   isRunningStatus,
   friendlyType,
+  githubUrl,
   headline,
   FLAMINGO_TRAVEL,
   flamingoView,
@@ -39,6 +43,8 @@ import {
   newFailures,
   readOutput,
   recentRuns,
+  restoredNote,
+  runsSummary,
   runLevel,
   runText,
   scriptRuns,
@@ -56,7 +62,7 @@ import {
   watchedText,
   worst,
 } from './activity'
-import type { Level, ScriptRun, Usage } from './activity'
+import type { Level, Reading, ScriptRun, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import type { Credentials } from './platform'
 
@@ -78,6 +84,9 @@ const isWorking = atom({ plugin: 'boomi-dashboard', key: 'isWorking' } as const,
 
 /** The theme picked in the pane or with /bc-dashboard theme; null follows the setting. */
 const pickedTheme = atom({ plugin: 'boomi-dashboard', key: 'theme' } as const, null as PaneTheme | null)
+
+/** Whether the Process runs in Boomi section is folded to one line, for this session. */
+const isRunsCollapsed = atom({ plugin: 'boomi-dashboard', key: 'isRunsCollapsed' } as const, false)
 
 /** The flamingo's animation frame, moved on while Claude works. */
 const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
@@ -160,6 +169,35 @@ const refreshStatus = async ($: Engine, settings: Settings) => {
 const record = ($: Engine, change: (list: Activity[]) => Activity[]) =>
   update($, dashboard, current => ({ ...current, activity: change(current.activity).slice(-150) }))
 
+/** Where this folder's activity is kept between sessions: one key per working directory. */
+const activityKey = async ($: Engine) => `activity:${await $.session.cwd()}`
+
+/**
+ * Keeps the latest steps between sessions, so a restart (the one that loads
+ * this mod, for one) doesn't empty the dashboard. Session state alone is
+ * gone when the session ends.
+ */
+const saveActivity = async ($: Engine) => {
+  try {
+    const list = (await read($, dashboard)).activity.filter(a => a.outcome !== 'running')
+    await $.store.set(await activityKey($), { savedAt: await $.clock.now(), activity: list.slice(-100) })
+  } catch {}
+}
+
+/** At the start of a session with nothing yet, brings back this folder's steps from the last window. */
+const restoreActivity = async ($: Engine, settings: Settings) => {
+  try {
+    if ((await read($, dashboard)).activity.length > 0) return
+    const saved = (await $.store.get(await activityKey($))) as { activity?: Activity[] } | undefined
+    const now = await $.clock.now()
+    const kept = (saved?.activity ?? [])
+      .filter(a => now - (a.endedAt ?? a.startedAt) <= settings.windowMs)
+      .map(a => ({ ...a, isRestored: true }))
+    if (kept.length === 0) return
+    await update($, dashboard, c => (c.activity.length > 0 ? c : { ...c, activity: kept, restored: kept.length }))
+  } catch {}
+}
+
 const nextId = (list: readonly Activity[]) => list.reduce((max, a) => Math.max(max, a.id), 0) + 1
 
 /** A component file's name, ID and type, when the file can be read. */
@@ -221,16 +259,19 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
   if (started.length === 0) return
   const endedAt = await $.clock.now()
   const output = ran.deny === undefined ? outputOf(ran) : ''
+  const isError = ran.isError === true
+  // Each result in the output is one step: a loop over six components is six.
+  const { first, extras } = assignResults(
+    started.filter(a => a.kind !== 'other' && a.kind !== 'pull'),
+    ran.deny === undefined ? parseResults(output) : [],
+  )
   const done: Activity[] = []
-  for (const a of started) {
-    if (ran.deny !== undefined) {
-      done.push({ ...a, outcome: 'blocked', detail: ran.deny.split('\n')[0]!.slice(0, 160), endedAt })
-      continue
-    }
-    const reading = readOutput(a.kind, output, ran.isError === true)
+  const added: Activity[] = []
+  let id = nextId((await read($, dashboard)).activity)
+  const finish = async (a: Activity, reading: Reading): Promise<Activity> => {
     // A create or pull writes the component's ID and name into its file.
     const fresh = a.file && (a.kind === 'create' || a.kind === 'pull') ? await readComponent($, a.file) : {}
-    done.push({
+    return {
       ...a,
       outcome: reading.outcome,
       detail: reading.detail,
@@ -241,13 +282,25 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
       version: reading.version,
       executionStatus: reading.executionStatus,
       executionId: reading.executionId,
-    })
+    }
   }
-  await record($, list => list.map(a => done.find(d => d.id === a.id) ?? a))
-  for (const a of done) announce($, settings, a)
+  for (const a of started) {
+    if (ran.deny !== undefined) {
+      done.push({ ...a, outcome: 'blocked', detail: ran.deny.split('\n')[0]!.slice(0, 160), endedAt })
+      continue
+    }
+    done.push(await finish(a, first.get(a.id) ?? readOutput(a.kind, output, isError)))
+    for (const extra of extras.get(a.id) ?? []) {
+      // Another pass of the same script: its own component, not this run's file.
+      added.push(await finish({ ...a, id: id++, file: undefined, componentId: undefined, subject: 'a component' }, extra))
+    }
+  }
+  await record($, list => [...list.map(a => done.find(d => d.id === a.id) ?? a), ...added])
+  for (const a of [...done, ...added]) announce($, settings, a)
   void refreshStatus($, settings)
+  void saveActivity($)
   // A deploy or test starts runs in Boomi: look for them soon.
-  if (done.some(a => a.kind === 'deploy' || a.kind === 'test')) pollSoon($, settings, 5_000)
+  if ([...done, ...added].some(a => a.kind === 'deploy' || a.kind === 'test')) pollSoon($, settings, 5_000)
 }
 
 /** A toast for what someone would want to hear about without looking. */
@@ -292,6 +345,7 @@ const noteEdit = async ($: Engine, settings: Settings, path: string) => {
   })
   if (isFirst) openPane($)
   void refreshStatus($, settings)
+  void saveActivity($)
 }
 
 // --- The Platform API --------------------------------------------------------
@@ -441,8 +495,15 @@ const unwatch = async ($: Engine, target: string): Promise<string> => {
 
 /** Marks every watched change as seen, so only new ones count. */
 const seen = async ($: Engine): Promise<string> => {
-  await update($, dashboard, c => ({ ...c, watched: c.watched.map(w => ({ ...w, changedBy: undefined })) }))
-  return 'Watched changes marked as seen.'
+  const current = await read($, dashboard)
+  const failedRuns = current.platform.runs.filter(run => isFailedStatus(run.status)).map(run => run.executionId)
+  const changed = current.watched.filter(w => w.changedBy).length
+  await update($, dashboard, c => ({
+    ...c,
+    watched: c.watched.map(w => ({ ...w, changedBy: undefined })),
+    seenRuns: [...new Set([...(c.seenRuns ?? []), ...failedRuns])].slice(-200),
+  }))
+  return `Marked as seen: ${failedRuns.length} failed run${failedRuns.length === 1 ? '' : 's'} and ${changed} watched change${changed === 1 ? '' : 's'}. They leave Needs attention; the runs stay listed under Process runs in Boomi.`
 }
 
 /** Picks the pane's theme, now and for later sessions. */
@@ -468,11 +529,12 @@ const theme = async ($: Engine, settings: Settings, target: string): Promise<str
 // --- Commands and tools ------------------------------------------------------
 
 const USAGE = [
-  '/bc-dashboard                 what needs attention, each component, recent activity, the live environment',
+  '/bc-dashboard                 open the dashboard pane (Esc closes it); where no pane fits, print it here',
+  '/bc-dashboard text            the same as text, here in the conversation',
   '/bc-dashboard poll            check Boomi now',
   '/bc-dashboard watch <id|file> watch a component for changes someone else makes',
   '/bc-dashboard unwatch <id>    stop watching it',
-  '/bc-dashboard seen            mark watched changes as seen',
+  '/bc-dashboard seen            mark failed runs and watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
 ].join('\n')
@@ -484,8 +546,17 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
   const [action = 'status', ...rest] = args.trim().split(/\s+/).filter(Boolean)
   const target = rest.join(' ')
   switch (action) {
-    case 'status':
-      openPane($)
+    case 'status': {
+      // The dashboard draws in its pane, beside or above the conversation, and
+      // leaves the transcript, the scrollback and the prompt as they were. Only
+      // where no pane can be shown does the summary go into the transcript.
+      const opened = await $.ui
+        .open({ id: PANE, title: 'Boomi Companion Dashboard', focus: true, closeOnEscape: true })
+        .catch(() => undefined)
+      if (opened?.isPlaced) return 'Dashboard open. Esc closes it; /bc-dashboard text prints it here instead.'
+      return summaryNow($, settings)
+    }
+    case 'text':
       return summaryNow($, settings)
     case 'poll':
       await poll($, settings)
@@ -551,6 +622,22 @@ const PALETTES: Record<PaneTheme, Palette> = {
   terminal: { text: 'text', muted: 'inactive', heading: 'claude', rule: 'subtle', bandText: 'claude', accent: 'suggestion', bird: '#C2185B' },
 }
 
+// The footer's facts, read once per load: the session's id and the repository's GitHub page.
+let footerCache: { session: string; repo?: string } | undefined
+
+/**
+ * The footer: the session (its short id: the mod API gives a plugin the
+ * session's id, not its name) and the GitHub page of the working copy's
+ * origin remote, read at run time. No link when origin isn't on GitHub.
+ */
+const footerOf = async ($: Engine): Promise<{ session: string; repo?: string }> => {
+  if (footerCache) return footerCache
+  const id = await $.session.id().catch(() => '')
+  const repo = await $.session.repo().catch(() => null)
+  footerCache = { session: id ? id.slice(0, 8) : 'unknown', repo: githubUrl(repo?.remote) }
+  return footerCache
+}
+
 /** The Deco rule under the title: double lines with a diamond at the center. */
 const decoRule = (width: number): string => {
   const side = Math.max(2, Math.floor((width - 5) / 2))
@@ -565,7 +652,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'poll | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
+      argumentHint: 'text | poll | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
     })
     await $.tool.register({
       name: 'summary',
@@ -586,6 +673,8 @@ export const register: Register = (on, options) => {
     // The watch list outlives the session; restore it the first time.
     const saved = await $.store.get(THEME_KEY)
     if (isTheme(saved)) await update($, pickedTheme, () => saved)
+
+    await restoreActivity($, settings)
 
     const ids = await $.store.get(WATCH_KEY)
     if (Array.isArray(ids)) {
@@ -734,8 +823,10 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const { Box, Button, Link, Text } = $.ui.resolve(e)
     const themeNow = await themeOf($, settings)
+    const collapsed = await read($, isRunsCollapsed)
+    const footer = await footerOf($)
     const p = PALETTES[themeNow]
     const current = await read($, dashboard)
     const now = await $.clock.now()
@@ -873,6 +964,7 @@ export const register: Register = (on, options) => {
 
         {heading('Components this session')}
         {rows.length === 0 && t('Components show up here as Claude edits, saves, deploys and tests them.', { color: p.muted })}
+        {current.restored ? note(`Includes ${restoredNote(current.restored, settings.windowMs)}.`) : undefined}
         {rows.slice(0, 8).map(row => {
           const spent = formatSpend(spendOf(row.ids, all))
           return (
@@ -888,7 +980,7 @@ export const register: Register = (on, options) => {
               </Box>
               <Text backgroundColor={p.bg}>
                 {t('  ')}
-                {stages(row).map(s => (
+                {stages(row, runs).map(s => (
                   <Text backgroundColor={p.bg}>
                     {icon(s.level)}
                     {t(` ${s.text}   `)}
@@ -907,15 +999,31 @@ export const register: Register = (on, options) => {
           return line(levelOf(a), describe(a), [ago(a.endedAt ?? a.startedAt, now), spent ? `${formatTokens(spent)} tok` : undefined].filter(Boolean).join(' · '))
         })}
 
-        {heading('Process runs in Boomi', `last ${hours}h`)}
-        {note("Every execution in your Boomi environment: this session's tests, schedules and other people's runs.")}
+        <Box marginTop={1} justifyContent="space-between">
+          <Box>
+            {t('◇ ', { color: p.rule, bold: true })}
+            {t('PROCESS RUNS IN BOOMI', { color: p.heading, bold: true })}
+            {t(`  last ${hours}h`, { color: p.muted })}
+          </Box>
+          <Button key="runs-toggle" label={collapsed ? 'Show' : 'Hide'} onPress={() => update($, isRunsCollapsed, v => !v)} />
+        </Box>
+        {!collapsed && note("Every execution in your Boomi environment: this session's tests, schedules and other people's runs.")}
         {current.platform.phase !== 'ok' && line(current.platform.phase === 'error' ? 'serious' : 'warning', current.platform.message)}
-        {current.platform.phase === 'ok' && runs.length === 0 && line('healthy', `No process ran in the last ${hours}h.`)}
-        {current.platform.phase === 'ok' && runs.slice(0, 6).map(run => line(runLevel(run), runText(run, now)))}
+        {current.platform.phase === 'ok' && collapsed && line(runsSummary(runs, hours).level, runsSummary(runs, hours).text)}
+        {current.platform.phase === 'ok' && !collapsed && runs.length === 0 && line('healthy', `No process ran in the last ${hours}h.`)}
+        {current.platform.phase === 'ok' && !collapsed && runs.slice(0, 6).map(run => line(runLevel(run), runText(run, now)))}
 
         {current.watched.length > 0 && heading('Watched components')}
         {current.watched.length > 0 && note('Flagged when someone other than Companion changes one in Boomi.')}
         {current.watched.map(w => line(watchedLevel(w), watchedText(w)))}
+
+        <Box marginTop={1}>
+          <Text color={p.muted} backgroundColor={p.bg} dimColor>
+            {`session ${footer.session}`}
+            {footer.repo ? ' · ' : ''}
+            {footer.repo ? <Link href={footer.repo} label={footer.repo.replace(/^https:\/\//, '')} /> : undefined}
+          </Text>
+        </Box>
       </Box>
     )
   })

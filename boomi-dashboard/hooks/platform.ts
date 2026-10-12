@@ -135,6 +135,8 @@ export const platformClient = (fetch: Fetch, credentials: Credentials) => {
         processName: String(raw.processName ?? ''),
         status: String(raw.status ?? ''),
         at: String(raw.executionTime ?? ''),
+        processId: text(raw.processId),
+        executionType: text(raw.executionType),
       }))
     },
 

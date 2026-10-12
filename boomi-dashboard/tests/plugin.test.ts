@@ -21,8 +21,15 @@ let clock: MockClock
 
 
 /** The surface, files, clock and session cost beneath the plugin; records the toasts. */
-const world = (on: On, files: Record<string, string> = {}) => {
+/** What the surface does with a pane, and the session's id and origin remote. */
+type WorldOptions = { isPlaced?: boolean; sessionId?: string; remote?: string | null }
+
+/** The panes the plugin asked to open in the test running now. */
+let opens: Record<string, unknown>[] = []
+
+const world = (on: On, files: Record<string, string> = {}, options: WorldOptions = {}) => {
   const toasts: string[] = []
+  opens = []
   const local = (path: string) => Object.keys(files).find(f => path === f || path.endsWith(`/${f}`)) ?? path
   on('fs.exists', async (_$, e) => ({ value: local(e.path) in files }))
   on('fs.read', async (_$, e) => {
@@ -30,8 +37,15 @@ const world = (on: On, files: Record<string, string> = {}) => {
     return text === undefined ? { deny: `ENOENT: ${e.path}` } : { value: text }
   })
   on('ui.status', async () => ({ value: undefined }))
-  on('ui.open', async () => ({ value: { isPlaced: false as const, reason: 'no pane in tests' } }))
+  on('ui.open', async (_$, e) => {
+    opens.push({ ...e })
+    return { value: options.isPlaced ? { isPlaced: true as const } : { isPlaced: false as const, reason: 'no pane in tests' } }
+  })
   on('session.cwd', async () => ({ value: '/work' }))
+  on('session.id', async () => ({ value: options.sessionId ?? '3adaec6a-0227-5e7b-a04b-eeeba5da8710' }))
+  on('session.repo', async () => ({
+    value: options.remote === null ? null : { root: '/work', remote: options.remote ?? 'git@github.com:brianbrinley/ClaudeMods.git', internal: false, name: null },
+  }))
   clock = mock.clock(on, { now: NOW })
   on('ui.toast', async (_$, e) => {
     toasts.push(String(e.text))
@@ -336,5 +350,122 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await pane.find({ text: /Opus 5\.5/ })).toBeDefined()
     expect(await pane.find({ text: /VALENCE/ })).toBeUndefined()
   })
+
+  test(`on ${surface}, Process runs in Boomi folds to one line and stays folded for the session`, async ($, on) => {
+    world(on)
+    mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-test' })
+    on('http.fetch', async (_$, e) => {
+      const result = e.url.endsWith('EnvironmentAtomAttachment/query') ? [{ atomId: 'atom-1' }] : RUNS
+      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
+    })
+    await $.command.run(dashboard('poll'))
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
+    expect(await pane.find({ text: /listener|Listener/ })).toBeDefined()
+    expect((await pane.find({ type: 'Button', key: 'runs-toggle' }))?.props.label).toBe('Hide')
+    await pane.press({ key: 'runs-toggle' })
+    expect(await pane.find({ text: '5 in 24h, 1 failed' })).toBeDefined()
+    // Folded: the run lines are gone, the one-line summary stands in for them.
+    expect(await pane.find({ text: /completed, / })).toBeUndefined()
+    await pane.unmount()
+    const again = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
+    expect(await again.find({ text: '5 in 24h, 1 failed' })).toBeDefined()
+    // Needs attention stays: folding the list never hides a failure.
+    expect(await again.find({ text: /ended ERROR/ })).toBeDefined()
+    await again.press({ key: 'runs-toggle' })
+  })
+
+  test(`on ${surface}, the footer names the session and links the repository's GitHub page`, async ($, on) => {
+    world(on)
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
+    expect(await pane.find({ text: /session 3adaec6a/ })).toBeDefined()
+    const link = await pane.find({ type: 'Link' })
+    expect(link?.props).toMatchObject({ href: 'https://github.com/brianbrinley/ClaudeMods', label: 'github.com/brianbrinley/ClaudeMods' })
+  })
 }
 
+
+// --- The live OrderValidator session: rows, runs and attention ---
+
+const SKILL = '/Users/me/.claude/plugins/cache/boomi-companion/bc-integration/1.0.76/skills/boomi-integration'
+const LISTENER = 'OrderValidator - Listener Validate Order'
+const LISTENER_ID = '33333333-1111-1111-1111-111111111111'
+const LISTENER_XML = `<bns:Component xmlns:bns="http://api.platform.boomi.com/" componentId="${LISTENER_ID}" name="${LISTENER}" type="process"></bns:Component>`
+const LISTENER_FILE = 'active-development/processes/Listener.xml'
+const RUNS = [
+  ...['a', 'b', 'c', 'd'].map(x => ({ executionId: `execution-${x}`, processName: LISTENER, processId: LISTENER_ID, status: 'COMPLETE', executionTime: '2026-10-12T11:00:00Z', executionType: 'exec_listener' })),
+  { executionId: 'execution-81f61084-fd93-4565-9bda-9bf0d4b4f102', processName: LISTENER, processId: LISTENER_ID, status: 'ERROR', executionTime: '2026-10-12T11:05:00Z', executionType: 'exec_listener' },
+]
+
+/** The shell beneath the plugins, answering each command with its own output. */
+const scriptedShell = (on: On, outputs: Record<string, string>) => {
+  on('tool.call', { tool: 'Bash' }, async (_$, e) => ({ result: { stdout: outputs[String(e.command)] ?? '', stderr: '', interrupted: false } }))
+}
+
+test('a build in a loop and on several lines shows every component, and a failed listener run names its component', async ($, on) => {
+  world(on, { [LISTENER_FILE]: LISTENER_XML })
+  mock.store(on)
+  mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-test' })
+  on('http.fetch', async (_$, e) => {
+    const result = e.url.endsWith('EnvironmentAtomAttachment/query') ? [{ atomId: 'atom-1' }] : RUNS
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
+  })
+  const createLoop = `cd /work && for f in active-development/profiles/*.xml; do bash ${SKILL}/scripts/boomi-component-create.sh "$f"; done`
+  const twoLines = [`bash ${SKILL}/scripts/boomi-component-create.sh ${LISTENER_FILE}`, `bash ${SKILL}/scripts/boomi-deploy.sh ${LISTENER_FILE}`].join('\n')
+  scriptedShell(on, {
+    [createLoop]: ['Request', 'Response'].map((n, i) => `Creating component 'OrderValidator - Order ${n} Profile' on the account default branch\nSUCCESS: Component 'OrderValidator - Order ${n} Profile' created with ID: ${i}2222222-1111-1111-1111-111111111111`).join('\n'),
+    [twoLines]: [
+      `Creating component '${LISTENER}' on the account default branch`,
+      `SUCCESS: Component '${LISTENER}' created with ID: ${LISTENER_ID}`,
+      `Packaging '${LISTENER}' (${LISTENER_ID}) from the account default branch`,
+      `SUCCESS: Deployed '${LISTENER}' (package: p1)`,
+    ].join('\n'),
+  })
+  await $.tool.call({ tool: 'Bash', command: createLoop })
+  await $.tool.call({ tool: 'Bash', command: twoLines })
+  const status = await $.command.run(dashboard('poll'))
+  expect(status.text).toContain('OrderValidator - Order Request Profile: ✓ created in Boomi')
+  expect(status.text).toContain('OrderValidator - Order Response Profile: ✓ created in Boomi')
+  expect(status.text).toContain(`${LISTENER} (process): ✓ created in Boomi  ✓ deployed  ✗ 1 of 5 listener runs failed`)
+  expect(status.text).toContain(`✗ Listener run of ${LISTENER} ended ERROR`)
+  expect(status.text).toContain('Execution 81f61084…, a component from this session')
+
+  const seen = await $.command.run(dashboard('seen'))
+  expect(seen.text).toContain('1 failed run')
+  const after = await $.command.run(dashboard('text'))
+  expect(after.text).toContain('✓ Nothing needs attention.')
+  expect(after.text).toContain(`✗ ${LISTENER} failed`)
+})
+
+test("after a restart, this folder's steps from the last 24h come back", async ($, on) => {
+  world(on)
+  mock.store(on, {
+    'activity:/work': {
+      savedAt: NOW - 3_600_000,
+      activity: [
+        { id: 1, kind: 'deploy', outcome: 'ok', subject: LISTENER, detail: 'deployed', startedAt: NOW - 3_600_000, endedAt: NOW - 3_600_000, componentId: LISTENER_ID },
+        { id: 2, kind: 'push', outcome: 'ok', subject: 'Old', detail: 'x', startedAt: NOW - 3 * 86_400_000, endedAt: NOW - 3 * 86_400_000, file: 'active-development/x/Old.xml' },
+      ],
+    },
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', async () => ({ value: undefined }) as never)
+  on('tool.register', async () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  const status = await $.command.run(dashboard('text'))
+  expect(status.text).toContain(`${LISTENER}: ✓ deployed`)
+  expect(status.text).not.toContain('Old')
+  expect(status.text).toContain('1 step from an earlier session in this folder, last 24h')
+})
+
+test('/bc-dashboard opens the pane with the keyboard and leaves the transcript a single line', async ($, on) => {
+  world(on, {}, { isPlaced: true })
+  const answer = await $.command.run(dashboard())
+  expect(answer.text).toBe('Dashboard open. Esc closes it; /bc-dashboard text prints it here instead.')
+  expect(opens.at(-1)).toMatchObject({ id: 'boomi-dashboard', focus: true, closeOnEscape: true })
+})
+
+test('where no pane can be shown, /bc-dashboard prints the dashboard instead', async ($, on) => {
+  world(on, {}, { isPlaced: false })
+  const answer = await $.command.run(dashboard())
+  expect(answer.text).toContain('Components this session')
+})
