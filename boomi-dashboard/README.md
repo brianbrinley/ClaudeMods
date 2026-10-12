@@ -7,8 +7,6 @@
 
 A Claude Code mod that shows where your [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) build stands while Claude works: each component's stage, what failed and what to do about it, what the session has cost, and the environment's recent runs.
 
-> **Prototype.** Tested against Companion's scripts and their output, not yet against a live Boomi account.
-
 **Install it:** paste the prompt in [INSTALL.md](INSTALL.md) into Claude Code.
 
 ## What you see
