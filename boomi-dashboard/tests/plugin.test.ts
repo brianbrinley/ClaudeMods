@@ -708,3 +708,13 @@ test('bash without Perl (exit 127) falls through to Perl on its own', async ($, 
   )
   expect((await $.command.run(dashboard('history'))).text).toContain('$3.50')
 })
+
+test('a Perl without its JSON module (a minimal Ubuntu or WSL) says what to install', async ($, on) => {
+  world(on)
+  mock.store(on)
+  const stderr = "Perl's JSON module is missing. On Debian or Ubuntu (WSL too): sudo apt install perl\n"
+  on('process.run', async () => ({ value: { exitCode: 3, stdout: '', stderr, isStdoutTruncated: false, isStderrTruncated: false } }))
+  expect((await $.command.run(dashboard('history'))).text).toBe(
+    "The transcript scan failed: Perl's JSON module is missing. On Debian or Ubuntu (WSL too): sudo apt install perl",
+  )
+})

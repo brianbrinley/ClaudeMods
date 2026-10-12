@@ -14,7 +14,15 @@ use strict;
 use warnings;
 use File::Find ();
 use Getopt::Long ();
-use JSON::PP ();
+# JSON::PP is core Perl, but a minimal Debian or Ubuntu (WSL's, for one) can
+# have only perl-base, which leaves it out. Say what to install instead of
+# Perl's own "Can't locate" message.
+BEGIN {
+  unless (eval { require JSON::PP; 1 }) {
+    print STDERR "Perl's JSON module is missing. On Debian or Ubuntu (WSL too): sudo apt install perl\n";
+    exit 3;
+  }
+}
 
 my $home = $ENV{HOME} // '';
 my $root = $ENV{CLAUDE_CONFIG_DIR} ? "$ENV{CLAUDE_CONFIG_DIR}/projects" : "$home/.claude/projects";
