@@ -2,7 +2,7 @@ import type { CommandRunInput, On, RenderElement, RenderPropsOf } from 'claude-c
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-const cockpit = (args = '') => ({ command: 'cockpit', args }) as CommandRunInput
+const dashboard = (args = '') => ({ command: 'dashboard', args }) as CommandRunInput
 
 const ID = '1a2b3c4d-1111-2222-3333-444455556666'
 const ORDERS = `<bns:Component xmlns:bns="http://api.platform.boomi.com/" componentId="${ID}" name="Orders Sync" type="process"></bns:Component>`
@@ -81,7 +81,7 @@ test('a Companion push shows the component saved with its version, and the comma
   expect(answer.deny).toBeUndefined()
   expect(ran).toEqual([command])
 
-  const status = await $.command.run(cockpit())
+  const status = await $.command.run(dashboard())
   expect(status.text).toContain('Orders Sync (process): ✓ saved v4')
   expect(status.text).toContain('Saved Orders Sync to Boomi (v4), just now')
   expect(status.text).toContain('Session: $1.25 so far')
@@ -92,7 +92,7 @@ test('the running token count adds up every model call, and each step shows what
   shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
   await modelCall($, on, 8_000)
   await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
-  const status = await $.command.run(cockpit())
+  const status = await $.command.run(dashboard())
   expect(status.text).toContain('Saved Orders Sync to Boomi (v4), just now  [8.0k tokens · $1.25]')
   expect(status.text).toContain('Orders Sync (process): ✓ saved v4  [8.0k tokens · $1.25]')
   expect(status.text).toContain('Session: 8.0k tokens · $1.25 so far')
@@ -103,7 +103,7 @@ test('Claude editing a component XML shows it as edited, not in Boomi yet', asyn
   writer(on)
   await $.tool.call({ tool: 'Write', file_path: `/work/${FILE}`, content: ORDERS })
   await $.tool.call({ tool: 'Write', file_path: `/work/${FILE}`, content: ORDERS })
-  const status = await $.command.run(cockpit())
+  const status = await $.command.run(dashboard())
   expect(status.text).toContain('Orders Sync (process): ◐ edited, not in Boomi yet')
   // Two writes to one file are one step.
   expect((status.text ?? '').match(/Edited Orders Sync/g)?.length).toBe(1)
@@ -113,7 +113,7 @@ test('a failed test needs attention, with what to do, and is toasted', async ($,
   const toasts = world(on, { [FILE]: ORDERS })
   shell(on, 'Execution completed: status=ERROR, executionId=execution-0490202b-2e2f')
   await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
-  const status = await $.command.run(cockpit())
+  const status = await $.command.run(dashboard())
   expect(status.text).toContain('Needs attention (1):')
   expect(status.text).toContain('✗ Test of')
   expect(status.text).toContain('Ask Claude to read the execution log (0490202b…)')
@@ -124,7 +124,7 @@ test('a deploy that exits with an error needs attention with its error line', as
   world(on, { [FILE]: ORDERS })
   shell(on, 'ERROR: Deployment failed (HTTP 400): no package', true)
   await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-deploy.sh ${FILE}` })
-  const status = await $.command.run(cockpit())
+  const status = await $.command.run(dashboard())
   expect(status.text).toContain('Deploy of Orders Sync failed')
   expect(status.text).toContain('ERROR: Deployment failed (HTTP 400): no package')
 })
@@ -134,14 +134,14 @@ test('commands that are not Companion scripts are left alone', async ($, on) => 
   const ran = shell(on, 'clean')
   await $.tool.call({ tool: 'Bash', command: 'git status' })
   expect(ran).toEqual(['git status'])
-  const status = await $.command.run(cockpit())
+  const status = await $.command.run(dashboard())
   expect(status.text).toContain('Components this session: none yet')
 })
 
 test('without credentials the live environment is off and says why', async ($, on) => {
   world(on)
   mock.env(on, {})
-  const status = await $.command.run(cockpit('poll'))
+  const status = await $.command.run(dashboard('poll'))
   expect(status.text).toContain('Off: no Boomi credentials')
 })
 
@@ -158,20 +158,20 @@ test('watching a component polls its version, and a change by someone else needs
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } }
   })
 
-  const watched = await $.command.run(cockpit(`watch ${FILE}`))
+  const watched = await $.command.run(dashboard(`watch ${FILE}`))
   expect(watched.text).toContain('Watching ✓ Orders Sync v3')
   expect(urls.every(url => url.includes('/ComponentMetadata/query'))).toBe(true)
 
   version = '4'
   modifiedBy = 'pat@example.com'
-  const status = await $.command.run(cockpit('poll'))
+  const status = await $.command.run(dashboard('poll'))
   expect(status.text).toContain('Orders Sync was changed by pat@example.com')
   expect(status.text).toContain('Pull it before you push')
   expect(status.text).not.toContain('secret-token-value')
   expect(toasts.some(t => t.includes('changed by pat@example.com'))).toBe(true)
 
-  await $.command.run(cockpit('seen'))
-  const after = await $.command.run(cockpit())
+  await $.command.run(dashboard('seen'))
+  const after = await $.command.run(dashboard())
   expect(after.text).toContain('✓ Nothing needs attention.')
 })
 
@@ -187,13 +187,13 @@ test("the environment's new failures are toasted, and old ones don't count", asy
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
   })
 
-  const first = await $.command.run(cockpit('poll'))
+  const first = await $.command.run(dashboard('poll'))
   expect(first.text).toContain('✓ Nothing needs attention.')
   expect(first.text).toContain('✓ Orders Sync completed, 2h ago')
   expect(first.text).not.toContain('JMX')
 
   runs = [{ executionId: 'e2', processName: 'Orders Sync', status: 'ERROR', executionTime: '2026-10-12T11:55:00Z' }, ...runs]
-  const status = await $.command.run(cockpit('poll'))
+  const status = await $.command.run(dashboard('poll'))
   expect(status.text).toContain('Orders Sync ended ERROR in the environment')
   expect(toasts.some(t => t.includes('Orders Sync failed'))).toBe(true)
 })
@@ -202,7 +202,7 @@ test("the environment's new failures are toasted, and old ones don't count", asy
 const propsOf = (tree: RenderElement) => ((tree as { props?: Record<string, unknown> }).props ?? {})
 
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 10, columns: 100 } as unknown as RenderPropsOf['AbovePrompt']
-const PANE = { component: 'Pane', requestId: 'boomi-cockpit', props: {} as RenderPropsOf['Pane'] } as const
+const PANE = { component: 'Pane', requestId: 'boomi-dashboard', props: {} as RenderPropsOf['Pane'] } as const
 
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`on ${surface}, the banner waits for activity, then shows the latest step and what needs attention`, async ($, on) => {
@@ -213,11 +213,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
       return h(Box, {}) as RenderElement
     })
     shell(on, 'Execution completed: status=ERROR, executionId=execution-9')
-    const quiet = await $.ui.mount({ plugin: 'boomi-cockpit', surface, component: 'AbovePrompt', props: BAND })
+    const quiet = await $.ui.mount({ plugin: 'boomi-dashboard', surface, component: 'AbovePrompt', props: BAND })
     expect(await quiet.find({ text: /Boomi/ })).toBeUndefined()
 
     await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
-    const band = await $.ui.mount({ plugin: 'boomi-cockpit', surface, component: 'AbovePrompt', props: BAND })
+    const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface, component: 'AbovePrompt', props: BAND })
     expect(await band.find({ text: /ended ERROR/ })).toBeDefined()
     expect(await band.find({ text: /1 needs attention/ })).toBeDefined()
     await band.press({ key: 'hide' })
@@ -229,9 +229,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
     await modelCall($, on, 12_000)
     await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
-    const pane = await $.ui.mount({ plugin: 'boomi-cockpit', surface, ...PANE })
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
     expect(propsOf(await pane.drawn())).toMatchObject({ backgroundColor: '#FBF6EE' })
-    const title = await pane.find({ type: 'Text', text: '◆ B O O M I   C O C K P I T ◆' })
+    const title = await pane.find({ type: 'Text', text: '◆ BOOMI COMPANION DASHBOARD ◆' })
     expect(title?.props).toMatchObject({ color: '#FBF6EE', backgroundColor: '#C2185B', bold: true })
     const names = await pane.findAll({ type: 'Text', text: 'Orders Sync' })
     expect(names.some(n => n.props.color === '#0B0B0B' && n.props.backgroundColor === '#FBF6EE')).toBe(true)
@@ -244,20 +244,20 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await pane.find({ text: 'NEEDS ATTENTION' })).toBeDefined()
   })
 
-  test(`on ${surface}, the pane shows when Claude is in flight`, async ($, on) => {
+  test(`on ${surface}, the pane shows when Claude is working`, async ($, on) => {
     world(on)
     on('turn.start', async (_$, e) => ({ turnId: e.turnId }) as never)
     await $.turn.start({ text: 'build it', turnId: 't1' } as never)
-    const pane = await $.ui.mount({ plugin: 'boomi-cockpit', surface, ...PANE })
-    expect(await pane.find({ text: '● IN FLIGHT' })).toBeDefined()
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
+    expect(await pane.find({ text: '● WORKING' })).toBeDefined()
   })
 
   test(`on ${surface}, the pane can follow the terminal's theme instead`, { options: { paneTheme: 'terminal' } }, async ($, on) => {
     world(on)
-    const pane = await $.ui.mount({ plugin: 'boomi-cockpit', surface, ...PANE })
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
     expect(propsOf(await pane.drawn()).backgroundColor).toBeUndefined()
-    const title = await pane.find({ type: 'Text', text: '◆ B O O M I   C O C K P I T ◆' })
+    const title = await pane.find({ type: 'Text', text: '◆ BOOMI COMPANION DASHBOARD ◆' })
     expect(title?.props.color).toBe('claude')
-    expect(await pane.find({ text: '◇ STANDING BY' })).toBeDefined()
+    expect(await pane.find({ text: '◇ IDLE' })).toBeDefined()
   })
 }

@@ -21,13 +21,13 @@ import {
   statusLine,
   summary,
 } from '../hooks/activity'
-import type { Activity, Cockpit } from '../types'
+import type { Activity, Dashboard } from '../types'
 
 const ID = '1a2b3c4d-1111-2222-3333-444455556666'
 const HOUR = 3_600_000
 const NOW = Date.parse('2026-10-12T12:00:00Z')
 
-const cockpit = (activity: Activity[] = [], extra: Partial<Cockpit> = {}): Cockpit => ({
+const dashboard = (activity: Activity[] = [], extra: Partial<Dashboard> = {}): Dashboard => ({
   activity,
   platform: { phase: 'off', message: 'Off: no Boomi credentials.', runs: [] },
   watched: [],
@@ -139,12 +139,12 @@ test('an edit after the last save, and a save after the last deploy, say so', ()
 })
 
 test('needs attention lists current failures with a next step, and a later fix clears them', () => {
-  const failing = cockpit([act('test', 'failed', 'Orders Sync', NOW, { componentId: ID, executionStatus: 'ERROR', executionId: 'execution-0490202b-2e2f' })])
+  const failing = dashboard([act('test', 'failed', 'Orders Sync', NOW, { componentId: ID, executionStatus: 'ERROR', executionId: 'execution-0490202b-2e2f' })])
   const [item] = attention(failing, NOW, 24 * HOUR)
   expect(item!.title).toBe('Test of Orders Sync ended ERROR')
   expect(item!.hint).toContain('execution log (0490202b…)')
 
-  const fixed = cockpit([...failing.activity, act('test', 'ok', 'Orders Sync', NOW + 1, { componentId: ID, executionStatus: 'COMPLETE' })])
+  const fixed = dashboard([...failing.activity, act('test', 'ok', 'Orders Sync', NOW + 1, { componentId: ID, executionStatus: 'COMPLETE' })])
   expect(attention(fixed, NOW, 24 * HOUR)).toEqual([])
 })
 
@@ -153,20 +153,20 @@ test("old runs in the environment don't need attention", () => {
     { executionId: 'e1', processName: 'JMX Capability Scan', status: 'ERROR', at: '2026-09-07T09:45:11Z' },
     { executionId: 'e2', processName: 'Orders Sync', status: 'ERROR', at: '2026-10-12T10:00:00Z' },
   ]
-  const state = cockpit([], { platform: { phase: 'ok', message: '', runs } })
+  const state = dashboard([], { platform: { phase: 'ok', message: '', runs } })
   expect(recentRuns(runs, NOW, 24 * HOUR).map(r => r.executionId)).toEqual(['e2'])
   expect(attention(state, NOW, 24 * HOUR).map(a => a.title)).toEqual(['Orders Sync ended ERROR in the environment'])
 })
 
 test('the status line leads with the latest step, then what needs attention, then the cost', () => {
-  const state = cockpit([
+  const state = dashboard([
     act('test', 'failed', 'Orders Sync', NOW - 10, { executionStatus: 'ERROR' }),
     act('push', 'ok', 'Weather API', NOW, { file: 'active-development/c/W.xml', version: '2' }),
   ])
   expect(statusLine(state, NOW, 24 * HOUR, { usd: 1.837, tokens: 1_240_000 })).toBe(
     '✓ Saved Weather API to Boomi (v2) · ✗ 1 needs attention · 1.24M tokens · $1.84 this session',
   )
-  expect(statusLine(cockpit(), NOW, 24 * HOUR)).toBe('waiting for Companion')
+  expect(statusLine(dashboard(), NOW, 24 * HOUR)).toBe('waiting for Companion')
 })
 
 test('describe words each step for a person, not a script', () => {
@@ -177,7 +177,7 @@ test('describe words each step for a person, not a script', () => {
 })
 
 test('the summary has each section, in plain words', () => {
-  const text = summary(cockpit([act('edit', 'ok', 'New Map', NOW - 120_000, { file: 'active-development/maps/New.xml', type: 'transform.map' })]), { usd: 0.5, contextPercent: 41.6 }, NOW, 24 * HOUR)
+  const text = summary(dashboard([act('edit', 'ok', 'New Map', NOW - 120_000, { file: 'active-development/maps/New.xml', type: 'transform.map' })]), { usd: 0.5, contextPercent: 41.6 }, NOW, 24 * HOUR)
   expect(text).toContain('✓ Nothing needs attention.')
   expect(text).toContain('New Map (map): ◐ edited, not in Boomi yet')
   expect(text).toContain('Edited New Map, 2m ago')

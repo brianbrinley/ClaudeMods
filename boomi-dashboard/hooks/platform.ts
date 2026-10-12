@@ -1,4 +1,4 @@
-// The read-only Platform API calls the cockpit polls, and reading Companion's
+// The read-only Platform API calls the dashboard polls, and reading Companion's
 // .env. Auth matches Companion's scripts: BOOMI_TOKEN.<username> and the API
 // token. Nothing here logs or returns the token.
 

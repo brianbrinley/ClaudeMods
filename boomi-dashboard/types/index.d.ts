@@ -55,14 +55,14 @@ export type Run = {
   at: string
 }
 
-/** A component someone asked the cockpit to watch for changes on the platform. */
+/** A component someone asked the dashboard to watch for changes on the platform. */
 export type Watched = {
   componentId: string
   name?: string
   version?: string
   modifiedBy?: string
   modifiedDate?: string
-  /** Set when its version moved since it was first seen, until /cockpit seen. */
+  /** Set when its version moved since it was first seen, until /dashboard seen. */
   changedBy?: string
   error?: string
 }
@@ -76,7 +76,7 @@ export type Platform = {
   runs: Run[]
 }
 
-export type Cockpit = {
+export type Dashboard = {
   activity: Activity[]
   platform: Platform
   watched: Watched[]
@@ -84,6 +84,6 @@ export type Cockpit = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-cockpit': { cockpit: Cockpit; isBandHidden: boolean; ledger: Ledger; isWorking: boolean }
+    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean }
   }
 }

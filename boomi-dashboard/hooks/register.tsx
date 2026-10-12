@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
-import type { Activity, Cockpit, Ledger, Platform, Watched } from '../types'
+import type { Activity, Dashboard, Ledger, Platform, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -55,17 +55,17 @@ type Engine = EngineInterface
 
 const OFF: Platform = { phase: 'off', message: 'Not checked yet.', runs: [] }
 
-const cockpit = atom({ plugin: 'boomi-cockpit', key: 'cockpit' } as const, {
+const dashboard = atom({ plugin: 'boomi-dashboard', key: 'dashboard' } as const, {
   activity: [],
   platform: OFF,
   watched: [],
-} as Cockpit)
+} as Dashboard)
 
-const isBandHidden = atom({ plugin: 'boomi-cockpit', key: 'isBandHidden' } as const, false)
+const isBandHidden = atom({ plugin: 'boomi-dashboard', key: 'isBandHidden' } as const, false)
 
-const ledger = atom({ plugin: 'boomi-cockpit', key: 'ledger' } as const, EMPTY_LEDGER as Ledger)
+const ledger = atom({ plugin: 'boomi-dashboard', key: 'ledger' } as const, EMPTY_LEDGER as Ledger)
 
-const isWorking = atom({ plugin: 'boomi-cockpit', key: 'isWorking' } as const, false)
+const isWorking = atom({ plugin: 'boomi-dashboard', key: 'isWorking' } as const, false)
 
 type PaneTheme = 'day' | 'night' | 'terminal'
 
@@ -89,7 +89,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   isBanded: options.banner !== false,
 })
 
-const PANE = 'boomi-cockpit'
+const PANE = 'boomi-dashboard'
 const WATCH_KEY = 'watched'
 const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit'])
 
@@ -97,7 +97,7 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
 
 // The pane is a convenience: a surface that cannot seat one must not stop the work.
 const openPane = ($: Engine) => {
-  $.ui.open({ id: PANE, title: 'Boomi cockpit' }).catch(() => undefined)
+  $.ui.open({ id: PANE, title: 'Boomi Companion Dashboard' }).catch(() => undefined)
 }
 
 const toast = ($: Engine, settings: Settings, text: string) => {
@@ -122,11 +122,11 @@ const snapshot = async ($: Engine) => {
 
 const refreshStatus = async ($: Engine, settings: Settings) => {
   const now = await $.clock.now()
-  $.ui.status(statusLine(await read($, cockpit), now, settings.windowMs, await usageOf($)))
+  $.ui.status(statusLine(await read($, dashboard), now, settings.windowMs, await usageOf($)))
 }
 
 const record = ($: Engine, change: (list: Activity[]) => Activity[]) =>
-  update($, cockpit, current => ({ ...current, activity: change(current.activity).slice(-150) }))
+  update($, dashboard, current => ({ ...current, activity: change(current.activity).slice(-150) }))
 
 const nextId = (list: readonly Activity[]) => list.reduce((max, a) => Math.max(max, a.id), 0) + 1
 
@@ -141,8 +141,8 @@ const readComponent = async ($: Engine, path: string) => {
 
 // --- Companion's script runs -----------------------------------------------
 
-/** What the cockpit calls a run before its output names the component. */
-const subjectOf = async ($: Engine, settings: Settings, run: ScriptRun, current: Cockpit) => {
+/** What the dashboard calls a run before its output names the component. */
+const subjectOf = async ($: Engine, settings: Settings, run: ScriptRun, current: Dashboard) => {
   if (run.file) {
     const found = await readComponent($, run.file)
     const file = componentPath(run.file, settings.componentsDir) ?? run.file
@@ -167,7 +167,7 @@ const outputOf = (ran: { text?: string; result?: unknown }): string => {
 
 /** Notes each script run as running, before it runs. */
 const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun[]): Promise<Activity[]> => {
-  const current = await read($, cockpit)
+  const current = await read($, dashboard)
   const startedAt = await $.clock.now()
   const spent = await snapshot($)
   let id = nextId(current.activity)
@@ -234,7 +234,7 @@ const noteEdit = async ($: Engine, settings: Settings, path: string) => {
   const found = await readComponent($, path)
   const at = await $.clock.now()
   const spent = await snapshot($)
-  const isFirst = !(await read($, cockpit)).activity.some(a => a.kind !== 'other')
+  const isFirst = !(await read($, dashboard)).activity.some(a => a.kind !== 'other')
   await record($, list => {
     // A run of edits to one file is one step.
     const last = list[list.length - 1]
@@ -292,11 +292,11 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
   try {
     const loaded = await loadCredentials($, settings)
     if (typeof loaded === 'string') {
-      await update($, cockpit, c => ({ ...c, platform: { ...OFF, message: loaded } }))
+      await update($, dashboard, c => ({ ...c, platform: { ...OFF, message: loaded } }))
       return
     }
     const client = platformClient((url, init) => $.http.fetch(url, init), loaded)
-    const before = await read($, cockpit)
+    const before = await read($, dashboard)
     const checkedAt = await $.clock.now()
 
     let platform: Platform
@@ -340,7 +340,7 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
       }
     }
     // A watch added or removed while this poll ran stands.
-    await update($, cockpit, c => ({
+    await update($, dashboard, c => ({
       ...c,
       platform,
       watched: c.watched.map(w => watched.find(fresh => fresh.componentId === w.componentId) ?? w),
@@ -353,13 +353,13 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
 // --- Watching components -----------------------------------------------------
 
 const saveWatchList = async ($: Engine) => {
-  const ids = (await read($, cockpit)).watched.map(w => w.componentId)
+  const ids = (await read($, dashboard)).watched.map(w => w.componentId)
   await $.store.set(WATCH_KEY, ids)
 }
 
 /** Watches a component by ID or by its XML file under Companion's folders. */
 const watch = async ($: Engine, settings: Settings, target: string): Promise<string> => {
-  if (!target) return 'Usage: /cockpit watch <component ID | component XML file>'
+  if (!target) return 'Usage: /dashboard watch <component ID | component XML file>'
   let componentId = target
   let name: string | undefined
   if (target.endsWith('.xml')) {
@@ -369,43 +369,43 @@ const watch = async ($: Engine, settings: Settings, target: string): Promise<str
     componentId = found.componentId
     name = found.name
   }
-  const current = await read($, cockpit)
+  const current = await read($, dashboard)
   if (current.watched.some(w => w.componentId === componentId)) return `Already watching ${name ?? componentId}.`
-  await update($, cockpit, c => ({ ...c, watched: [...c.watched, { componentId, name }] }))
+  await update($, dashboard, c => ({ ...c, watched: [...c.watched, { componentId, name }] }))
   await saveWatchList($)
   await poll($, settings)
-  const added = (await read($, cockpit)).watched.find(w => w.componentId === componentId)
+  const added = (await read($, dashboard)).watched.find(w => w.componentId === componentId)
   return `Watching ${added ? watchedLine(added) : componentId}`
 }
 
 const unwatch = async ($: Engine, target: string): Promise<string> => {
-  const current = await read($, cockpit)
+  const current = await read($, dashboard)
   const gone = current.watched.find(w => w.componentId === target || w.name === target)
   if (!gone) return `Not watching ${target}.`
-  await update($, cockpit, c => ({ ...c, watched: c.watched.filter(w => w.componentId !== gone.componentId) }))
+  await update($, dashboard, c => ({ ...c, watched: c.watched.filter(w => w.componentId !== gone.componentId) }))
   await saveWatchList($)
   return `Stopped watching ${gone.name ?? gone.componentId}.`
 }
 
 /** Marks every watched change as seen, so only new ones count. */
 const seen = async ($: Engine): Promise<string> => {
-  await update($, cockpit, c => ({ ...c, watched: c.watched.map(w => ({ ...w, changedBy: undefined })) }))
+  await update($, dashboard, c => ({ ...c, watched: c.watched.map(w => ({ ...w, changedBy: undefined })) }))
   return 'Watched changes marked as seen.'
 }
 
 // --- Commands and tools ------------------------------------------------------
 
 const USAGE = [
-  '/cockpit                 what needs attention, each component, recent activity, the live environment',
-  '/cockpit poll            check Boomi now',
-  '/cockpit watch <id|file> watch a component for changes someone else makes',
-  '/cockpit unwatch <id>    stop watching it',
-  '/cockpit seen            mark watched changes as seen',
-  '/cockpit banner          show the banner above the prompt again',
+  '/dashboard                 what needs attention, each component, recent activity, the live environment',
+  '/dashboard poll            check Boomi now',
+  '/dashboard watch <id|file> watch a component for changes someone else makes',
+  '/dashboard unwatch <id>    stop watching it',
+  '/dashboard seen            mark watched changes as seen',
+  '/dashboard banner          show the banner above the prompt again',
 ].join('\n')
 
 const summaryNow = async ($: Engine, settings: Settings) =>
-  summary(await read($, cockpit), await usageOf($), await $.clock.now(), settings.windowMs)
+  summary(await read($, dashboard), await usageOf($), await $.clock.now(), settings.windowMs)
 
 const runCommand = async ($: Engine, settings: Settings, args: string): Promise<string> => {
   const [action = 'status', ...rest] = args.trim().split(/\s+/).filter(Boolean)
@@ -425,7 +425,7 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return seen($)
     case 'banner':
       await update($, isBandHidden, () => false)
-      return 'The cockpit banner is back above the prompt.'
+      return 'The dashboard banner is back above the prompt.'
     default:
       return USAGE
   }
@@ -484,7 +484,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await $.command.register({
-      name: 'cockpit',
+      name: 'dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
       argumentHint: 'poll | watch <id|file> | unwatch <id> | seen | banner',
     })
@@ -496,7 +496,7 @@ export const register: Register = (on, options) => {
     await $.tool.register({
       name: 'watch',
       description:
-        'Watch a Boomi component for changes someone else makes in Boomi; the cockpit flags it when its version moves. Takes a component ID or a component XML file Companion created.',
+        'Watch a Boomi component for changes someone else makes in Boomi; the dashboard flags it when its version moves. Takes a component ID or a component XML file Companion created.',
       inputSchema: {
         type: 'object',
         properties: { target: { type: 'string', description: 'A component ID, or the path of its XML file' } },
@@ -507,7 +507,7 @@ export const register: Register = (on, options) => {
     // The watch list outlives the session; restore it the first time.
     const ids = await $.store.get(WATCH_KEY)
     if (Array.isArray(ids)) {
-      await update($, cockpit, c =>
+      await update($, dashboard, c =>
         c.watched.length > 0 ? c : { ...c, watched: ids.map(id => ({ componentId: String(id) })) },
       )
     }
@@ -521,7 +521,7 @@ export const register: Register = (on, options) => {
   })
 
   // Companion's scripts: note each run as it starts, then read how it went.
-  // The cockpit only watches: its own trouble never stops the command.
+  // The dashboard only watches: its own trouble never stops the command.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const runs = scriptRuns(String(e.command ?? ''))
     if (runs.length === 0) return next(e)
@@ -542,15 +542,15 @@ export const register: Register = (on, options) => {
     return ran
   })
 
-  on('command.run', { command: 'cockpit' }, async ($, e) => ({ text: await runCommand($, settings, e.args) }))
+  on('command.run', { command: 'dashboard' }, async ($, e) => ({ text: await runCommand($, settings, e.args) }))
 
-  on('tool.call', { tool: 'mcp__boomi-cockpit__summary' }, async $ => ({
-    result: await summaryNow($, settings).catch(error => `The cockpit couldn't build its summary: ${messageOf(error)}`),
+  on('tool.call', { tool: 'mcp__boomi-dashboard__summary' }, async $ => ({
+    result: await summaryNow($, settings).catch(error => `The dashboard couldn't build its summary: ${messageOf(error)}`),
   }))
 
-  on('tool.call', { tool: 'mcp__boomi-cockpit__watch' }, async ($, e) => ({
+  on('tool.call', { tool: 'mcp__boomi-dashboard__watch' }, async ($, e) => ({
     result: await watch($, settings, String((e as { target?: unknown }).target ?? '').trim()).catch(
-      error => `The cockpit couldn't watch that component: ${messageOf(error)}`,
+      error => `The dashboard couldn't watch that component: ${messageOf(error)}`,
     ),
   }))
 
@@ -570,7 +570,7 @@ export const register: Register = (on, options) => {
     return response
   })
 
-  // In flight while Claude works on a turn, standing by between turns.
+  // Working while Claude is on a turn, idle between turns.
   on('turn.start', async ($, e, next) => {
     await update($, isWorking, () => true).catch(() => undefined)
     return next(e)
@@ -587,7 +587,7 @@ export const register: Register = (on, options) => {
   // attention and the spend so far, on one row. Hidden until there's news.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!settings.isBanded || e.props.hasSurvey || (await read($, isBandHidden))) return next(e)
-    const current = await read($, cockpit)
+    const current = await read($, dashboard)
     const now = await $.clock.now()
     const latest = headline(current.activity)
     const needs = attention(current, now, settings.windowMs)
@@ -635,7 +635,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
     const p = PALETTES[settings.paneTheme]
-    const current = await read($, cockpit)
+    const current = await read($, dashboard)
     const now = await $.clock.now()
     const usage = await usageOf($)
     const working = await read($, isWorking)
@@ -688,19 +688,19 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
-    const status = working ? '● IN FLIGHT' : '◇ STANDING BY'
-    const onDeck = usage.startedAt === undefined ? undefined : `on deck ${duration(now - usage.startedAt)}`
+    const status = working ? '● WORKING' : '◇ IDLE'
+    const session = usage.startedAt === undefined ? undefined : `session ${duration(now - usage.startedAt)}`
 
     return (
       <Box flexDirection="column" backgroundColor={p.bg} paddingX={1} minHeight={e.viewport?.rows} width="100%">
         <Box justifyContent="space-between" backgroundColor={p.band ?? p.bg} paddingX={1}>
-          {t('◆ B O O M I   C O C K P I T ◆', { color: p.bandText, bold: true, bg: p.band })}
+          {t('◆ BOOMI COMPANION DASHBOARD ◆', { color: p.bandText, bold: true, bg: p.band })}
           {t(status, { color: p.bandText, bold: true, bg: p.band })}
         </Box>
         <Box justifyContent="space-between">
           {t('VALENCE · MIAMI DECO', { color: p.rule, bold: true })}
           {t(
-            [onDeck, `${rows.length} component${rows.length === 1 ? '' : 's'} in flight`].filter(Boolean).join(' · '),
+            [session, `${rows.length} component${rows.length === 1 ? '' : 's'}`].filter(Boolean).join(' · '),
             { color: p.muted },
           )}
         </Box>
@@ -757,7 +757,7 @@ export const register: Register = (on, options) => {
             </Box>
           )
         })}
-        {rows.length > 8 && t(`…and ${rows.length - 8} more: /cockpit lists them all.`, { color: p.muted })}
+        {rows.length > 8 && t(`…and ${rows.length - 8} more: /dashboard lists them all.`, { color: p.muted })}
 
         {feed.length > 0 && heading('Recently')}
         {feed.map(a => {

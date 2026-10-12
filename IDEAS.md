@@ -4,7 +4,7 @@ Ideas for mods we could build next, starting with Boomi and integration work. Th
 
 **Built from this page so far:**
 - The Companion guardrail, now the [boomi-standards](boomi-standards/README.md) mod.
-- The deployment watcher, folded into the [boomi-cockpit](boomi-cockpit/README.md) mod: a live summary of a Companion session that also polls the environment's runs and watches components for changes.
+- The deployment watcher, folded into the [boomi-dashboard](boomi-dashboard/README.md) mod: a live summary of a Companion session that also polls the environment's runs and watches components for changes.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
 
