@@ -240,14 +240,15 @@ for (const surface of ['terminal', 'desktop'] as const) {
     })
     shell(on, 'Execution completed: status=ERROR, executionId=execution-9')
     const quiet = await $.ui.mount({ plugin: 'boomi-dashboard', surface, component: 'AbovePrompt', props: BAND })
-    expect(await quiet.find({ text: /Boomi/ })).toBeUndefined()
+    expect(await quiet.find({ text: /BC Dashboard/ })).toBeUndefined()
 
     await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
     const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface, component: 'AbovePrompt', props: BAND })
+    expect(await band.find({ text: '◆ BC Dashboard ' })).toBeDefined()
     expect(await band.find({ text: /ended ERROR/ })).toBeDefined()
     expect(await band.find({ text: /1 needs attention/ })).toBeDefined()
     await band.press({ key: 'hide' })
-    expect(await band.find({ text: /Boomi/ })).toBeUndefined()
+    expect(await band.find({ text: /BC Dashboard/ })).toBeUndefined()
   })
 
   test(`on ${surface}, the pane draws in Valence Day with its title band, gauges and spend`, async ($, on) => {

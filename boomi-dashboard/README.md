@@ -18,7 +18,7 @@ You see it as a banner above the prompt, a pane, a status line and toasts. `/bc-
 **The banner** above the prompt shows the latest step and what needs attention. It stays hidden until Companion does something.
 
 ```text
-◆ Boomi ✓ Saved Orders Sync to Boomi (v4) 2m ago │ ✗ 1 needs attention │ 3 components │ 338k tokens · $0.54   [ Open ]  [ Hide ]
+◆ BC Dashboard ✓ Saved Orders Sync to Boomi (v4) 2m ago │ ✗ 1 needs attention │ 3 components │ 338k tokens · $0.54   [ Open ]  [ Hide ]
 ```
 
 **The pane** has the whole picture. It opens the first time Claude edits or saves a component:

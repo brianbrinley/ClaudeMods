@@ -682,7 +682,7 @@ export const register: Register = (on, options) => {
         <Box flexShrink={1}>
           <Text wrap="truncate-end">
             <Text bold color="claude">
-              ◆ Boomi{' '}
+              ◆ BC Dashboard{' '}
             </Text>
             {latest && (
               <Text>
