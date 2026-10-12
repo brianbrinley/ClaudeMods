@@ -146,7 +146,7 @@ test('without credentials the live environment is off and says why', async ($, o
   world(on)
   mock.env(on, {})
   const status = await $.command.run(dashboard('poll'))
-  expect(status.text).toContain('Off: no Boomi credentials')
+  expect(status.text).toContain('Not connected')
 })
 
 test('watching a component polls its version, and a change by someone else needs attention', async ($, on) => {
@@ -177,6 +177,28 @@ test('watching a component polls its version, and a change by someone else needs
   await $.command.run(dashboard('seen'))
   const after = await $.command.run(dashboard())
   expect(after.text).toContain('✓ Nothing needs attention.')
+})
+
+test('after a deploy, the dashboard checks Boomi again within seconds', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-1' })
+  shell(on, "SUCCESS: Deployed 'Orders Sync' (package: p1)")
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', async () => ({ value: undefined }) as never)
+  on('tool.register', async () => ({ value: undefined }) as never)
+  mock.store(on)
+  const urls: string[] = []
+  on('http.fetch', async (_$, e) => {
+    urls.push(e.url)
+    const result = e.url.endsWith('EnvironmentAtomAttachment/query') ? [{ atomId: 'atom-1' }] : []
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
+  })
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.advance(3_000)
+  const before = urls.length
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-deploy.sh ${FILE}` })
+  await clock.advance(5_000)
+  expect(urls.length).toBeGreaterThan(before)
 })
 
 test("the environment's new failures are toasted, and old ones don't count", async ($, on) => {

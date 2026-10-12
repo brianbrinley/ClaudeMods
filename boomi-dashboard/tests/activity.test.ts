@@ -10,6 +10,9 @@ import {
   FLAMINGO_IDLE,
   FLAMINGO_WALK,
   flamingo,
+  flamingoView,
+  mirror,
+  pace,
   formatTokens,
   friendlyType,
   meter,
@@ -60,8 +63,8 @@ test('scriptRuns finds the Companion scripts a command runs and what they name',
       `cd work && bash scripts/boomi-component-push.sh ${FILE} --branch dev && bash scripts/boomi-deploy.sh ${FILE} --deployment-notes "first cut"`,
     ),
   ).toEqual([
-    { kind: 'push', file: FILE },
-    { kind: 'deploy', file: FILE },
+    { kind: 'push', file: `work/${FILE}` },
+    { kind: 'deploy', file: `work/${FILE}` },
   ])
   expect(scriptRuns(`bash scripts/boomi-test-execute.sh --process-id ${ID} --test-data in.json`)).toEqual([{ kind: 'test', processId: ID }])
   expect(scriptRuns('bash scripts/boomi-undeploy.sh dep-123')).toEqual([{ kind: 'undeploy', deploymentId: 'dep-123' }])
@@ -70,7 +73,7 @@ test('scriptRuns finds the Companion scripts a command runs and what they name',
 
 test("scriptRuns notes Companion's other scripts, and finds scripts inside bash -c", () => {
   expect(scriptRuns('bash scripts/boomi-component-search.sh --name Orders')).toEqual([{ kind: 'other', script: 'component-search' }])
-  expect(scriptRuns(`bash -c 'cd x && bash scripts/boomi-deploy.sh ${FILE}'`)).toEqual([{ kind: 'deploy', file: FILE }])
+  expect(scriptRuns(`bash -c 'cd x && bash scripts/boomi-deploy.sh ${FILE}'`)).toEqual([{ kind: 'deploy', file: `x/${FILE}` }])
 })
 
 test('scriptRuns leaves out help, connection tests, the shared library and other commands', () => {
@@ -166,7 +169,7 @@ test("old runs in the environment don't need attention", () => {
 
 test('the status line leads with the latest step, then what needs attention, then the cost', () => {
   const state = dashboard([
-    act('test', 'failed', 'Orders Sync', NOW - 10, { executionStatus: 'ERROR' }),
+    act('test', 'failed', 'Orders Sync', NOW - 10, { componentId: ID, executionStatus: 'ERROR' }),
     act('push', 'ok', 'Weather API', NOW, { file: 'active-development/c/W.xml', version: '2' }),
   ])
   expect(statusLine(state, NOW, 24 * HOUR, { usd: 1.837, tokens: 1_240_000 })).toBe(
@@ -187,7 +190,7 @@ test('the summary has each section, in plain words', () => {
   expect(text).toContain('✓ Nothing needs attention.')
   expect(text).toContain('New Map (map): ◐ edited, not in Boomi yet')
   expect(text).toContain('Edited New Map, 2m ago')
-  expect(text).toContain('Live environment, last 24h:')
+  expect(text).toContain('Process runs in Boomi, last 24h')
   expect(text).toContain('Session: $0.50 so far · context 42% full')
 })
 
@@ -268,4 +271,66 @@ test('pixelCells packs two pixel rows into each cell with half blocks', () => {
   ])
   expect(pixelCells(['PL', 'LP'], colors)[0]![0]).toEqual({ char: '▀', color: '#C2185B', bg: '#F7A8C4' })
   expect(pixelCells(FLAMINGO_IDLE, { P: 'p', L: 'l', K: 'k' }).length).toBe(8)
+})
+
+test("a script that's only read or searched isn't a run", () => {
+  expect(scriptRuns('cat scripts/boomi-deploy.sh')).toEqual([])
+  expect(scriptRuns('grep -n SUCCESS scripts/boomi-deploy.sh | head')).toEqual([])
+  expect(scriptRuns('sed -n 1,40p skills/boomi-integration/scripts/boomi-deploy.sh')).toEqual([])
+  expect(scriptRuns(`BOOMI_X=1 timeout 60 bash -x scripts/boomi-deploy.sh ${FILE}`)).toEqual([{ kind: 'deploy', file: FILE }])
+  expect(scriptRuns(`./scripts/boomi-deploy.sh ${FILE}; echo done`)).toEqual([{ kind: 'deploy', file: FILE }])
+})
+
+test('a file named after a cd is read from that folder', () => {
+  const [run] = scriptRuns('cd active-development && bash ../scripts/boomi-deploy.sh processes/Listener.xml')
+  expect(run!.file).toBe('active-development/processes/Listener.xml')
+  expect(componentPath(run!.file!)).toBe('active-development/processes/Listener.xml')
+  expect(scriptRuns('cd /w/active-development/processes && bash /w/scripts/boomi-deploy.sh ./Listener.xml')[0]!.file).toBe(
+    '/w/active-development/processes/Listener.xml',
+  )
+})
+
+test("a script's SUCCESS line passes it even when the command's exit code is an error", () => {
+  const output = "SUCCESS: Deployed 'WX Listener' (package: p1)\nbash: tpyo: command not found"
+  expect(readOutput('deploy', output, true)).toMatchObject({ outcome: 'ok', name: 'WX Listener' })
+  expect(readOutput('deploy', 'bash: tpyo: command not found', true).outcome).toBe('failed')
+  expect(readOutput('deploy', 'Deploying...', false)).toMatchObject({ outcome: 'ok', detail: 'finished' })
+})
+
+test('one component named two ways is one row, and its failure needs attention once', () => {
+  const list = [
+    act('create', 'ok', 'WX Listener', NOW - 30, { file: 'active-development/processes/Listener.xml', componentId: ID }),
+    act('deploy', 'failed', 'Listener.xml', NOW - 20, { file: 'x/processes/Listener.xml', componentId: ID }),
+    act('deploy', 'failed', 'WX Listener', NOW - 10, { componentId: ID, detail: 'ERROR: x' }),
+  ]
+  const rows = components(list)
+  expect(rows.length).toBe(1)
+  expect(rows[0]!.name).toBe('WX Listener')
+  expect(attention(dashboard(list), NOW, 24 * HOUR).length).toBe(1)
+})
+
+test("a step that names no component stays out of the components list", () => {
+  expect(components([act('deploy', 'ok', 'a component', NOW)])).toEqual([])
+})
+
+test('the flamingo paces across its strip and turns at each end', () => {
+  expect([0, 1, 5, 6, 7, 11, 12].map(f => pace(f, 6))).toEqual([
+    { offset: 0, facing: 'right' },
+    { offset: 1, facing: 'right' },
+    { offset: 5, facing: 'right' },
+    { offset: 6, facing: 'left' },
+    { offset: 5, facing: 'left' },
+    { offset: 1, facing: 'left' },
+    { offset: 0, facing: 'right' },
+  ])
+})
+
+test('facing left, the flamingo is drawn mirrored', () => {
+  expect(mirror(['P..L'])).toEqual(['L..P'])
+  const right = flamingoView(true, 1)
+  const left = flamingoView(true, 7)
+  expect(right.facing).toBe('right')
+  expect(left.facing).toBe('left')
+  expect(left.pixels).toEqual(mirror(flamingo(true, 7)))
+  expect(right.pixels).toEqual([...flamingo(true, 1)])
 })

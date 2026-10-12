@@ -25,9 +25,11 @@ import {
   formatCost,
   formatSpend,
   formatTokens,
+  isRunningStatus,
   friendlyType,
   headline,
-  flamingo,
+  FLAMINGO_TRAVEL,
+  flamingoView,
   levelOf,
   meter,
   modelMix,
@@ -57,7 +59,7 @@ import type { Credentials } from './platform'
 
 type Engine = EngineInterface
 
-const OFF: Platform = { phase: 'off', message: 'Not checked yet.', runs: [] }
+const OFF: Platform = { phase: 'off', message: 'Checking Boomi…', runs: [] }
 
 const dashboard = atom({ plugin: 'boomi-dashboard', key: 'dashboard' } as const, {
   activity: [],
@@ -174,7 +176,7 @@ const subjectOf = async ($: Engine, settings: Settings, run: ScriptRun, current:
     const watched = current.watched.find(w => w.componentId === id)
     return { subject: known?.subject ?? watched?.name ?? id, componentId: id, type: known?.type, file: known?.file }
   }
-  return { subject: run.deploymentId ? `deployment ${run.deploymentId}` : (run.script ?? 'Companion') }
+  return { subject: run.deploymentId ? `deployment ${run.deploymentId}` : run.kind === 'other' ? (run.script ?? 'a Companion script') : 'a component' }
 }
 
 const outputOf = (ran: { text?: string; result?: unknown }): string => {
@@ -232,6 +234,8 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
   await record($, list => list.map(a => done.find(d => d.id === a.id) ?? a))
   for (const a of done) announce($, settings, a)
   void refreshStatus($, settings)
+  // A deploy or test starts runs in Boomi: look for them soon.
+  if (done.some(a => a.kind === 'deploy' || a.kind === 'test')) pollSoon($, settings, 5_000)
 }
 
 /** A toast for what someone would want to hear about without looking. */
@@ -298,10 +302,27 @@ const loadCredentials = async ($: Engine, settings: Settings): Promise<Credentia
   for (const [key, value] of Object.entries(fromEnv)) if (value) values[key] = value
   Object.assign(values, Object.fromEntries(Object.entries(fromFile).filter(([, v]) => v)))
   const found = credentialsFrom(values)
-  return 'missing' in found ? `Off: no Boomi credentials (${found.missing.join(', ')} not set).` : found.credentials
+  return 'missing' in found
+    ? `Not connected: Companion's Boomi credentials aren't set (${found.missing.join(', ')}). Runs show up here once they are.`
+    : found.credentials
 }
 
 let isPolling = false
+let isFollowUpDue = false
+
+/**
+ * A check of Boomi soon, on top of the regular poll: after a deploy or test,
+ * and while a run is still in progress, so a new run shows without the
+ * regular poll's wait. One is pending at a time.
+ */
+const pollSoon = ($: Engine, settings: Settings, ms: number) => {
+  if (settings.pollSeconds <= 0 || isFollowUpDue) return
+  isFollowUpDue = true
+  $.clock.after(ms, async () => {
+    isFollowUpDue = false
+    await poll($, settings)
+  })
+}
 
 /** Polls the environment's recent runs and the watched components; toasts what's new. */
 const poll = async ($: Engine, settings: Settings): Promise<void> => {
@@ -319,14 +340,14 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
 
     let platform: Platform
     if (!loaded.environmentId) {
-      platform = { phase: 'off', message: 'Off: BOOMI_ENVIRONMENT_ID is not set, so there is no environment to watch.', runs: [], checkedAt }
+      platform = { phase: 'off', message: 'Not connected: set BOOMI_ENVIRONMENT_ID to choose which environment to show.', runs: [], checkedAt }
     } else {
       try {
         const atoms = await client.environmentAtoms(loaded.environmentId)
         const runs = await client.recentRuns(atoms)
         platform = {
           phase: 'ok',
-          message: atoms.length === 0 ? 'No runtimes are attached to the environment.' : `Watching ${atoms.length} runtime${atoms.length === 1 ? '' : 's'}.`,
+          message: atoms.length === 0 ? 'No runtimes are attached to the environment, so nothing can run there yet.' : `Watching ${atoms.length} runtime${atoms.length === 1 ? '' : 's'}.`,
           environmentId: loaded.environmentId,
           checkedAt,
           runs,
@@ -363,6 +384,7 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
       platform,
       watched: c.watched.map(w => watched.find(fresh => fresh.componentId === w.componentId) ?? w),
     }))
+    if (platform.runs.some(run => isRunningStatus(run.status))) pollSoon($, settings, 10_000)
   } finally {
     isPolling = false
   }
@@ -697,6 +719,7 @@ export const register: Register = (on, options) => {
     const now = await $.clock.now()
     const usage = await usageOf($)
     const working = await read($, isWorking)
+    const flamingoFrame = await read($, frame)
     const hours = Math.round(settings.windowMs / 3_600_000)
     const needs = attention(current, now, settings.windowMs)
     const rows = components(current.activity)
@@ -727,6 +750,7 @@ export const register: Register = (on, options) => {
         {aside ? t(`  ${aside}`, { color: p.muted }) : undefined}
       </Box>
     )
+    const note = (text: string) => t(text, { color: p.muted })
     const line = (level: Level, text: string, aside?: string) => (
       <Box justifyContent="space-between">
         <Box flexShrink={1}>
@@ -788,15 +812,21 @@ export const register: Register = (on, options) => {
           </Box>
           {settings.hasFlamingo && (
             <Box flexDirection="column" flexShrink={0} marginLeft={1}>
-              {pixelCells(flamingo(working, await read($, frame)), { P: p.bird, L: '#F7A8C4', K: '#0B0B0B' }).map(row => (
-                <Text backgroundColor={p.bg}>
-                  {row.map(cell => (
-                    <Text color={cell.color} backgroundColor={cell.bg ?? p.bg}>
-                      {cell.char}
-                    </Text>
-                  ))}
-                </Text>
-              ))}
+              {(() => {
+                const view = flamingoView(working, flamingoFrame)
+                const pad = (n: number) => (n > 0 ? <Text backgroundColor={p.bg}>{' '.repeat(n)}</Text> : undefined)
+                return pixelCells(view.pixels, { P: p.bird, L: '#F7A8C4', K: '#0B0B0B' }).map(row => (
+                  <Text backgroundColor={p.bg}>
+                    {pad(view.offset)}
+                    {row.map(cell => (
+                      <Text color={cell.color} backgroundColor={cell.bg ?? p.bg}>
+                        {cell.char}
+                      </Text>
+                    ))}
+                    {pad(FLAMINGO_TRAVEL - view.offset)}
+                  </Text>
+                ))
+              })()}
             </Box>
           )}
         </Box>
@@ -839,18 +869,21 @@ export const register: Register = (on, options) => {
         })}
         {rows.length > 8 && t(`…and ${rows.length - 8} more: /bc-dashboard lists them all.`, { color: p.muted })}
 
-        {feed.length > 0 && heading('Recently')}
+        {feed.length > 0 && heading("Claude's latest steps")}
+        {feed.length > 0 && note('What Claude just did with Companion, newest first, and the tokens each step took.')}
         {feed.map(a => {
           const spent = all.get(a.id)?.tokens
           return line(levelOf(a), describe(a), [ago(a.endedAt ?? a.startedAt, now), spent ? `${formatTokens(spent)} tok` : undefined].filter(Boolean).join(' · '))
         })}
 
-        {heading('Live environment', `last ${hours}h`)}
-        {current.platform.phase !== 'ok' && t(current.platform.message, { color: p.muted })}
-        {current.platform.phase === 'ok' && runs.length === 0 && t(`No runs in the last ${hours}h.`, { color: p.muted })}
+        {heading('Process runs in Boomi', `last ${hours}h`)}
+        {note("Every execution in your Boomi environment: this session's tests, schedules and other people's runs.")}
+        {current.platform.phase !== 'ok' && line(current.platform.phase === 'error' ? 'serious' : 'warning', current.platform.message)}
+        {current.platform.phase === 'ok' && runs.length === 0 && line('healthy', `No process ran in the last ${hours}h.`)}
         {current.platform.phase === 'ok' && runs.slice(0, 6).map(run => line(runLevel(run), runText(run, now)))}
 
-        {current.watched.length > 0 && heading('Watched')}
+        {current.watched.length > 0 && heading('Watched components')}
+        {current.watched.length > 0 && note('Flagged when someone other than Companion changes one in Boomi.')}
         {current.watched.map(w => line(watchedLevel(w), watchedText(w)))}
       </Box>
     )
