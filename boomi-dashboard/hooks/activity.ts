@@ -90,6 +90,8 @@ const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefin
   if (NOT_A_RUN.has(name)) return undefined
   const kind = SCRIPTS[name]
   if (kind) return { kind }
+  // event-streams-setup.sh is Companion's too, though not named boomi-*.
+  if (name === 'event-streams-setup.sh') return { kind: 'other', script: 'event-streams-setup' }
   const other = name.match(/^boomi-([a-z0-9-]+)\.sh$/)
   return other ? { kind: 'other', script: other[1] } : undefined
 }
@@ -281,13 +283,30 @@ const ID = '([0-9a-f]{8}-[0-9a-f-]{27,})'
 export const parseResults = (output: string): Result[] => {
   const results: Result[] = []
   let pending: { kind: ActivityKind; name?: string; componentId?: string } | undefined
+  // A test that was submitted and not (yet) followed by its status: its result
+  // only if the script stopped there (--no-wait).
+  let submitted: Result | undefined
+  const settleSubmitted = () => {
+    if (submitted) results.push(submitted)
+    submitted = undefined
+  }
   const push = (result: Result) => {
+    settleSubmitted()
     results.push(result)
     pending = undefined
   }
   for (const raw of output.split(/\r?\n/)) {
     const line = raw.trim()
     let m: RegExpMatchArray | null
+    // Progress lines that start with SUCCESS: but aren't a script's result:
+    // a deploy packages first, and a test is submitted before it finishes.
+    if (/^SUCCESS: Package /.test(line)) continue
+    if (/^SUCCESS: Test submitted/.test(line)) {
+      settleSubmitted()
+      submitted = { kind: 'test', outcome: 'ok', detail: 'submitted, not waited for', componentId: pending?.kind === 'test' ? pending.componentId : undefined }
+      continue
+    }
+    if (/^(Creating component|Pushing component|Packaging|Executing test|Undeploying) /.test(line)) settleSubmitted()
     if ((m = line.match(/^Creating component '([^']+)'/))) pending = { kind: 'create', name: m[1] }
     else if ((m = line.match(new RegExp(`^Pushing component '([^']+)' \\(${ID}\\)`)))) pending = { kind: 'push', name: m[1], componentId: m[2] }
     else if ((m = line.match(new RegExp(`^Packaging '([^']+)' \\(${ID}\\)`)))) pending = { kind: 'deploy', name: m[1], componentId: m[2] }
@@ -295,13 +314,16 @@ export const parseResults = (output: string): Result[] => {
     else if ((m = line.match(/^Undeploying (\S+)/))) pending = { kind: 'undeploy' }
     else if ((m = line.match(/^Execution completed: status=([A-Z_]+), executionId=(\S+)/))) {
       const status = m[1]
+      // The status is the result; the submission before it was progress.
+      const testedId = submitted?.componentId
+      submitted = undefined
       push({
         kind: 'test',
         outcome: isFailedStatus(status) ? 'failed' : 'ok',
         detail: `status ${status}`,
         executionStatus: status,
         executionId: m[2]?.replace(/[,.]$/, ''),
-        componentId: pending?.kind === 'test' ? pending.componentId : undefined,
+        componentId: pending?.kind === 'test' ? pending.componentId : testedId,
       })
     } else if (/^SUCCESS:|already exists with ID:|nothing sent to the platform/.test(line)) {
       const created = line.match(new RegExp(`[Cc]omponent '([^']+)' (?:created|already exists) with ID: ${ID}`))
@@ -328,9 +350,15 @@ export const parseResults = (output: string): Result[] => {
         version: pushed?.[2],
       })
     } else if (/^ERROR:/.test(line)) {
+      if (submitted) {
+        // A test that was submitted, then failed while it was being waited for.
+        submitted = { ...submitted, outcome: 'failed', detail: shorten(line) }
+        continue
+      }
       push({ kind: pending?.kind, outcome: 'failed', detail: shorten(line), name: pending?.name, componentId: pending?.componentId })
     }
   }
+  settleSubmitted()
   return results
 }
 
@@ -419,7 +447,10 @@ export const worst = (levels: readonly Level[]): Level =>
 const LEVEL_OF: Record<Outcome, Level> = { ok: 'healthy', running: 'warning', failed: 'critical', blocked: 'serious' }
 
 export const levelOf = (a: Activity): Level =>
-  a.outcome === 'ok' && isWarnStatus(a.executionStatus) ? 'warning' : LEVEL_OF[a.outcome]
+  a.outcome === 'ok' && (isWarnStatus(a.executionStatus) || isSubmittedOnly(a)) ? 'warning' : LEVEL_OF[a.outcome]
+
+/** A test that was submitted and not waited for (--no-wait): no result yet. */
+const isSubmittedOnly = (a: Activity) => a.kind === 'test' && a.outcome === 'ok' && !a.executionStatus
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -439,6 +470,7 @@ const SCRIPT_WORDS: Record<string, string> = {
   'component-diff': 'Compared a component',
   'execution-query': 'Read execution results',
   'env-check': 'Checked the Boomi connection',
+  'event-streams-setup': 'Set up Event Streams',
   'folder-create': 'Created a folder',
   'folder-list': 'Listed folders',
   extensions: 'Read environment extensions',
@@ -595,7 +627,8 @@ export const stages = (row: ComponentRow, runs: readonly Run[] = []): Stage[] =>
     if (tested.outcome === 'running') out.push({ level: 'warning', text: 'testing…' })
     else if (tested.outcome === 'failed') out.push({ level: 'critical', text: `test ${tested.executionStatus ?? 'failed'}` })
     else if (tested.outcome === 'blocked') out.push({ level: 'serious', text: 'test blocked' })
-    else out.push({ level: levelOf(tested), text: tested.executionStatus === 'COMPLETE' || !tested.executionStatus ? 'test passed' : `test ${tested.executionStatus}` })
+    else if (!tested.executionStatus) out.push({ level: 'warning', text: 'test submitted, result not waited for' })
+    else out.push({ level: levelOf(tested), text: tested.executionStatus === 'COMPLETE' ? 'test passed' : `test ${tested.executionStatus}` })
   }
   return out
 }
@@ -635,8 +668,8 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
       const hint =
         a.outcome === 'blocked'
           ? a.detail
-          : a.kind === 'test'
-            ? `Execution ${a.executionId ? `${a.executionId.replace(/^execution-/, '').slice(0, 8)}…` : 'log'}: press Why? to read what failed.`
+          : a.kind === 'test' && a.executionId
+            ? `Execution ${a.executionId.replace(/^execution-/, '').slice(0, 8)}…: press Why? to read what failed.`
             : a.detail
       items.push({
         key: `step:${a.id}`,

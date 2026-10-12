@@ -742,3 +742,67 @@ test('without the other mods, there is no Guardrails section', async ($, on) => 
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
   expect(await pane.find({ text: /GUARDRAILS/ })).toBeUndefined()
 })
+
+// Companion v1.0.83's own output, line for line (OfficialBoomi/bc-integration
+// scripts/boomi-deploy.sh and boomi-test-execute.sh).
+const V1083 = {
+  deploy: [
+    `Packaging 'Orders Sync' (${ID}) from the account default branch`,
+    'SUCCESS: Package 9f8e7d6c-0000-1111-2222-333344445555',
+    "SUCCESS: Deployed 'Orders Sync' (package: 9f8e7d6c-0000-1111-2222-333344445555)",
+  ].join('\n'),
+  failedTest: [
+    `Executing test for process ${ID} on atom atom-1`,
+    'Execution started: requestId=executionrecord-abc',
+    'SUCCESS: Test submitted (requestId: executionrecord-abc)',
+    'Polling for results...',
+    '  Execution in progress... (1/60)',
+    'Execution completed: status=ERROR, executionId=execution-0490202b-2e2f',
+  ].join('\n'),
+  noWait: [`Executing test for process ${ID} on atom atom-1`, 'Execution started: requestId=executionrecord-def', 'SUCCESS: Test submitted (requestId: executionrecord-def)'].join('\n'),
+  timedOut: [
+    `Executing test for process ${ID} on atom atom-1`,
+    'SUCCESS: Test submitted (requestId: executionrecord-ghi)',
+    'Polling for results...',
+    'ERROR: Polling timed out after 60 attempts',
+  ].join('\n'),
+}
+
+test('Companion v1.0.83: a deploy is one step, though it prints SUCCESS for its package first', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  shell(on, V1083.deploy)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-deploy.sh ${FILE}` })
+  const text = String((await $.command.run(dashboard('text'))).text)
+  expect(text.match(/Deployed Orders Sync/g)).toHaveLength(1)
+  expect(text).toContain('Orders Sync (process): ✓ deployed')
+})
+
+test('Companion v1.0.83: a failed test is one failed step of its component, and needs attention', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  shell(on, V1083.failedTest)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
+  const text = String((await $.command.run(dashboard('text'))).text)
+  expect(text).toContain('Needs attention (1)')
+  expect(text).toContain('✗ test ERROR')
+  expect(text).not.toContain('Test submitted')
+  expect(text).not.toContain('a component')
+})
+
+test('Companion v1.0.83: a --no-wait test is submitted, not passed', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  shell(on, V1083.noWait)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID} --no-wait` })
+  const text = String((await $.command.run(dashboard('text'))).text)
+  expect(text).toContain('◐ test submitted, result not waited for')
+  expect(text).toContain('◐ Test of')
+  expect(text).not.toContain('test passed')
+})
+
+test('Companion v1.0.83: a test that times out while waited for fails', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  shell(on, V1083.timedOut)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
+  const text = String((await $.command.run(dashboard('text'))).text)
+  expect(text).toContain('Needs attention (1)')
+  expect(text).toContain('ERROR: Polling timed out after 60 attempts')
+})

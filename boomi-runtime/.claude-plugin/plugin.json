@@ -1,6 +1,6 @@
 {
   "name": "boomi-runtime",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Provisions a temporary Boomi runtime in the session and hands its ID to Boomi Companion",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -45,12 +45,6 @@
       "title": "Guard the API token",
       "description": "Refuse tool calls that would show the Boomi API token (reading .env, printing the environment) and withhold any output that contains it",
       "default": true
-    },
-    "apiToken": {
-      "type": "string",
-      "title": "Boomi API token",
-      "description": "The Platform API token, kept in Claude Code's secure storage instead of .env. Companion's scripts get it only while one runs. Set it from a terminal with claude plugin configure (see the README), never in the chat",
-      "sensitive": true
     }
   }
 }

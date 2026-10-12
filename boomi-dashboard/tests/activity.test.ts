@@ -676,3 +676,7 @@ test('guardrails: what the standards and runtime mods say, each with an icon and
   )
   expect(guardrailText([])).toBe('')
 })
+
+test("event-streams-setup.sh is Companion's too, though it isn't named boomi-*", () => {
+  expect(scriptRuns('bash scripts/event-streams-setup.sh create-topic orders')).toMatchObject([{ kind: 'other', script: 'event-streams-setup' }])
+})

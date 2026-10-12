@@ -2,27 +2,9 @@
 
 What the automated tests can't prove: each item needs a real Claude Code session, a real Boomi account, or both. Run them in order within a section. Each step has a **Pass** and a **Fail** you can see; nothing is "probably fine".
 
-**Reporting back:** give the item's ID and **PASS** or **FAIL**, and for a fail, the exact text you saw (a screenshot works too). For example: `A4 FAIL: ERROR: Missing required environment variables: BOOMI_API_TOKEN`. Never paste the token itself.
+**Reporting back:** give the item's ID and **PASS** or **FAIL**, and for a fail, the exact text you saw (a screenshot works too). For example: `B2 FAIL: ERROR: Polling timed out after 60 attempts`. Never paste the token itself.
 
 When an item passes, tick it here. When every item in a section passes, the section's open question in the mod's README can be closed.
-
-## A. API token in secure storage
-
-*boomi-runtime 0.2.0, boomi-dashboard 0.8.0 ([#21](https://github.com/brianbrinley/ClaudeMods/pull/21)). Setup: [Secure the API token](boomi-runtime/README.md#secure-the-api-token).*
-
-- [ ] **A1. Save the token.** Run step 2 of the setup from a terminal.
-  **Pass:** each `claude plugin configure` finishes without an error. **Fail:** any error, such as `No installed plugin has the id`; then run `claude plugin list` and send me the IDs it shows.
-- [ ] **A2. Take it out of `.env`.** Delete or comment out the `BOOMI_API_TOKEN` line in Companion's `.env`, and remove any `BOOMI_API_TOKEN` environment variable. Keep the rest of the file.
-- [ ] **A3. Doctor.** Start a new session and run `/boomi doctor`.
-  **Pass:** a line reads `✓ API token in Claude Code's secure storage; Companion's scripts get it only while they run`, and no toast warns about `.env`. **Fail:** the line says `API token from the .env file`, `from an environment variable`, or `but Delete the BOOMI_API_TOKEN line`.
-- [ ] **A4. Companion uses it.** *(Mechanism proven 2026-10-12 with a fake token: in a fresh Claude Code with boomi-runtime 0.2.0, a script named like a Companion script saw the token through Claude's Bash tool and another command didn't. Still to do: one run with the real token and a real push.)* Ask Claude to run Companion's connection test (`boomi-folder-create.sh --test-connection`), then to push one component.
-  **Pass:** both end with `SUCCESS`. **Fail:** `ERROR: Missing required environment variables: BOOMI_API_TOKEN`. This is the one the tests can't cover; if it fails, the token isn't reaching Companion's scripts.
-- [ ] **A5. The guard still holds.** Ask Claude to run `printenv`.
-  **Pass:** refused with `boomi-runtime: this command could show the Boomi API token`. **Fail:** it runs.
-- [ ] **A6. The dashboard reaches Boomi.** Run `/bc-dashboard poll`.
-  **Pass:** **Process runs in Boomi** lists runs, or says no process ran. **Fail:** `Not connected: Companion's Boomi credentials aren't set (BOOMI_API_TOKEN)`.
-- [ ] **A7. Undo works.** Put the token line back in `.env` and start a new session.
-  **Pass:** Companion works as before, and `/boomi doctor` warns that the line overrides the secure token. **Fail:** anything else.
 
 ## B. Dashboard features
 
@@ -66,7 +48,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
 
 ## E. Runtime regression
 
-*Already verified live before 0.2.0; recheck once after it.*
+*Already verified live before the token work; recheck once on boomi-runtime 0.3.0, which removed it.*
 
 - [ ] **E1.** `/boomi up`, then `/boomi smoke`, then `/boomi down`.
   **Pass:** online, `smoke test: passed`, then everything deleted. **Fail:** the phase or message where it stopped.

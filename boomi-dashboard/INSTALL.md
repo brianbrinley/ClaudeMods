@@ -31,10 +31,6 @@ Never read, print or copy my .env or any Boomi credentials. The mod reads them i
 - To be warned about spend, set a budget under `/config`, in the mod's **Spend budget (USD)** setting.
 - The pane starts in the Day theme. Press **Night** or **Terminal** at the top of the pane, or run `/bc-dashboard theme night`, to switch.
 
-## Keep the API token out of `.env` (recommended)
-
-Companion's setup puts the Platform API token in `.env`, in plain text. The dashboard and the [boomi-runtime](../boomi-runtime/README.md) mod can keep it in Claude Code's secure storage instead, and hand it to Companion's scripts only while one runs. Follow [Secure the API token](../boomi-runtime/README.md#secure-the-api-token): it sets the token from your terminal, never in the chat.
-
 ## Updating
 
 Run `git -C ~/ClaudeMods pull`, then restart Claude Code.
