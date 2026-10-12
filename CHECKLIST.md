@@ -56,9 +56,9 @@ When an item passes, tick it here. When every item in a section passes, the sect
 
 *After [#21](https://github.com/brianbrinley/ClaudeMods/pull/21) is merged.*
 
-- [ ] **D1.** The **Docs Site** workflow runs for the merge, under the repository's **Actions** tab.
+- [x] **D1.** *(Passed: [run 8](https://github.com/brianbrinley/ClaudeMods/actions/runs/38290300634), green.)* The **Docs Site** workflow runs for the merge, under the repository's **Actions** tab.
   **Pass:** a green run. **Fail:** no run, or a red one.
-- [ ] **D2.** On [the site](https://brianbrinley.github.io/ClaudeMods/), the Companion Dashboard page has a **Commands and tools** section, and the Boomi Runtime page has **Secure the API token**.
+- [x] **D2.** *(Passed: both sections are live.)* On [the site](https://brianbrinley.github.io/ClaudeMods/), the Companion Dashboard page has a **Commands and tools** section, and the Boomi Runtime page has **Secure the API token**.
   **Pass:** both. **Fail:** the old pages.
 
 ## E. Runtime regression
