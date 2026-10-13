@@ -120,3 +120,14 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** a **BUDGET** gauge listing `session:` and `month:` with their amounts. **Fail:** no gauge, or a budget missing.
 - [ ] **H6. Pane size.** Run `/bc-dashboard size 30`, then restart and open the pane.
   **Pass:** the pane opens about 30 rows tall both times; dragging its edge still resizes it. **Fail:** the size doesn't change, or isn't kept.
+
+## I. Cost review
+
+*boomi-dashboard 0.18.0. Needs earlier Companion sessions on this machine.*
+
+- [ ] **I1. Review a session.** Under **Past Companion sessions**, press **Scan**, then **Review** beside your costliest session.
+  **Pass:** a line with its cost, prompts, tokens and peak context, then findings that match what you remember of it (each with a tip), or `Nothing stands out`. **Fail:** an error, or a finding that's plainly wrong; say which.
+- [ ] **I2. Ask Claude to review.** Press **Ask Claude to review**, then Enter.
+  **Pass:** the prompt box holds the request with the transcript's path; Claude reads the transcript in parts and suggests concrete changes. **Fail:** no path, or Claude can't open the file.
+- [ ] **I3. Compactions and prompts.** Review a session you know compacted.
+  **Pass:** `It compacted N times`, and a prompt count close to how many messages you sent. **Fail:** no compaction found; the transcript's marker may have changed.

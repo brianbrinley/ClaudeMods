@@ -12,6 +12,7 @@
 - **Know where every component stands.** Edited, saved with its version, deployed, tested: each component's stage updates as Claude works.
 - **Go from failure to fix in two clicks.** **Why?** reads a failed test's process log. **Ask Claude to fix** drafts the request with the log's lines in it, and **Run again** checks the fix without a turn of Claude's.
 - **Keep spend in sight.** Tokens, cost and how full the context is, per step and per component. On a Claude seat, your 5-hour and weekly usage limits and where your pace leads, read automatically, and an optional Companion budget of your own: a share of your limit per day, week or month, or a monthly amount.
+- **Learn from what cost the most.** Review a past session to see what drove its cost (the model, a long conversation, repeated tests) and the Claude Code habit that would have saved it.
 - **Pick up where you left off.** A new session opens with what the last one did and left to fix, and **Past Companion sessions** shows what earlier work cost.
 - **Every Companion plugin, not only integration.** Data Hub deploys, BDI flow runs, Agentstudio agents, custom connector releases and Marketplace recipes show up as steps too, with their failures under **Needs attention** and each product's share of the spend.
 - **Catch what happens outside the chat.** Companion's activity log adds script runs from a terminal, and watched components flag changes someone else makes in Boomi.
@@ -182,6 +183,7 @@ Boomi Companion sessions on this machine, last 90 days:
 
 - The cost is Claude Code's own, as `/cost` showed it, read from the transcript. Older Claude Code versions didn't record it; those sessions show tokens only.
 - A session counts only if it ran a Companion script, not if it only looked at one. The folder shows on each line only when sessions come from different folders.
+- **Review one:** **Review** beside a session shows what drove its cost, read from the transcript's figures, each with a change for next time. It flags the largest model doing most of the work (`/model`), a long conversation re-read on every call (`/clear`), a context that grew large (`/compact`), a session that kept compacting, the same test or push run again and again, and subagents doing much of it. **Ask Claude to review** drafts a request for a closer look in the prompt box, naming the transcript; nothing is sent until you press Enter, and that look costs a turn. `/bc-dashboard review [n]` gives the same in text; without a number it asks which of the four costliest sessions of the last 30 days.
 - **Reopen one:** **Copy** beside a session puts the command that reopens it on the clipboard, `cd <its folder> && claude --resume <session ID>`, to paste into a new terminal. `/bc-dashboard resume` does the same from the prompt: with several sessions it asks which, and `resume <n>` takes the nth newest. Where the clipboard can't be reached, the command is shown to type instead.
 - Transcripts are often tens of MB, past the 4 MiB a mod can read at once, so `scripts/scan-sessions.pl` reads them a line at a time and returns only each session's totals and the commands that name a Companion script. It needs Perl, which macOS and Linux have. **On Windows, run Claude Code in WSL.**
 
@@ -206,6 +208,7 @@ Boomi Companion sessions on this machine, last 90 days:
 | `/bc-dashboard report [save]` | `report` | The session report. |
 | `/bc-dashboard history` | `history` | Past Companion sessions and their cost. |
 | `/bc-dashboard resume [n]` | | Copies the command that reopens a past session in a new terminal; without a number, asks which. |
+| `/bc-dashboard review [n]` | | What drove a past session's cost, and what to change next time; without a number, asks which of the costliest. |
 | `/bc-dashboard theme [name]` | | Picks the pane's theme, or lists them. |
 | `/bc-dashboard banner` | | Shows the banner again after **Hide**. |
 

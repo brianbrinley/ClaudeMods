@@ -81,6 +81,10 @@ is($s->{firstPrompt}, 'Build the orders sync process', 'its first request, on on
 is($s->{title}, undef, 'no title unless the session has one');
 is($s->{startedAt}, '2026-10-01T10:00:00Z', 'from its first reply');
 is($s->{endedAt}, '2026-10-01T11:00:00Z', 'to its last');
+is($s->{prompts}, 2, "counts the person's prompts, not meta notes or command echoes");
+is($s->{peakContext}, 350, "its peak context: the largest prompt one call of the main conversation sent");
+is($s->{subagentTokens}, 70, "its subagents' new tokens, apart");
+like($s->{file}, qr{/-work-orders/\Q$built\E\.jsonl\z}, 'its main transcript, for a closer look');
 
 # A title the session was given wins.
 write_lines("$root/-work-orders/$built.jsonl",
@@ -100,6 +104,19 @@ write_lines("$root/-work-mdm/$datahub.jsonl",
     content => [$bash->('bash scripts/datahub-deployment.sh deploy u-1 r-1 --version 2')]));
 my @all = @{ $json->decode(`perl $script --root $root`)->{sessions} };
 ok((grep { $_->{id} eq $datahub } @all), "counts a session that ran only a Data Hub script");
+
+# Each time the conversation compacted is counted; the summary that follows isn't a prompt.
+my $long = 'eeeeeeee-0000-0000-0000-000000000001';
+write_lines("$root/-work-long/$long.jsonl",
+  { type => 'user', sessionId => $long, message => { content => 'Build it' } },
+  reply(session => $long, at => '2026-10-03T10:00:00Z', id => 'msg_l1', request => 'req_l1',
+    content => [$bash->('bash scripts/boomi-component-push.sh active-development/x/A.xml')]),
+  { type => 'system', subtype => 'compact_boundary', sessionId => $long, timestamp => '2026-10-03T11:00:00Z' },
+  { type => 'user', sessionId => $long, isCompactSummary => JSON::PP::true, message => { content => 'This session is being continued...' } },
+  { type => 'system', subtype => 'compact_boundary', sessionId => $long, timestamp => '2026-10-03T12:00:00Z' });
+my ($compacted) = grep { $_->{id} eq $long } @{ $json->decode(`perl $script --root $root`)->{sessions} };
+is($compacted->{compactions}, 2, 'counts each time the conversation compacted');
+is($compacted->{prompts}, 1, "a compaction's summary isn't a prompt");
 
 my $none = $json->decode(`perl $script --root $root/missing`);
 is($none->{error}, 'no transcripts folder', 'a missing folder is an empty answer, not a failure');

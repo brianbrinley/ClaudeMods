@@ -97,6 +97,7 @@ import {
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { bdiRunId, bdiRunReading, bdiStatusChecks, recipeComponents } from './products'
+import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import type { Credentials } from './platform'
 
 type Engine = EngineInterface
@@ -162,6 +163,9 @@ const history = atom({ plugin: 'boomi-dashboard', key: 'history' } as const, { p
 /** How many of Claude's latest steps the pane lists: More adds a page, Fewer goes back to one. */
 const STEPS_PAGE = 6
 const stepsShown = atom({ plugin: 'boomi-dashboard', key: 'stepsShown' } as const, STEPS_PAGE)
+
+/** The past session whose cost review is open in the pane. */
+const reviewing = atom({ plugin: 'boomi-dashboard', key: 'reviewing' } as const, null as string | null)
 
 /** The past session whose resume command was last copied, and whether the copy took. */
 const copied = atom({ plugin: 'boomi-dashboard', key: 'copied' } as const, null as { id: string; isCopied: boolean } | null)
@@ -1114,6 +1118,48 @@ const resumeCommandFor = async ($: Engine, settings: Settings, target: string): 
     : `Run this in a new terminal to reopen that session:\n  ${command}`
 }
 
+/** Puts the request for Claude's closer look at a past session's cost in the prompt box, after whatever is typed there. */
+const askToReview = async ($: Engine, s: PastSession) => {
+  const draft = await $.prompt.read().catch(() => ({ text: '', cursor: 0 }))
+  const text = reviewPrompt(s)
+  await $.prompt.fill({ text: draft.text.trim() ? `\n${text}` : text, mode: draft.text.trim() ? 'append' : 'replace' }).catch(() => undefined)
+}
+
+/**
+ * /bc-dashboard review [number]: a past session's cost review, numbered as
+ * Past Companion sessions lists them, newest first. Without a number it asks
+ * which of the four costliest of the last 30 days, or lists them.
+ */
+const reviewCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  if ((await read($, history)).sessions === undefined) await scanHistory($, settings)
+  const sessions = (await read($, history)).sessions
+  if (sessions === undefined) return (await read($, history)).error ?? 'The transcript scan failed.'
+  if (sessions.length === 0) return `No Companion sessions on this machine from the last ${settings.historyDays} days to review.`
+  const view = { currentId: await $.session.id().catch(() => undefined) }
+  const numbered = sessions.map((s, i) => ({ s, n: i + 1 }))
+  const listed = () => ['Which session? Run /bc-dashboard review <number>:', ...numbered.slice(0, 20).map(({ s, n }) => `  ${reviewLabel(s, n)}`)].join('\n')
+  let picked: PastSession | undefined
+  if (target) {
+    picked = sessions[Number(target.replace(/^#/, '')) - 1]
+    if (!picked) return `${target} isn't one of these.\n${listed()}`
+  } else {
+    const now = await $.clock.now()
+    const costly = numbered
+      .filter(({ s }) => s.startedAt && now - Date.parse(s.startedAt) <= 30 * 86_400_000)
+      .sort((a, b) => (b.s.costUsd ?? 0) - (a.s.costUsd ?? 0))
+      .slice(0, 4)
+    if (costly.length === 1) picked = costly[0]!.s
+    else if (costly.length > 1) {
+      const labels = costly.map(({ s, n }) => reviewLabel(s, n))
+      const answer = await $.ui.ask('Which session should the dashboard review?', { header: 'Review', options: labels }).catch(() => undefined)
+      const typed = answer?.trim().replace(/^#|\.$/g, '')
+      picked = answer === undefined ? undefined : (costly[labels.indexOf(answer)]?.s ?? sessions[Number(typed) - 1])
+    }
+    if (!picked) return listed()
+  }
+  return reviewText(picked, view)
+}
+
 // --- The session report ------------------------------------------------------------
 
 const reportNow = async ($: Engine, settings: Settings) => {
@@ -1209,6 +1255,7 @@ const USAGE = [
   '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
   '/bc-dashboard history         past Companion sessions on this machine and what each cost',
   '/bc-dashboard resume [n]      copy the command that reopens a past session in a new terminal',
+  '/bc-dashboard review [n]      what made a past session cost what it did, and what to change next time',
   '/bc-dashboard seen            mark watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
@@ -1285,6 +1332,8 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return historyCommand($, settings)
     case 'resume':
       return resumeCommandFor($, settings, target)
+    case 'review':
+      return reviewCommand($, settings, target)
     case 'reopen':
       return reopen($, settings)
     case 'earlier':
@@ -1381,7 +1430,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
+      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
     })
     await $.tool.register({
       name: 'summary',
@@ -1635,6 +1684,7 @@ export const register: Register = (on, options) => {
     const past = await read($, history)
     const shown = await read($, historyShown)
     const copiedNow = await read($, copied)
+    const reviewingNow = await read($, reviewing)
     const sessionId = await $.session.id().catch(() => undefined)
     const footer = await footerOf($)
     const p = PALETTES[themeNow]
@@ -1891,7 +1941,7 @@ export const register: Register = (on, options) => {
           )}
         </Box>
         {past.phase === 'idle' && note(`What earlier Companion sessions on this machine cost, from Claude Code's transcripts. Scan reads the last ${settings.historyDays} days.`)}
-        {past.sessions && past.sessions.length > 0 && note('Copy puts the command that reopens a session on the clipboard, for a new terminal.')}
+        {past.sessions && past.sessions.length > 0 && note('Review shows what made a session cost what it did. Copy puts the command that reopens it on the clipboard, for a new terminal.')}
         {past.phase === 'loading' && note('Reading the transcripts…')}
         {past.phase === 'error' && line('warning', past.error ?? 'The transcript scan failed.')}
         {past.sessions && past.sessions.length === 0 && note(`No Companion sessions in the last ${settings.historyDays} days.`)}
@@ -1914,16 +1964,39 @@ export const register: Register = (on, options) => {
                           {t(`  ${head}`)}
                         </Text>
                       </Box>
-                      {!isThis && (
-                        <Box flexShrink={0}>
-                          {t(' ')}
-                          <Button key={`history-copy-${i}`} label="Copy" onPress={press => void copyResume($, s, press.surface)} />
-                        </Box>
-                      )}
+                      <Box flexShrink={0}>
+                        {t(' ')}
+                        <Button
+                          key={`history-review-${i}`}
+                          label={reviewingNow === s.id ? 'Close' : 'Review'}
+                          onPress={() => update($, reviewing, now => (now === s.id ? null : s.id))}
+                        />
+                        {!isThis && <Button key={`history-copy-${i}`} label="Copy" onPress={press => void copyResume($, s, press.surface)} />}
+                      </Box>
                     </Box>
                     <Text backgroundColor={p.bg} wrap="truncate-end">
                       {t(`      ${detail}`, { color: p.muted })}
                     </Text>
+                    {reviewingNow === s.id &&
+                      (() => {
+                        const review = reviewSession(s)
+                        return (
+                          <Box flexDirection="column">
+                            {t(`      ${review.summary}`, { color: p.accent })}
+                            {review.findings.length === 0 && line('healthy', 'Nothing stands out: its cost came from the work itself.')}
+                            {review.findings.map(f => (
+                              <Box flexDirection="column">
+                                {line(f.level, f.title)}
+                                {t(`      ${f.tip}`, { color: p.muted })}
+                              </Box>
+                            ))}
+                            <Box>
+                              {t('      ')}
+                              <Button key={`history-ask-${i}`} label="Ask Claude to review" onPress={() => void askToReview($, s)} />
+                            </Box>
+                          </Box>
+                        )
+                      })()}
                     {copiedNow?.id === s.id &&
                       (copiedNow.isCopied
                         ? line('healthy', 'Copied. Paste it into a new terminal to reopen this session.')

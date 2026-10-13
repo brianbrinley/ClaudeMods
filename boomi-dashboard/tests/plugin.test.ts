@@ -1358,3 +1358,67 @@ test('/bc-dashboard size asks for a pane size, keeps it, and goes back to the de
   await $.command.run(dashboard())
   expect(opens.at(-1)?.rows).toBeUndefined()
 })
+
+const COSTLY_SCANNED = JSON.stringify({
+  version: 1,
+  scanned: 2,
+  sessions: [
+    { id: 'cheap-1', project: '/work', startedAt: '2026-10-11T09:00:00Z', costUsd: 0.5, commands: [`bash scripts/boomi-component-push.sh ${FILE}`], prompts: 4, models: { 'claude-sonnet-5-5': { input: 1000, output: 1000 } } },
+    {
+      id: 'costly-2',
+      project: '/work',
+      startedAt: '2026-10-10T09:00:00Z',
+      costUsd: 20.1,
+      commands: Array(5).fill(`bash scripts/boomi-test-execute.sh --process-id ${ID}`),
+      prompts: 30,
+      peakContext: 150_000,
+      models: { 'claude-opus-5-5': { input: 10_000, output: 90_000, cacheRead: 2_000_000, cacheWrite: 50_000 } },
+      file: '/home/me/.claude/projects/-work/costly-2.jsonl',
+    },
+  ],
+})
+
+test('Review on a past session shows what drove its cost, and Ask Claude to review drafts the request', async ($, on) => {
+  world(on)
+  mock.store(on)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: COSTLY_SCANNED, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const fills: string[] = []
+  on('prompt.read', async () => ({ value: { text: '', cursor: 0 } }))
+  on('prompt.fill', async (_$, e) => {
+    fills.push(String(e.text))
+    return { isFilled: true }
+  })
+  await $.command.run(dashboard('history'))
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect((await pane.find({ type: 'Button', key: 'history-review-1' }))?.props.label).toBe('Review')
+  await pane.press({ key: 'history-review-1' })
+  expect(await pane.find({ text: /Opus 5\.5 did 100% of the work/ })).toBeDefined()
+  expect(await pane.find({ text: /was tested 5 times/ })).toBeDefined()
+  expect(await pane.find({ text: /reached 150k tokens of context/ })).toBeDefined()
+  await pane.press({ key: 'history-ask-1' })
+  expect(fills.at(-1)).toContain('Review my earlier Claude Code session costly-2')
+  expect(fills.at(-1)).toContain('/home/me/.claude/projects/-work/costly-2.jsonl')
+  // Close folds it again.
+  await pane.press({ key: 'history-review-1' })
+  expect(await pane.find({ text: /did 100% of the work/ })).toBeUndefined()
+})
+
+test('/bc-dashboard review takes a number, or asks which of the costliest recent sessions', async ($, on) => {
+  world(on)
+  mock.store(on)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: COSTLY_SCANNED, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const asked: string[][] = []
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    const q = e.questions[0]!
+    asked.push(q.options.map(o => o.label))
+    return { result: { questions: [q], answers: { [q.question]: q.options[0]!.label } } as never }
+  })
+  const one = (await $.command.run(dashboard('review 1'))).text ?? ''
+  expect(one).toContain('✓ Nothing stands out')
+  const picked = (await $.command.run(dashboard('review'))).text ?? ''
+  // The costliest first.
+  expect(asked[0]![0]).toMatch(/^2\. .*\$20/)
+  expect(picked).toContain('$20 · 30 prompts')
+  expect(picked).toContain('Switch with /model')
+  expect((await $.command.run(dashboard('review 9'))).text).toContain("9 isn't one of these.")
+})

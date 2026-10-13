@@ -1443,6 +1443,11 @@ export type ScannedSession = {
   commands?: string[]
   title?: string
   firstPrompt?: string
+  prompts?: number
+  peakContext?: number
+  compactions?: number
+  subagentTokens?: number
+  file?: string
 }
 
 const fileName = (path: string) => (path.split('/').pop() ?? path).replace(/\.xml$/, '')
@@ -1459,10 +1464,18 @@ export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession
     const products: Partial<Record<Product, number>> = {}
     const files = new Set<string>()
     const ids = new Set<string>()
+    // The same step on the same component, counted, for the cost review.
+    const repeats = new Map<string, { name: string; kind: ActivityKind; count: number }>()
     for (const command of s.commands ?? []) {
       for (const run of scriptRuns(command)) {
         if (run.product) products[run.product] = (products[run.product] ?? 0) + 1
         if (run.kind === 'other') continue
+        const which = run.file ? fileName(run.file) : (run.processId ?? run.componentId)
+        if (which && (run.kind === 'test' || run.kind === 'push' || run.kind === 'deploy')) {
+          const key = `${run.kind}|${which}`
+          const seen = repeats.get(key) ?? { name: which.length > 12 && !run.file ? `${which.slice(0, 8)}…` : which, kind: run.kind, count: 0 }
+          repeats.set(key, { ...seen, count: seen.count + 1 })
+        }
         runs[run.kind] = (runs[run.kind] ?? 0) + 1
         if (run.file) files.add(fileName(run.file))
         else if (run.processId ?? run.componentId) ids.add((run.processId ?? run.componentId)!)
@@ -1483,6 +1496,13 @@ export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession
       models: models.map(([id]) => modelName(id) ?? id),
       runs,
       ...(Object.keys(products).length > 0 ? { products } : {}),
+      ...(typeof s.prompts === 'number' ? { prompts: s.prompts } : {}),
+      ...(typeof s.peakContext === 'number' ? { peakContext: s.peakContext } : {}),
+      ...(typeof s.compactions === 'number' ? { compactions: s.compactions } : {}),
+      ...(typeof s.subagentTokens === 'number' ? { subagentTokens: s.subagentTokens } : {}),
+      ...(s.file ? { file: s.file } : {}),
+      modelTokens: Object.fromEntries(models.map(([id, m]) => [id, (m.input ?? 0) + (m.output ?? 0) + (m.cacheWrite ?? 0)])),
+      repeats: [...repeats.values()].filter(r => r.count >= 3).sort((a, b) => b.count - a.count),
       // A file names a component; an ID only when the session named no file.
       components: files.size > 0 ? [...files] : [...ids].map(id => (id.length > 12 ? `${id.slice(0, 8)}…` : id)),
       label: s.title || s.firstPrompt || undefined,
