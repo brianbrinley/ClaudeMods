@@ -1487,3 +1487,79 @@ test('Data Hub quarantine Claude looks at is kept per universe: records in it ne
   expect(cleared).toContain('✓ Universe 7c1e9a40…: nothing in quarantine')
   expect(cleared).toContain('✓ Nothing needs attention.')
 })
+
+test('an Agentstudio agent shows its stages, and its test conversations with how they ended', async ($, on) => {
+  world(on)
+  const AGENT = '5d1c2b3a-aaaa-4bbb-8ccc-0123456789ab'
+  const AS = 'bash scripts'
+  const create = `${AS}/agentstudio-agent.sh create --body active-development/feedback/agent.json`
+  const update = `${AS}/agentstudio-agent.sh update ${AGENT} --body active-development/feedback/agent.json`
+  const pack = `${AS}/agentstudio-deployment.sh package-create ${AGENT}`
+  const deploy = `${AS}/agentstudio-deployment.sh deploy ${AGENT} --package pkg-1`
+  const talk = `${AS}/agentstudio-session.sh invoke --deployment dep-7 --message "Where is order 42?"`
+  const more = `${AS}/agentstudio-session.sh continue --deployment dep-7 --session 01KSFE6WT8G0SHSTCRWAC28WN8 --message "And 43?"`
+  const replies: Record<string, { out: string; isError?: boolean }> = {
+    [create]: { out: JSON.stringify({ id: AGENT, name: 'Support Triage', agent_status: 'DRAFT' }) },
+    [update]: { out: JSON.stringify({ id: AGENT, name: 'Support Triage', agent_status: 'DRAFT' }) },
+    [pack]: { out: JSON.stringify({ id: 'pkg-1', agent_id: AGENT, version: 1 }) },
+    [deploy]: { out: JSON.stringify({ id: 'dep-7', package_id: 'pkg-1', status: 'ACTIVE' }) },
+    // A conversational agent streams its reply; its answer may say anything.
+    [talk]: { out: `event: message\ndata: {"session_id":"01KSFE6WT8G0SHSTCRWAC28WN8","content":"Component 'Orders' says ERROR: none"}\n\n` },
+    [more]: { out: 'ERROR: HTTP 504\n{"detail":"timeout"}', isError: true },
+  }
+  on('tool.call', { tool: 'Bash' }, async (_$, e) => {
+    const found = replies[String(e.command)] ?? { out: '' }
+    return found.isError ? { isError: true as const, result: found.out, text: found.out } : { result: { stdout: found.out, stderr: '', interrupted: false } }
+  })
+
+  await $.tool.call({ tool: 'Bash', command: create })
+  let text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('✓ Agentstudio: created agent Support Triage')
+  expect(text).toContain('Agentstudio agents:\n  Support Triage: ✓ created')
+
+  await $.tool.call({ tool: 'Bash', command: pack })
+  await $.tool.call({ tool: 'Bash', command: deploy })
+  text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('✓ Agentstudio: packaged agent Support Triage')
+  expect(text).toContain('✓ Agentstudio: deployed agent Support Triage')
+  expect(text).toContain('Support Triage: ✓ created  ✓ packaged v1  ✓ deployed')
+
+  await $.tool.call({ tool: 'Bash', command: talk })
+  text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('✓ Agentstudio: started a test conversation with Support Triage')
+  expect(text).toContain('✓ 1 test conversation, 1 turn, all answered')
+  expect(text).toContain('✓ Nothing needs attention.')
+
+  await $.tool.call({ tool: 'Bash', command: more })
+  text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('✗ Agentstudio: a test conversation with Support Triage failed')
+  expect(text).toContain('✗ 1 test conversation, 2 turns; the last failed')
+  expect(text).toContain('ERROR: HTTP 504')
+
+  // An edit after packaging isn't live until a new package is deployed.
+  await clock.advance(60_000)
+  await $.tool.call({ tool: 'Bash', command: update })
+  text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('Support Triage: ✓ updated  ✓ packaged v1  ✓ deployed  ◐ changed since packaged  ✗ 1 test conversation, 2 turns; the last failed')
+  expect((await $.command.run(dashboard('report'))).text).toContain('## Agentstudio agents (1)')
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ type: 'Text', text: 'AGENTSTUDIO AGENTS' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Support Triage' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: ' changed since packaged   ' })).toBeDefined()
+})
+
+test('an Agentstudio response that says success: false fails its step, and package-create --deploy counts as deployed', async ($, on) => {
+  world(on)
+  const pack = 'bash scripts/agentstudio-deployment.sh package-create agent-1 --deploy'
+  let out = JSON.stringify({ success: false, error: '1 tool(s) remain inactive.' })
+  on('tool.call', { tool: 'Bash' }, async () => ({ result: { stdout: out, stderr: '', interrupted: false } }))
+  await $.tool.call({ tool: 'Bash', command: pack })
+  let text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain("✗ Agentstudio: couldn't package agent agent-1")
+  expect(text).toContain('ERROR: 1 tool(s) remain inactive.')
+  expect(text).toContain('agent-1: ✗ packaging failed')
+  out = JSON.stringify({ package_id: 'pkg-2', version: 2, deployment_id: 'dep-2' })
+  await $.tool.call({ tool: 'Bash', command: pack })
+  text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('agent-1: ✓ packaged v2  ✓ deployed')
+})

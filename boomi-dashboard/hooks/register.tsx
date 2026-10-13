@@ -78,6 +78,10 @@ import {
   recapOf,
   welcomeLine,
   quarantineLines,
+  agents,
+  agentStages,
+  agentName,
+  agentOfDeployment,
   budgetLines,
   shareView,
   monthSpend,
@@ -97,7 +101,7 @@ import {
 } from './activity'
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
-import { bdiRunId, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
+import { agentstudioReading, bdiRunId, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import type { Credentials } from './platform'
 
@@ -497,6 +501,14 @@ const subjectOf = async ($: Engine, settings: Settings, run: ScriptRun, current:
     const watched = current.watched.find(w => w.componentId === id)
     return { subject: known?.subject ?? watched?.name ?? id, componentId: id, type: known?.type, file: known?.file }
   }
+  if (run.product === 'agentstudio' && run.ref) {
+    // A test conversation names its deployment; the deploy that made it names the agent.
+    if (run.script === 'agentstudio-session') {
+      const agentId = agentOfDeployment(current.activity, run.ref)
+      return { subject: (agentId && agentName(current.activity, agentId)) || `deployment ${run.target}`, deploymentId: run.ref }
+    }
+    return { subject: agentName(current.activity, run.ref) ?? run.target ?? '' }
+  }
   if (run.product) return { subject: run.target ?? '' }
   return { subject: run.deploymentId ? `deployment ${run.deploymentId}` : run.kind === 'other' ? (run.script ?? 'a Companion script') : 'a component' }
 }
@@ -528,6 +540,45 @@ const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun
 }
 
 type Ran = { deny?: string; text?: string; result?: unknown; isError?: boolean }
+
+/**
+ * An Agentstudio step's response, when it was the command's only script run:
+ * a new agent's ID and name, a package's version and the deployment
+ * package-create --deploy or deploy made, a conversation's session. A 2xx
+ * that says success: false failed. The reply's own words never rename the
+ * step: an agent's answer may say anything.
+ */
+const readAgentstudio = (a: Activity, before: Activity, output: string) => {
+  a.subject = before.subject
+  if (!output) return
+  const r = agentstudioReading(output)
+  if (r.error && a.outcome === 'ok') {
+    a.outcome = 'failed'
+    a.detail = `ERROR: ${r.error}`.slice(0, 160)
+  }
+  if (a.outcome !== 'ok') return
+  if (a.script === 'agentstudio-agent') {
+    if (a.verb === 'create' && r.id) a.ref = r.id
+    if (r.name) a.subject = r.name
+    if (a.ref) a.detail = `agent ${a.ref}`
+  } else if (a.script === 'agentstudio-deployment' && a.verb === 'package-create') {
+    if (r.agentName) a.subject = r.agentName
+    if (r.version) a.version = r.version
+    if (r.deploymentId) a.deploymentId = r.deploymentId
+    const pkg = r.packageId ?? r.id
+    a.detail = [pkg ? `package ${pkg}` : 'packaged', r.version ? `v${r.version}` : '', r.deploymentId ? `deployed as ${r.deploymentId}` : ''].filter(Boolean).join(', ')
+  } else if (a.script === 'agentstudio-deployment' && a.verb === 'deploy') {
+    if (r.agentName) a.subject = r.agentName
+    const deployment = r.deploymentId ?? r.id
+    if (deployment) {
+      a.deploymentId = deployment
+      a.detail = `deployment ${deployment}`
+    }
+  } else if (a.script === 'agentstudio-session') {
+    if (r.sessionId) a.sessionId = r.sessionId
+    a.detail = r.sessionId ? `answered, session ${r.sessionId}` : 'answered'
+  }
+}
 
 /** Reads how each run went from the command's output, or the refusal that stopped it. */
 const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity[], ran: Ran) => {
@@ -588,6 +639,7 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
         a.detail = `ERROR: the deployment ended ${status}`
       } else if (deploymentId) a.detail = `deployment ${deploymentId}${status ? `: ${status}` : ''}`
     }
+    if (a.product === 'agentstudio' && ran.deny === undefined) readAgentstudio(a, started.find(s => s.id === a.id)!, started.length === 1 ? output : '')
     if (a.product === 'bdi' && a.verb === 'run' && a.outcome === 'ok') {
       const runId = bdiRunId(output)
       if (runId) {
@@ -1769,6 +1821,7 @@ export const register: Register = (on, options) => {
     const closedItems = closedCount(current, now, settings.windowMs)
     const whys = await read($, diagnoses)
     const rows = components(current.activity)
+    const agentRows = agents(current.activity)
     const stepsLimit = await read($, stepsShown)
     const steps = current.activity.filter(a => !a.recipe).reverse()
     const feed = steps.slice(0, stepsLimit)
@@ -1982,6 +2035,33 @@ export const register: Register = (on, options) => {
           )
         })}
         {rows.length > 8 && t(`…and ${rows.length - 8} more: /bc-dashboard lists them all.`, { color: p.muted })}
+
+        {agentRows.length > 0 && heading('Agentstudio agents')}
+        {agentRows.slice(0, 6).map(row => {
+          const spent = formatSpend(spendOf(row.ids, all))
+          return (
+            <Box flexDirection="column">
+              <Box justifyContent="space-between">
+                <Box flexShrink={1}>
+                  <Text backgroundColor={p.bg} wrap="truncate-end">
+                    {t(row.name, { bold: true })}
+                  </Text>
+                </Box>
+                {spent ? <Box flexShrink={0}>{t(`  ${spent}`, { color: p.muted })}</Box> : undefined}
+              </Box>
+              <Text backgroundColor={p.bg}>
+                {t('  ')}
+                {agentStages(row).map(s => (
+                  <Text backgroundColor={p.bg}>
+                    {icon(s.level)}
+                    {t(` ${s.text}   `)}
+                  </Text>
+                ))}
+              </Text>
+            </Box>
+          )
+        })}
+        {agentRows.length > 6 && t(`…and ${agentRows.length - 6} more: /bc-dashboard lists them all.`, { color: p.muted })}
 
         {feed.length > 0 && heading("Claude's latest steps")}
         {feed.length > 0 && note('What Claude just did with Companion, newest first, and the tokens each step took.')}

@@ -537,6 +537,13 @@ export const describe = (a: Activity): string => {
     if (state === 'pending') return `Data Hub: universe ${a.subject} deploying`
     if (state === 'failed') return `Data Hub: deploy of universe ${a.subject} failed`
   }
+  if (isConversation(a)) {
+    const who = a.subject || 'an agent'
+    if (a.outcome === 'running') return `Agentstudio: talking to ${who}…`
+    if (a.outcome === 'failed') return `Agentstudio: a test conversation with ${who} failed`
+    if (a.outcome === 'blocked') return `Blocked: a test conversation with ${who}`
+    return `Agentstudio: ${a.verb === 'continue' ? 'continued' : 'started'} a test conversation with ${who}`
+  }
   if (a.product && a.script && a.verb !== undefined) {
     const run = { product: a.product, script: a.script, verb: a.verb, subject: a.subject }
     if (a.outcome === 'running') return productWords(run, 'doing')
@@ -645,6 +652,114 @@ export const components = (activity: readonly Activity[]): ComponentRow[] => {
 }
 
 export type Stage = { level: Level; text: string }
+
+// --- Agentstudio agents ---------------------------------------------------------
+
+/** A turn of a test conversation with a deployed Agentstudio agent. */
+const isConversation = (a: Activity) => a.product === 'agentstudio' && a.script === 'agentstudio-session' && (a.verb === 'invoke' || a.verb === 'continue')
+
+/** An Agentstudio step on an agent itself: authored, packaged or deployed. Its `ref` is the agent's ID. */
+const isAgentStep = (a: Activity) =>
+  a.product === 'agentstudio' &&
+  ((a.script === 'agentstudio-agent' && (a.verb === 'create' || a.verb === 'update')) ||
+    (a.script === 'agentstudio-deployment' && (a.verb === 'package-create' || a.verb === 'deploy')))
+
+/** An agent's name as Claude's steps learned it, by its ID. */
+export const agentName = (activity: readonly Activity[], agentId: string): string | undefined =>
+  [...activity].reverse().find(a => isAgentStep(a) && a.ref === agentId && a.subject && !agentId.startsWith(a.subject.replace(/…$/, '')))?.subject
+
+/** The agent a deployment belongs to, from the deploy that made it. */
+export const agentOfDeployment = (activity: readonly Activity[], deploymentId: string): string | undefined =>
+  [...activity].reverse().find(a => isAgentStep(a) && a.deploymentId === deploymentId && a.ref)?.ref
+
+/** One Agentstudio agent this session: its latest authoring, packaging and deploy, and its test conversations. */
+export type AgentRow = {
+  key: string
+  name: string
+  agentId?: string
+  authored?: Activity
+  packaged?: Activity
+  deployed?: Activity
+  /** Every turn of its test conversations, oldest first. */
+  turns: Activity[]
+  lastAt: number
+  ids: number[]
+}
+
+/**
+ * The session's Agentstudio agents, newest first. Steps on an agent group by
+ * its ID; a test conversation joins the agent whose deployment it talked
+ * to, else a row of its own for that deployment.
+ */
+export const agents = (activity: readonly Activity[]): AgentRow[] => {
+  const rows = new Map<string, AgentRow>()
+  for (const a of activity) {
+    const conversation = isConversation(a)
+    if (!conversation && !isAgentStep(a)) continue
+    const agentId = conversation ? (a.deploymentId ? agentOfDeployment(activity, a.deploymentId) : undefined) : a.ref
+    const key = agentId ? `agent:${agentId}` : conversation && a.deploymentId ? `deployment:${a.deploymentId}` : undefined
+    if (!key) continue
+    const name = agentId ? (agentName(activity, agentId) ?? (agentId.length > 14 ? `${agentId.slice(0, 8)}…` : agentId)) : a.subject
+    const row: AgentRow = rows.get(key) ?? { key, name, ...(agentId ? { agentId } : {}), turns: [], lastAt: a.startedAt, ids: [] }
+    row.name = name
+    row.ids.push(a.id)
+    row.lastAt = Math.max(row.lastAt, a.endedAt ?? a.startedAt)
+    if (conversation) row.turns.push(a)
+    else if (a.verb === 'create' || a.verb === 'update') row.authored = a
+    else if (a.verb === 'package-create') {
+      row.packaged = a
+      // Packaged with --deploy: the response named the deployment, so it's deployed too.
+      if (a.deploymentId && a.outcome === 'ok') row.deployed = a
+    } else row.deployed = a
+    rows.set(key, row)
+  }
+  return [...rows.values()].sort((a, b) => b.lastAt - a.lastAt)
+}
+
+/** An agent's journey as short steps, each with an icon and a label, as a component's are. */
+export const agentStages = (row: AgentRow): Stage[] => {
+  const out: Stage[] = []
+  const { authored, packaged, deployed, turns } = row
+  const okAt = (a: Activity | undefined) => (a && a.outcome === 'ok' ? when(a) : undefined)
+  if (authored) {
+    const verb = authored.verb === 'create' ? 'create' : 'update'
+    if (authored.outcome === 'running') out.push({ level: 'warning', text: 'saving…' })
+    else if (authored.outcome === 'blocked') out.push({ level: 'serious', text: `${verb} blocked` })
+    else if (authored.outcome === 'failed') out.push({ level: 'critical', text: `${verb} failed` })
+    else out.push({ level: 'healthy', text: verb === 'create' ? 'created' : 'updated' })
+  }
+  if (packaged) {
+    if (packaged.outcome === 'running') out.push({ level: 'warning', text: 'packaging…' })
+    else if (packaged.outcome === 'blocked') out.push({ level: 'serious', text: 'packaging blocked' })
+    else if (packaged.outcome === 'failed') out.push({ level: 'critical', text: 'packaging failed' })
+    else out.push({ level: 'healthy', text: packaged.version ? `packaged v${packaged.version}` : 'packaged' })
+  }
+  if (deployed && deployed !== packaged) {
+    if (deployed.outcome === 'running') out.push({ level: 'warning', text: 'deploying…' })
+    else if (deployed.outcome === 'blocked') out.push({ level: 'serious', text: 'deploy blocked' })
+    else if (deployed.outcome === 'failed') out.push({ level: 'critical', text: 'deploy failed' })
+    else out.push({ level: 'healthy', text: 'deployed' })
+  } else if (deployed) out.push({ level: 'healthy', text: 'deployed' })
+  // Edits go live only through a new package, deployed: say which step is still to do.
+  const authoredAt = okAt(authored)
+  const packagedAt = okAt(packaged)
+  const deployedAt = okAt(deployed)
+  if (authoredAt !== undefined && packagedAt !== undefined && authoredAt > packagedAt) out.push({ level: 'warning', text: 'changed since packaged' })
+  else if (authoredAt !== undefined && deployedAt !== undefined && packagedAt === undefined && authoredAt > deployedAt) out.push({ level: 'warning', text: 'changes not live' })
+  else if (packagedAt !== undefined && deployedAt !== undefined && packagedAt > deployedAt) out.push({ level: 'warning', text: 'new package not deployed' })
+  const done = turns.filter(t => t.outcome !== 'running')
+  if (turns.some(t => t.outcome === 'running')) out.push({ level: 'warning', text: 'talking…' })
+  if (done.length > 0) {
+    const conversations = Math.max(1, done.filter(t => t.verb === 'invoke').length)
+    const failed = done.filter(t => t.outcome === 'failed' || t.outcome === 'blocked').length
+    const last = done[done.length - 1]!
+    const what = `${plural(conversations, 'test conversation')}, ${plural(done.length, 'turn')}`
+    if (last.outcome === 'failed' || last.outcome === 'blocked') out.push({ level: 'critical', text: `${what}; the last failed` })
+    else if (failed > 0) out.push({ level: 'warning', text: `${what}; ${failed} failed` })
+    else out.push({ level: 'healthy', text: `${what}, all answered` })
+  }
+  return out
+}
 
 const when = (a: Activity) => a.endedAt ?? a.startedAt
 
@@ -1091,6 +1206,15 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   const byProduct = productSpendLine(dashboard.activity, all)
   if (byProduct) lines.push(`  ${byProduct}`)
 
+  const agentRows = agents(dashboard.activity)
+  if (agentRows.length > 0) {
+    lines.push('', 'Agentstudio agents:')
+    for (const row of agentRows) {
+      const spent = formatSpend(spendOf(row.ids, all))
+      lines.push(`  ${row.name}: ${agentStages(row).map(s => `${STATUS[s.level].icon} ${s.text}`).join('  ')}${spent ? `  [${spent}]` : ''}`)
+    }
+  }
+
   const feed = dashboard.activity.filter(a => !a.recipe).slice(-8).reverse()
   if (feed.length > 0) {
     lines.push('', "Claude's latest steps (what Claude just did with Companion, newest first):")
@@ -1462,6 +1586,17 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
       lines.push(
         `| ${cell(row.name)} | ${cell(friendlyType(row.type) ?? '')} | ${cell(where)} | ${spent.tokens ? formatTokens(spent.tokens) : ''} | ${formatCost(spent.usd) ?? ''} |`,
       )
+    }
+  }
+
+  const agentRows = agents(dashboard.activity)
+  if (agentRows.length > 0) {
+    lines.push('', `## Agentstudio agents (${agentRows.length})`, '')
+    lines.push('| Agent | Where it stands | Tokens | Cost |', '|---|---|---|---|')
+    for (const row of agentRows) {
+      const spent = spendOf(row.ids, all)
+      const where = agentStages(row).map(s => `${STATUS[s.level].icon} ${s.text}`).join(' · ')
+      lines.push(`| ${cell(row.name)} | ${cell(where)} | ${spent.tokens ? formatTokens(spent.tokens) : ''} | ${formatCost(spent.usd) ?? ''} |`)
     }
   }
 

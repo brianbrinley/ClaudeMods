@@ -87,7 +87,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **G2. BDI.** Have Claude run a flow.
   **Pass:** `✓ BDI: ran flow …`. If it fails, `✗ BDI: couldn't run flow …` under **Needs attention** with the `ERROR:` line. **Fail:** nothing, or a pass for a failed run.
 - [ ] **G3. Agentstudio.** Have Claude deploy an agent and talk to it.
-  **Pass:** `✓ Agentstudio: deployed agent …` and `✓ Agentstudio: talked to deployment …`. **Fail:** nothing.
+  **Pass:** `✓ Agentstudio: deployed agent …` and `✓ Agentstudio: started a test conversation with …`. **Fail:** nothing.
 - [ ] **G4. Connectors.** Have Claude validate a connector descriptor and upload a version.
   **Pass:** `Connectors: validated connector descriptor …` (◐ if it was accepted with warnings) and `✓ Connectors: uploaded a version to connector group …`. **Fail:** nothing, or ✓ when the script warned.
 - [ ] **G5. Marketplace.** Have Claude install a recipe.
@@ -107,6 +107,10 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** `◐ Data Hub: universe … deploying`, then `✓ Data Hub: deployed universe …`. **Fail:** it stays ◐, or a success reads as failed; send the deploy's and the status check's output, so the status words can be confirmed.
 - [ ] **G12. Data Hub quarantine.** Send a record that quarantines (a missing required field), then have Claude list the universe's quarantine.
   **Pass:** a **Data Hub** section with `1 in quarantine (1 REQUIRED_FIELD)`, and the item under **Needs attention** with the reason. After the record is deleted from quarantine and Claude lists it again, `nothing in quarantine`. **Fail:** no section, or a count that doesn't match.
+- [ ] **G13. Agentstudio agent stages.** *(0.20.0)* Have Claude create an agent, package and deploy it, then talk to it twice in one conversation.
+  **Pass:** an **Agentstudio agents** section with the agent's name and `✓ created  ✓ packaged v1  ✓ deployed  ✓ 1 test conversation, 2 turns, all answered`, and the steps read `Agentstudio: started a test conversation with <name>`, then `continued …`. **Fail:** no section, the agent shown by its ID after it was created, no `v1`, or the conversation on a row of its own (`deployment …`); send the create, package-create and deploy output, so their field names can be confirmed.
+- [ ] **G14. Agentstudio edit not live.** *(0.20.0)* After G13, have Claude update the agent without packaging it.
+  **Pass:** the row adds `◐ changed since packaged`; after Claude packages and deploys again, it's gone and the version moves. **Fail:** no warning, or one that stays.
 
 
 ## H. Usage limits and a Companion budget

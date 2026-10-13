@@ -257,7 +257,7 @@ export const productWords = (
   const found = PRODUCT_SCRIPTS[`${run.script}.sh`]?.verbs[run.verb]
   const name = PRODUCT_NAMES[run.product]
   if (!found) return `${name}: ${run.script} ${run.verb}`.trim()
-  const what = run.subject ? [found.noun, run.subject].filter(Boolean).join(' ') : found.noun ? `a ${found.noun}` : ''
+  const what = run.subject ? [found.noun, run.subject].filter(Boolean).join(' ') : found.noun ? `${/^(?:[aeiou]|MCP\b)/i.test(found.noun) ? 'an' : 'a'} ${found.noun}` : ''
   const phrase = (verb: string) => [verb, what].filter(Boolean).join(' ')
   if (how === 'did') return `${name}: ${phrase(found.did)}`
   if (how === 'doing') return `${name}: ${phrase(found.does)}…`
@@ -378,4 +378,71 @@ export const causeWords = (entries: readonly QuarantineEntry[]): string => {
   const counts = new Map<string, number>()
   for (const e of entries) counts.set(e.cause, (counts.get(e.cause) ?? 0) + 1)
   return [...counts].sort((a, b) => b[1] - a[1]).map(([cause, n]) => `${n} ${cause}`).join(', ')
+}
+
+// --- Agentstudio agents -----------------------------------------------------------
+
+/**
+ * What an Agentstudio response says, read leniently since its fields aren't
+ * documented beyond their names: an object's own ID and name, the agent,
+ * package and deployment it names, a package's version, a conversation's
+ * session ID, and an error when the API answered 2xx with `success: false`.
+ * A conversational agent's reply is a Server-Sent Events stream rather than
+ * one object: its session ID and any `event: error` are read from the stream.
+ */
+export type AgentstudioReading = {
+  id?: string
+  name?: string
+  agentName?: string
+  packageId?: string
+  deploymentId?: string
+  version?: string
+  sessionId?: string
+  error?: string
+}
+
+const textField = (o: Record<string, unknown>, ...keys: string[]): string | undefined => {
+  for (const key of keys) {
+    const value = o[key]
+    if (typeof value === 'string' && value) return value
+    if (typeof value === 'number') return String(value)
+  }
+  return undefined
+}
+
+export const agentstudioReading = (output: string): AgentstudioReading => {
+  const out: AgentstudioReading = {}
+  if (/^event:/m.test(output)) {
+    out.sessionId = output.match(/"session_id"\s*:\s*"([^"]+)"/)?.[1]
+    const error = output.match(/^event:\s*error\s*\n(?:data:\s*(.*))?/m)
+    if (error) {
+      const data = error[1] ?? ''
+      out.error = data.match(/"(?:message|error|detail)"\s*:\s*"([^"]+)"/)?.[1] ?? (data.trim() || 'the agent replied with an error')
+    }
+    return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined)) as AgentstudioReading
+  }
+  let body: unknown
+  try {
+    body = JSON.parse(output.slice(output.indexOf('{'), output.lastIndexOf('}') + 1))
+  } catch {
+    return out
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return out
+  const top = body as Record<string, unknown>
+  const inner = top.data && typeof top.data === 'object' && !Array.isArray(top.data) ? (top.data as Record<string, unknown>) : {}
+  const field = (...keys: string[]) => textField(top, ...keys) ?? textField(inner, ...keys)
+  const found: AgentstudioReading = {
+    id: field('id'),
+    name: field('name'),
+    agentName: field('agent_name'),
+    packageId: field('package_id'),
+    deploymentId: field('deployment_id'),
+    version: field('version', 'package_version', 'version_number'),
+    sessionId: field('session_id'),
+  }
+  if (top.success === false) {
+    const error = top.error ?? top.message ?? top.detail
+    found.error = typeof error === 'string' && error ? error : 'the response said success: false'
+  }
+  return Object.fromEntries(Object.entries(found).filter(([, v]) => v !== undefined)) as AgentstudioReading
 }
