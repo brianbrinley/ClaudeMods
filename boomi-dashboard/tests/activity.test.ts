@@ -77,7 +77,7 @@ import {
   resumeCommand,
   resumable,
 } from '../hooks/activity'
-import { bdiRunId, bdiRunReading, bdiStatusChecks, productWords } from '../hooks/products'
+import { bdiRunId, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, productWords, quarantineChecks, quarantineReading } from '../hooks/products'
 import { reviewPrompt, reviewSession, reviewText } from '../hooks/review'
 import type { Activity, Dashboard } from '../types'
 import type { ScannedSession } from '../hooks/activity'
@@ -1001,4 +1001,19 @@ test('a lean session has nothing to point at', () => {
   })
   expect(reviewSession(s!).findings).toEqual([])
   expect(reviewText(s!)).toContain('✓ Nothing stands out: its cost came from the work itself.')
+})
+
+test("Data Hub's responses: a deploy's ID and status, the checks in a command, quarantine entries and their causes", () => {
+  expect(datahubDeployReading('<mdm:UniverseDeployment><mdm:id>d-1</mdm:id><mdm:status>PENDING</mdm:status></mdm:UniverseDeployment>')).toEqual({ deploymentId: 'd-1', status: 'PENDING' })
+  expect(datahubDeployReading('{"id":"d-2","status":"SUCCESS"}')).toEqual({ deploymentId: 'd-2', status: 'SUCCESS' })
+  expect(['PENDING', 'IN_PROGRESS', 'SUCCESS', 'Deployed', 'FAILED', 'ERROR', undefined].map(deployState)).toEqual(['pending', 'pending', 'ok', 'ok', 'failed', 'failed', undefined])
+  expect(datahubStatusChecks('bash s/datahub-deployment.sh status u-1 d-1')).toEqual([{ universe: 'u-1', deployment: 'd-1' }])
+  expect(quarantineChecks('bash s/datahub-quarantine.sh query --universe u-1')).toEqual([{ universe: 'u-1', isAll: true }])
+  expect(quarantineChecks('bash s/datahub-quarantine.sh query --universe u-1 /tmp/f.xml')).toEqual([{ universe: 'u-1', isAll: false }])
+  expect(quarantineChecks('bash s/datahub-quarantine.sh reject --universe u-1 t-1')).toEqual([])
+  const entries = quarantineReading('<QuarantineQueryResponse><QuarantineEntry sourceId="S" sourceEntityId="E1"><cause>ENRICH_ERROR</cause><reason>At data quality step \'Price\': bad</reason></QuarantineEntry><QuarantineEntry><cause>ENRICH_ERROR</cause></QuarantineEntry></QuarantineQueryResponse>')
+  expect(entries).toEqual([{ cause: 'ENRICH_ERROR', reason: "At data quality step 'Price': bad", sourceEntityId: 'E1' }, { cause: 'ENRICH_ERROR' }])
+  expect(causeWords(entries!)).toBe('2 ENRICH_ERROR')
+  expect(quarantineReading('<QuarantineQueryResponse resultCount="0"/>')).toEqual([])
+  expect(quarantineReading('ERROR: HTTP 401')).toBeUndefined()
 })

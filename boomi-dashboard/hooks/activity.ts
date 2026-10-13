@@ -4,7 +4,7 @@
 // nothing here touches the engine, so the tests call them directly.
 
 import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, PastSession, Product, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
-import { PRODUCT_NAMES, isProductScript, productRun, productWords } from './products'
+import { PRODUCT_NAMES, deployState, isProductScript, productRun, productWords } from './products'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
@@ -482,8 +482,14 @@ export const levelOf = (a: Activity): Level =>
  * descriptor accepted with warnings; or a BDI run that started and hasn't
  * been seen to finish.
  */
-const isProductWarning = (a: Activity) =>
-  a.product !== undefined && (/^WARNING:/.test(a.detail) || (a.product === 'bdi' && a.verb === 'run' && !!a.runId && a.outcome === 'ok' && (!a.runStatus || a.runStatus === 'running' || a.runStatus === 'pending')))
+const isProductWarning = (a: Activity) => a.product !== undefined && (/^WARNING:/.test(a.detail) || isUnderway(a))
+
+/** Another plugin's work that started and hasn't been seen to finish: a BDI run, a Data Hub deployment. */
+const isUnderway = (a: Activity) =>
+  a.outcome === 'ok' &&
+  !!a.runId &&
+  ((a.product === 'bdi' && a.verb === 'run' && (!a.runStatus || a.runStatus === 'running' || a.runStatus === 'pending')) ||
+    (a.product === 'datahub' && a.verb === 'deploy' && deployState(a.runStatus) === 'pending'))
 
 /** A test that was submitted and not waited for (--no-wait): no result yet. */
 const isSubmittedOnly = (a: Activity) => a.kind === 'test' && a.outcome === 'ok' && !a.executionStatus
@@ -525,6 +531,11 @@ export const describe = (a: Activity): string => {
     if (a.runStatus === 'canceled') return `${flow} run cancelled`
     if (a.runStatus === 'skipped') return `${flow} run skipped`
     if (a.outcome === 'ok') return `${flow} run ${a.runStatus === 'pending' ? 'pending' : 'started'}`
+  }
+  if (a.product === 'datahub' && a.verb === 'deploy' && a.runId && a.outcome !== 'running') {
+    const state = deployState(a.runStatus)
+    if (state === 'pending') return `Data Hub: universe ${a.subject} deploying`
+    if (state === 'failed') return `Data Hub: deploy of universe ${a.subject} failed`
   }
   if (a.product && a.script && a.verb !== undefined) {
     const run = { product: a.product, script: a.script, verb: a.verb, subject: a.subject }
@@ -752,6 +763,16 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
     if (closedSteps.has(a.id) || a.isEarlier) continue
     items.push({ key: `step:${a.id}`, level: levelOf(a), title: describe(a), hint: a.detail, at: when(a) })
   }
+  for (const [universe, q] of Object.entries(dashboard.quarantine ?? {})) {
+    if (q.count <= (q.seen ?? 0)) continue
+    items.push({
+      key: `quarantine:${universe}`,
+      level: 'warning',
+      title: `${q.count} record${q.count === 1 ? '' : 's'} in Data Hub quarantine, universe ${shortId(universe)}`,
+      hint: `${q.causes}.${q.reason ? ` First: ${q.reason}` : ''} Close this once they're handled; more will show again.`,
+      at: q.checkedAt,
+    })
+  }
   const seenRuns = new Set(dashboard.seenRuns ?? [])
   const testRuns = new Set(dashboard.activity.filter(a => a.kind === 'test' && a.executionId).map(a => a.executionId!))
   const rows = components(dashboard.activity)
@@ -796,7 +817,7 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
 
 /** How many items the person closed that would otherwise need attention now. */
 export const closedCount = (dashboard: Dashboard, now: number, windowMs: number): number =>
-  attention({ ...dashboard, closedSteps: [], seenRuns: [] }, now, windowMs).length - attention(dashboard, now, windowMs).length
+  attention(reopenAll(dashboard), now, windowMs).length - attention(dashboard, now, windowMs).length
 
 /** What closing an item changes in the dashboard: a step is closed, a run seen, a watched change cleared. */
 export const closeItem = (dashboard: Dashboard, key: string): Dashboard => {
@@ -805,11 +826,19 @@ export const closeItem = (dashboard: Dashboard, key: string): Dashboard => {
   if (kind === 'step') return { ...dashboard, closedSteps: [...new Set([...(dashboard.closedSteps ?? []), Number(id)])].slice(-200) }
   if (kind === 'run') return { ...dashboard, seenRuns: [...new Set([...(dashboard.seenRuns ?? []), id])].slice(-200) }
   if (kind === 'watch') return { ...dashboard, watched: dashboard.watched.map(w => (w.componentId === id ? { ...w, changedBy: undefined } : w)) }
+  if (kind === 'quarantine' && dashboard.quarantine?.[id]) {
+    return { ...dashboard, quarantine: { ...dashboard.quarantine, [id]: { ...dashboard.quarantine[id]!, seen: dashboard.quarantine[id]!.count } } }
+  }
   return dashboard
 }
 
 /** Brings back every closed step and run. (A watched change, once cleared, comes back with the next one.) */
-export const reopenAll = (dashboard: Dashboard): Dashboard => ({ ...dashboard, closedSteps: [], seenRuns: [] })
+export const reopenAll = (dashboard: Dashboard): Dashboard => ({
+  ...dashboard,
+  closedSteps: [],
+  seenRuns: [],
+  ...(dashboard.quarantine ? { quarantine: Object.fromEntries(Object.entries(dashboard.quarantine).map(([u, q]) => [u, { ...q, seen: 0 }])) } : {}),
+})
 
 // --- Tokens and spend --------------------------------------------------------------
 
@@ -1071,6 +1100,11 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
     }
   }
 
+  const quarantine = quarantineLines(dashboard, now)
+  if (quarantine.length > 0) {
+    lines.push('', 'Data Hub quarantine:')
+    for (const q of quarantine) lines.push(`  ${STATUS[q.level].icon} ${q.text}`)
+  }
   if (dashboard.watched.length > 0) {
     lines.push('', 'Watched components:')
     if (dashboard.platform.phase !== 'ok' && dashboard.platform.checkedAt !== undefined) lines.push(`  ${dashboard.platform.message}`)
@@ -1411,6 +1445,11 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
   if (others.length > 0) {
     lines.push('', "## Companion's other plugins", '')
     for (const a of others) lines.push(`- ${STATUS[levelOf(a)].icon} ${describe(a)}`)
+  }
+  const quarantine = quarantineLines(dashboard, now)
+  if (quarantine.length > 0) {
+    lines.push('', '## Data Hub quarantine', '')
+    for (const q of quarantine) lines.push(`- ${STATUS[q.level].icon} ${q.text}`)
   }
 
   lines.push('', '## Needs attention', '')
@@ -1899,7 +1938,7 @@ export const productIssues = (activity: readonly Activity[]): Activity[] => {
     if (!a.product || a.outcome === 'running') continue
     latest.set(`${a.product}|${a.script}|${a.verb}|${a.subject}`, a)
   }
-  return [...latest.values()].filter(a => a.outcome === 'failed' || a.outcome === 'blocked' || (isProductWarning(a) && !(a.product === 'bdi' && a.verb === 'run')))
+  return [...latest.values()].filter(a => a.outcome === 'failed' || a.outcome === 'blocked' || (isProductWarning(a) && !isUnderway(a)))
 }
 
 /** Each product's share of the session: bc-integration's steps, then each other plugin's, by what they took. */
@@ -2119,3 +2158,13 @@ export const budgetLines = (
   }
   return lines.sort((a, b) => b.percent - a.percent)
 }
+
+/** An ID in a line of text: a long one shortened as elsewhere, a short one as it is. */
+const shortId = (id: string): string => (id.length > 14 ? `${id.slice(0, 8)}…` : id)
+
+/** Data Hub's quarantine, a line per universe Claude has looked at, for the pane, the text and the report. */
+export const quarantineLines = (dashboard: Dashboard, now: number): { level: Level; text: string }[] =>
+  Object.entries(dashboard.quarantine ?? {}).map(([universe, q]) => ({
+    level: q.count > 0 ? 'warning' : 'healthy',
+    text: `Universe ${shortId(universe)}: ${q.count === 0 ? 'nothing in quarantine' : `${q.count} in quarantine (${q.causes})`}, checked ${ago(q.checkedAt, now)}`,
+  }))

@@ -77,6 +77,7 @@ import {
   choiceList,
   recapOf,
   welcomeLine,
+  quarantineLines,
   budgetLines,
   shareView,
   monthSpend,
@@ -96,7 +97,7 @@ import {
 } from './activity'
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
-import { bdiRunId, bdiRunReading, bdiStatusChecks, recipeComponents } from './products'
+import { bdiRunId, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import type { Credentials } from './platform'
 
@@ -578,6 +579,15 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
     }
   }
   for (const a of done) {
+    if (a.product === 'datahub' && a.verb === 'deploy' && a.outcome === 'ok') {
+      const { deploymentId, status } = datahubDeployReading(output)
+      if (deploymentId) a.runId = deploymentId
+      if (status) a.runStatus = status
+      if (deployState(status) === 'failed') {
+        a.outcome = 'failed'
+        a.detail = `ERROR: the deployment ended ${status}`
+      } else if (deploymentId) a.detail = `deployment ${deploymentId}${status ? `: ${status}` : ''}`
+    }
     if (a.product === 'bdi' && a.verb === 'run' && a.outcome === 'ok') {
       const runId = bdiRunId(output)
       if (runId) {
@@ -674,6 +684,66 @@ const followBdiRuns = async ($: Engine, settings: Settings, checks: readonly { f
     void refreshStatus($, settings)
     void saveActivity($, settings)
   }
+}
+
+/**
+ * Claude checking a Data Hub deployment with datahub-deployment.sh status: the
+ * status it found updates that deploy's step, until it's done or failed.
+ */
+const followDeploys = async ($: Engine, settings: Settings, checks: readonly { universe: string; deployment: string }[], ran: Ran) => {
+  if (ran.deny !== undefined || checks.length !== 1) return
+  const status = datahubDeployReading(outputOf(ran)).status
+  const state = deployState(status)
+  if (!state) return
+  const { universe, deployment } = checks[0]!
+  let changed: Activity | undefined
+  await update($, dashboard, c => {
+    const list = [...c.activity]
+    const at = list.map(a => a.product === 'datahub' && a.verb === 'deploy' && (a.runId === deployment || a.ref === universe)).lastIndexOf(true)
+    if (at < 0 || list[at]!.runStatus === status) return c
+    const step = list[at]!
+    changed = {
+      ...step,
+      runId: step.runId ?? deployment,
+      runStatus: status,
+      outcome: state === 'failed' ? 'failed' : 'ok',
+      detail: state === 'failed' ? `ERROR: the deployment ended ${status} (deployment ${deployment})` : `deployment ${deployment}: ${status}`,
+    }
+    list[at] = changed
+    return { ...c, activity: list }
+  })
+  if (changed && state !== 'pending') announce($, settings, { ...changed, kind: 'test' })
+  if (changed) {
+    void refreshStatus($, settings)
+    void saveActivity($, settings)
+  }
+}
+
+/**
+ * Claude listing a universe's quarantine with datahub-quarantine.sh query:
+ * with no filter, that's every active entry, so the dashboard keeps the
+ * count, the causes and the first reason. More than before is toasted;
+ * an empty list clears it.
+ */
+const followQuarantine = async ($: Engine, settings: Settings, checks: readonly { universe: string; isAll: boolean }[], ran: Ran) => {
+  if (ran.deny !== undefined || checks.length !== 1 || !checks[0]!.isAll) return
+  const entries = quarantineReading(outputOf(ran))
+  if (!entries) return
+  const universe = checks[0]!.universe
+  const before = (await read($, dashboard)).quarantine?.[universe]
+  const now = await $.clock.now()
+  const seen = entries.length === 0 ? 0 : Math.min(before?.seen ?? 0, entries.length)
+  await update($, dashboard, c => ({
+    ...c,
+    quarantine: {
+      ...c.quarantine,
+      [universe]: { count: entries.length, causes: causeWords(entries), ...(entries[0]?.reason ? { reason: entries[0].reason } : {}), checkedAt: now, seen },
+    },
+  }))
+  if (entries.length > (before?.count ?? 0)) {
+    toast($, settings, `${STATUS.warning.icon} Data Hub: ${entries.length} record${entries.length === 1 ? '' : 's'} in quarantine (${causeWords(entries)})`)
+  }
+  void refreshStatus($, settings)
 }
 
 // --- The Platform API --------------------------------------------------------
@@ -1523,17 +1593,19 @@ export const register: Register = (on, options) => {
   // Companion's scripts: note each run as it starts, then read how it went.
   // The dashboard only watches: its own trouble never stops the command.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const runs = scriptRuns(String(e.command ?? ''))
-    const checks = bdiStatusChecks(String(e.command ?? ''))
-    if (runs.length === 0 && checks.length === 0) return next(e)
-    if (runs.length === 0) {
-      const ran = await next(e)
-      await followBdiRuns($, settings, checks, ran).catch(() => undefined)
-      return ran
-    }
-    const started = await noteStart($, settings, runs).catch(() => [] as Activity[])
+    const command = String(e.command ?? '')
+    const runs = scriptRuns(command)
+    const checks = bdiStatusChecks(command)
+    const deploys = datahubStatusChecks(command)
+    const quarantines = quarantineChecks(command)
+    if (runs.length === 0 && checks.length === 0 && deploys.length === 0 && quarantines.length === 0) return next(e)
+    const started = runs.length > 0 ? await noteStart($, settings, runs).catch(() => [] as Activity[]) : []
     const ran = await next(e)
-    await noteEnd($, settings, started, ran).catch(() => undefined)
+    if (runs.length > 0) await noteEnd($, settings, started, ran).catch(() => undefined)
+    // Claude checking on work that finishes later, or on a universe's quarantine.
+    if (checks.length > 0) await followBdiRuns($, settings, checks, ran).catch(() => undefined)
+    if (deploys.length > 0) await followDeploys($, settings, deploys, ran).catch(() => undefined)
+    if (quarantines.length > 0) await followQuarantine($, settings, quarantines, ran).catch(() => undefined)
     return ran
   })
 
@@ -1926,6 +1998,9 @@ export const register: Register = (on, options) => {
             {stepsLimit > STEPS_PAGE && <Button key="steps-fewer" label="Fewer" onPress={() => update($, stepsShown, () => STEPS_PAGE)} />}
           </Box>
         )}
+
+        {quarantineLines(current, now).length > 0 && heading('Data Hub')}
+        {quarantineLines(current, now).map(q => line(q.level, q.text))}
 
         {guards.length > 0 && heading('Guardrails')}
         {guards.map(g => (g.level ? line(g.level, g.text) : note(g.text)))}

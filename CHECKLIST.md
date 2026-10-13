@@ -103,6 +103,11 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **G10. BDI run result.** Have Claude run a BDI flow and check its status until it finishes.
   **Pass:** `◐ BDI: flow … run started`, then `✓ BDI: flow … ran and succeeded`; or, if it fails, `✗ … run failed` under **Needs attention** with BDI's reason. **Fail:** it stays ◐ after Claude saw it finish; send the status output.
 
+- [ ] **G11. Data Hub deploy.** Have Claude deploy a universe and check its status until it's done.
+  **Pass:** `◐ Data Hub: universe … deploying`, then `✓ Data Hub: deployed universe …`. **Fail:** it stays ◐, or a success reads as failed; send the deploy's and the status check's output, so the status words can be confirmed.
+- [ ] **G12. Data Hub quarantine.** Send a record that quarantines (a missing required field), then have Claude list the universe's quarantine.
+  **Pass:** a **Data Hub** section with `1 in quarantine (1 REQUIRED_FIELD)`, and the item under **Needs attention** with the reason. After the record is deleted from quarantine and Claude lists it again, `nothing in quarantine`. **Fail:** no section, or a count that doesn't match.
+
 
 ## H. Usage limits and a Companion budget
 
