@@ -41,7 +41,31 @@ Never read, print or copy my .env or any Boomi credentials. The mod reads them i
 
 **Optional:** add `BOOMI_COMPANION_LOG_ACTIVITY=1` to Companion's `.env` so its scripts keep an activity log, which the dashboard reads as a [second source](#companions-activity-log).
 
-**To update:** `git -C ~/ClaudeMods pull`, then restart Claude Code.
+### How it's installed, and how to update it
+
+The install above uses no marketplace and copies nothing. Claude Code loads the mod straight from the folder named in `CLAUDE_CODE_PLUGIN_DIRS`, a git checkout of this repository (`~/ClaudeMods`). The checkout *is* the install: whatever it holds when a session starts is what runs. Other mods from the same checkout (boomi-runtime, say) update along with it.
+
+**To update:** run `/bc-dashboard upgrade`. It does what you'd otherwise do by hand (fetch, pull, validate, test), in this order:
+
+1. **Check.** It runs `git fetch origin` against the checkout's own `origin` remote, which is its only network call. It shows the version change, the commits, the changed files, the [changelog](CHANGELOG.md) entries in between, and which mods from the checkout it would update.
+2. **Ask.** It asks before installing. `--yes` skips only this question.
+3. **Refuse rather than risk your work.** It stops, changing nothing, if the checkout has uncommitted changes or commits that aren't on origin, or if the update isn't a fast-forward. It never resets, stashes, rebases or forces.
+4. **Test before it goes live.** It checks out the new code in a temporary git worktree and runs `claude plugin validate` and `claude plugin test` there, for each mod it would update. If any fail, nothing is installed and you see the failing output. From the new code it runs nothing else.
+5. **Install.** It records the current commit, then fast-forwards the checkout and reads the version back.
+6. **Restart Claude Code.** The running session keeps the code it started with; the dashboard can't safely reload itself.
+
+| Command | What it does |
+|---|---|
+| `/bc-dashboard upgrade --check` | A dry run: the check alone. Changes nothing |
+| `/bc-dashboard upgrade` | Check, ask, test, install |
+| `/bc-dashboard upgrade --yes` | The same without the question. The safety steps still run |
+| `/bc-dashboard upgrade --rollback` | Back to the commit recorded before the last upgrade, as a detached checkout. `main` keeps the newer commits, and the next upgrade returns to it |
+
+Anything it prints is masked for tokens and keys (`glc_`, `sk-`, `eyJ`, `Bearer …`, `Basic …`), and it never reads `.env`.
+
+**Update nudge:** at the start of a session, at most once every `updateCheckHours` (24), the dashboard fetches and toasts `bc-dashboard X.Y.Z is available` when you're behind. It never installs, and says nothing when offline. Turn it off with `updateCheck` under `/config`.
+
+By hand, the same thing is `git -C ~/ClaudeMods pull --ff-only`, then `claude plugin validate` and `claude plugin test` on the mod, then a restart.
 
 ## What you see
 
@@ -285,6 +309,8 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `companionShare` | `0` | Companion's share of your weekly usage limit, in percent; `0` turns it off. |
 | `companionSharePeriod` | `week` | What the share runs over: `day`, `week` or `month`. |
 | `companionMonthlyUsd` | `0` | A monthly amount for Companion sessions, in US dollars; `0` turns it off. |
+| `updateCheck` | `true` | At the start of a session, say when a newer dashboard is on GitHub (never installs). |
+| `updateCheckHours` | `24` | Hours between update checks; `0` turns them off. |
 | `suggestions` | `true` | Suggest the next step after a turn. |
 | `historyDays` | `90` | How far back **Past Companion sessions** reads. |
 
@@ -364,7 +390,7 @@ Built against Claude Code 2.1.296.
 cd boomi-dashboard
 claude plugin validate .
 claude plugin test .
-prove tests          # scripts/scan-sessions.pl against made-up transcripts
+prove tests          # scripts/scan-sessions.pl against made-up transcripts, and scripts/upgrade.sh against a throwaway repo
 ```
 
 `hooks/activity.ts` holds the plain functions (stages, attention, wording, tokens), with unit tests; `hooks/platform.ts` is the Platform API client. Everything that touches the engine is in `hooks/register.tsx`, because the engine follows `$` only within one file. `assets/pane-*.png` are the pane as the test kit draws it for a sample session.

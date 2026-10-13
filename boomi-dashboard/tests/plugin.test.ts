@@ -1619,3 +1619,170 @@ test("a PUBLIC connector's version change waits for approval, and a rejected des
   expect(text).toContain('Connector project: ✗ descriptor rejected')
   expect(text).toContain('ERROR: descriptor rejected')
 })
+
+// --- /bc-dashboard upgrade ---------------------------------------------------------
+
+const UPGRADE_CHECK = [
+  'ROOT: /home/me/ClaudeMods',
+  'MOD: boomi-dashboard',
+  'ORIGIN: https://github.com/brianbrinley/ClaudeMods.git',
+  'BRANCH: main',
+  'HEAD: aaaa',
+  'DETACHED: no',
+  'TARGET: bbbb',
+  'INSTALLED: 0.21.0',
+  'LATEST: 0.23.0',
+  'BEHIND: 2',
+  'AHEAD: 0',
+  'DIRTY: 0',
+  'MODS: boomi-dashboard',
+  'COMMIT: 1a2b3c4 boomi-dashboard 0.23.0: upgrade command',
+  'COMMIT: 5d6e7f8 boomi-dashboard 0.22.0: report html',
+  'FILE: M\tboomi-dashboard/hooks/register.tsx',
+  'CHANGELOG: ## 0.23.0',
+  'CHANGELOG: - /bc-dashboard upgrade',
+].join('\n')
+
+/** Stands in for scripts/upgrade.sh: each subcommand's output, and the calls made. */
+const upgradeShell = (on: On, outputs: Partial<Record<'check' | 'install' | 'rollback', string>>) => {
+  const calls: string[][] = []
+  on('process.run', async (_$, e) => {
+    calls.push([...e.argv])
+    const sub = e.argv[2] as 'check' | 'install' | 'rollback'
+    const out = outputs[sub] ?? ''
+    return { value: { exitCode: /^ERROR:/m.test(out) ? 1 : 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  return calls
+}
+
+/** Lets a session start in a test: the engine's own start and registrations. */
+const startable = (on: On) => {
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', async () => ({ value: undefined }) as never)
+  on('tool.register', async () => ({ value: undefined }) as never)
+}
+
+const answerUpgrade = (on: On, label: string) => {
+  const asked: string[] = []
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    const q = e.questions[0]!
+    asked.push(q.question)
+    return { result: { questions: [q], answers: { [q.question]: label } } as never }
+  })
+  return asked
+}
+
+test('/bc-dashboard upgrade --check shows the delta and changelog, and installs nothing', async ($, on) => {
+  world(on)
+  mock.store(on)
+  const calls = upgradeShell(on, { check: UPGRADE_CHECK })
+  const text = (await $.command.run(dashboard('upgrade --check'))).text ?? ''
+  expect(text).toContain('boomi-dashboard 0.21.0 → 0.23.0: 2 commits behind origin/main')
+  expect(text).toContain('- /bc-dashboard upgrade')
+  expect(calls.map(c => c[2])).toEqual(['check'])
+  expect(calls[0]![1]).toMatch(/scripts\/upgrade\.sh$/)
+})
+
+test('/bc-dashboard upgrade asks, then installs the checked commit and says to restart', async ($, on) => {
+  world(on)
+  mock.store(on)
+  const asked = answerUpgrade(on, 'Install')
+  const calls = upgradeShell(on, { check: UPGRADE_CHECK, install: 'PASSED: boomi-dashboard (validate)\nPASSED: boomi-dashboard (test)\nINSTALLED-NOW: 0.23.0\nPREVIOUS: 0.21.0 aaaa' })
+  const text = (await $.command.run(dashboard('upgrade'))).text ?? ''
+  expect(asked[0]).toContain('Install 0.23.0 over 0.21.0? 2 commits, 1 files')
+  expect(calls.map(c => c.slice(2))).toEqual([['check', expect.any(String) as never], ['install', expect.any(String) as never, 'bbbb']])
+  expect(text).toContain('✓ Installed 0.23.0 (was 0.21.0)')
+  expect(text).toContain('/bc-dashboard upgrade --rollback goes back to 0.21.0')
+  expect(text).toContain('Restart Claude Code')
+})
+
+test('/bc-dashboard upgrade installs nothing when the answer is Cancel; --yes skips only the question', async ($, on) => {
+  world(on)
+  mock.store(on)
+  const asked = answerUpgrade(on, 'Cancel')
+  const calls = upgradeShell(on, { check: UPGRADE_CHECK, install: 'INSTALLED-NOW: 0.23.0' })
+  expect((await $.command.run(dashboard('upgrade'))).text).toContain('Not installed.')
+  expect(calls.map(c => c[2])).toEqual(['check'])
+  await $.command.run(dashboard('upgrade --yes'))
+  expect(asked).toHaveLength(1)
+  expect(calls.map(c => c[2])).toEqual(['check', 'check', 'install'])
+})
+
+test('/bc-dashboard upgrade stops before asking when the checkout has changes, and says when up to date', async ($, on) => {
+  world(on)
+  mock.store(on)
+  const asked = answerUpgrade(on, 'Install')
+  let check = UPGRADE_CHECK.replace('DIRTY: 0', 'DIRTY: 2')
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: check, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const text = (await $.command.run(dashboard('upgrade --yes'))).text ?? ''
+  expect(text).toContain('✗ The checkout has uncommitted changes (2 files)')
+  expect(text).toContain('Nothing was changed.')
+  expect(asked).toHaveLength(0)
+  check = UPGRADE_CHECK.replace('LATEST: 0.23.0', 'LATEST: 0.21.0').replace('BEHIND: 2', 'BEHIND: 0')
+  expect((await $.command.run(dashboard('upgrade'))).text).toBe('✓ boomi-dashboard 0.21.0 is up to date with origin/main.')
+})
+
+test("/bc-dashboard upgrade keeps the current version when the new code's tests fail, and masks what it prints", async ($, on) => {
+  world(on)
+  mock.store(on)
+  upgradeShell(on, {
+    check: UPGRADE_CHECK,
+    install: "TESTS-FAILED: boomi-dashboard (test)\n(fail) posts with Bearer abc.def-123\nERROR: the new version's test failed for boomi-dashboard, so it wasn't installed. You're still on 0.21.0.",
+  })
+  const text = (await $.command.run(dashboard('upgrade --yes'))).text ?? ''
+  expect(text).toContain("✗ The new version's boomi-dashboard (test) failed, so it wasn't installed. You're still on 0.21.0.")
+  expect(text).toContain('Bearer ****')
+  expect(text).not.toContain('abc.def-123')
+})
+
+test('/bc-dashboard upgrade --rollback returns to the recorded version, or says none is recorded', async ($, on) => {
+  world(on)
+  mock.store(on)
+  let out = 'INSTALLED-NOW: 0.21.0\nROLLED-BACK: 0.21.0 at aaaa; main still holds the newer version, and /bc-dashboard upgrade returns to it'
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const text = (await $.command.run(dashboard('upgrade --rollback'))).text ?? ''
+  expect(text).toContain('✓ Rolled back to 0.21.0')
+  expect(text).toContain('Restart Claude Code')
+  out = 'ERROR: No previous version recorded: rollback works after an upgrade made with /bc-dashboard upgrade.'
+  expect((await $.command.run(dashboard('upgrade --rollback'))).text).toContain('✗ No previous version recorded')
+  expect((await $.command.run(dashboard('upgrade --force'))).text).toContain('Unknown option --force')
+})
+
+test('at session start, a newer version is announced at most once a day, never installed, and nothing is said offline', async ($, on) => {
+  const toasts = world(on)
+  mock.store(on)
+  startable(on)
+  const calls = upgradeShell(on, { check: UPGRADE_CHECK })
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.advance(20_000)
+  expect(calls.map(c => c[2])).toEqual(['check'])
+  expect(toasts).toContain('bc-dashboard 0.23.0 is available (you have 0.21.0): run /bc-dashboard upgrade')
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.advance(20_000)
+  expect(calls.map(c => c[2])).toEqual(['check'])
+})
+
+test('the update check says nothing offline, and tries again next session', async ($, on) => {
+  const toasts = world(on)
+  mock.store(on)
+  startable(on)
+  const calls = upgradeShell(on, { check: "ERROR: couldn't fetch from origin (offline, or no access); nothing changed" })
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.advance(20_000)
+  expect(calls.map(c => c[2])).toEqual(['check'])
+  expect(toasts.filter(t => /available|fetch/.test(t))).toHaveLength(0)
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.advance(20_000)
+  expect(calls.map(c => c[2])).toEqual(['check', 'check'])
+})
+
+test('the update check is off when updateCheck is off', { options: { updateCheck: false } }, async ($, on) => {
+  const toasts = world(on)
+  mock.store(on)
+  startable(on)
+  const calls = upgradeShell(on, { check: "ERROR: couldn't fetch from origin (offline, or no access); nothing changed" })
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.advance(20_000)
+  expect(calls).toHaveLength(0)
+  expect(toasts.filter(t => /available/.test(t))).toHaveLength(0)
+})
