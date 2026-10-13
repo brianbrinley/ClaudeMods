@@ -134,6 +134,9 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **H6. Pane size.** Run `/bc-dashboard size 30`, then restart and open the pane.
   **Pass:** the pane opens about 30 rows tall both times; dragging its edge still resizes it. **Fail:** the size doesn't change, or isn't kept.
 
+- [ ] **H7. Budget setup as the README says.** Follow [Set up a budget](boomi-dashboard/README.md#set-up-a-budget): set `budgetUsd` to `5` through `/config`, then set `companionMonthlyUsd` to `50` in `~/.claude/settings.json` under `pluginConfigs` and restart.
+  **Pass:** `/config` lists the four **boomi-dashboard** budget rows; after each change the **BUDGET** gauge shows `session: … of $5.00`, then `month: … of $50` as well. **Fail:** no rows under `/config`, a change that never shows, or the settings-file block ignored; say which, and whether a restart fixed it.
+
 ## I. Cost review
 
 *boomi-dashboard 0.18.0. Needs earlier Companion sessions on this machine.*
