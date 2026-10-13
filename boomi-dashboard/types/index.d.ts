@@ -53,6 +53,13 @@ export type Activity = {
    */
   deploymentId?: string
   sessionId?: string
+  /**
+   * A connector step: the project folder its descriptor or archive is in,
+   * and the connector group it uploads to or changes. The version it names
+   * is `version`; a version change's classification is `ref`.
+   */
+  project?: string
+  group?: string
   /** A pushed component's new version. */
   version?: string
   /** A test's execution status (COMPLETE, ERROR, ...) and ID. */
