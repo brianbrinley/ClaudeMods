@@ -324,49 +324,65 @@ test('modelName reads model ids in words, and modelMix lists each model biggest 
   expect(mix).toBe('Opus 5.5 312k · Haiku 5.5 26k')
 })
 
-test('the 8-bit flamingo stands in one place: it looks back, shifts its weight and turns around now and then', () => {
-  const at = (tick: number) => sceneAt(tick)
-  expect(at(0)).toEqual({ facing: 'right', leg: 'one', isLookingBack: false, visitor: 0 })
-  expect(flamingo(at(0))).toEqual([...FLAMINGO_IDLE])
-  // Looks back for three seconds, then forward again.
-  expect(at(30).isLookingBack).toBe(true)
-  expect(at(36).isLookingBack).toBe(false)
-  // Shifts to the other leg, turns around, and back again over three minutes.
-  expect(at(90).leg).toBe('other')
-  expect(at(180)).toMatchObject({ facing: 'left', leg: 'one' })
-  expect(at(270)).toMatchObject({ facing: 'left', leg: 'other' })
-  expect(at(360)).toEqual(at(0))
-  // Every pose is the same 12-by-16 sprite, so nothing jumps.
-  for (const tick of [0, 30, 90, 180, 230, 270]) {
-    const pixels = flamingo(at(tick))
+test('the 8-bit flamingo stands in one place, with a little life: glances, blinks, now and then a shift or a turn', () => {
+  const ticks = Array.from({ length: 7200 }, (_, i) => i) // an hour
+  const scenes = ticks.map(sceneAt)
+  const changes = scenes.filter((s, i) => i > 0 && JSON.stringify(s) !== JSON.stringify(scenes[i - 1]))
+  // Something every 10 to 15 seconds: about 4 to 10 changes a minute (each glance or blink is two), never busy.
+  expect(changes.length).toBeGreaterThan(240)
+  expect(changes.length).toBeLessThan(600)
+  for (let minute = 0; minute < 60; minute++) {
+    const window = scenes.slice(minute * 120, minute * 120 + 120)
+    expect(new Set(window.map(s => JSON.stringify(s))).size).toBeGreaterThan(1)
+  }
+  // It glances back, blinks, shifts and turns, and a neighbour visits, over the hour.
+  expect(scenes.some(s => s.isLookingBack)).toBe(true)
+  expect(scenes.some(s => s.isBlinking)).toBe(true)
+  expect(new Set(scenes.map(s => s.leg)).size).toBe(2)
+  expect(new Set(scenes.map(s => s.facing)).size).toBe(2)
+  expect(scenes.some(s => s.visitor > 0)).toBe(true)
+  // Never both at once, and the same tick always draws the same.
+  expect(scenes.some(s => s.isBlinking && s.isLookingBack)).toBe(false)
+  expect(sceneAt(4321)).toEqual(sceneAt(4321))
+})
+
+test("the flamingo's poses: the same 12-by-16 sprite, so nothing jumps", () => {
+  const base = { facing: 'right' as const, leg: 'one' as const, isLookingBack: false, isBlinking: false, visitor: 0 }
+  expect(flamingo(base)).toEqual([...FLAMINGO_IDLE])
+  for (const scene of [base, { ...base, isLookingBack: true }, { ...base, leg: 'other' as const }, { ...base, facing: 'left' as const }, { ...base, isBlinking: true }]) {
+    const pixels = flamingo(scene)
     expect(pixels).toHaveLength(16)
     expect(pixels.every(row => row.length === 12)).toBe(true)
   }
   // Looking back turns the beak the other way; the body stays.
-  const back = flamingo(at(30))
+  const back = flamingo({ ...base, isLookingBack: true })
   expect(back[2]).toBe('...LLPPPP...')
   expect(back.slice(8)).toEqual(FLAMINGO_IDLE.slice(8))
   // The other leg: standing and tucked legs trade places.
-  expect(flamingo(at(90)).slice(12)).toEqual(['....PPP.P...', '.....P..P...', '........P...', '........PP..'])
+  expect(flamingo({ ...base, leg: 'other' }).slice(12)).toEqual(['....PPP.P...', '.....P..P...', '........P...', '........PP..'])
   // Facing left is the whole bird reflected.
-  expect(flamingo(at(180))[2]).toBe('...LLPPPP...')
+  expect(flamingo({ ...base, facing: 'left' })[2]).toBe('...LLPPPP...')
+  // A blink closes the eye; the beak's tip stays dark.
+  const blink = flamingo({ ...base, isBlinking: true })
+  expect(blink[1]).toBe('...PPPPP....')
+  expect(blink[3]).toContain('K')
   expect(pixelCells(FLAMINGO_IDLE, { P: 'p', L: 'l', K: 'k' }).length).toBe(8)
 })
 
-test('once in a while a neighbour peeks in from the side the flamingo faces, looks, and goes', () => {
-  const visit = [400, 401, 402, 404, 407, 408, 409].map(tick => sceneAt(tick).visitor)
-  expect(visit).toEqual([2, 4, 6, 6, 4, 2, 0])
-  expect(sceneAt(399).visitor).toBe(0)
-  expect(sceneAt(400 + 720).visitor).toBe(2)
+test('a neighbour peeks in from the side the flamingo faces, looks, and goes', () => {
+  // The visit, column by column, wherever in the hour it falls.
+  const visits = Array.from({ length: 7200 }, (_, i) => sceneAt(i).visitor)
+  const first = visits.findIndex(v => v > 0)
+  expect(visits.slice(first, first + 10)).toEqual([2, 4, 6, 6, 6, 6, 6, 4, 2, 0])
   // Facing right, it comes in at the right edge, its beak toward the flamingo.
-  const rows = sceneRows({ facing: 'right', leg: 'one', isLookingBack: false, visitor: 6 })
+  const rows = sceneRows({ facing: 'right', leg: 'one', isLookingBack: false, isBlinking: false, visitor: 6 })
   expect(rows).toHaveLength(16)
   expect(rows.every(r => r.length === 18)).toBe(true)
   expect(rows[2]!.slice(12)).toBe('LLPPPP')
   // Not there between visits: only the flamingo, in the middle of its strip.
-  expect(sceneRows(sceneAt(0))[0]).toBe('.......PPP........')
+  expect(sceneRows({ facing: 'right', leg: 'one', isLookingBack: false, isBlinking: false, visitor: 0 })[0]).toBe('.......PPP........')
   // Facing left, it comes in at the left edge.
-  expect(sceneRows({ facing: 'left', leg: 'one', isLookingBack: false, visitor: 6 })[2]!.slice(0, 6)).toBe('PPPPLL')
+  expect(sceneRows({ facing: 'left', leg: 'one', isLookingBack: false, isBlinking: false, visitor: 6 })[2]!.slice(0, 6)).toBe('PPPPLL')
 })
 
 test('the flamingo stands in a thin line of still water across its strip', () => {
