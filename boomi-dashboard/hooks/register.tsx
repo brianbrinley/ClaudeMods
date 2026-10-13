@@ -77,6 +77,7 @@ import {
   choiceList,
   recapOf,
   welcomeLine,
+  productSpendLine,
   resumable,
   resumeCommand,
   resumeLabel,
@@ -322,6 +323,7 @@ const subjectOf = async ($: Engine, settings: Settings, run: ScriptRun, current:
     const watched = current.watched.find(w => w.componentId === id)
     return { subject: known?.subject ?? watched?.name ?? id, componentId: id, type: known?.type, file: known?.file }
   }
+  if (run.product) return { subject: run.target ?? '' }
   return { subject: run.deploymentId ? `deployment ${run.deploymentId}` : run.kind === 'other' ? (run.script ?? 'a Companion script') : 'a component' }
 }
 
@@ -341,9 +343,10 @@ const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun
   for (const run of runs) {
     const found = await subjectOf($, settings, run, current)
     const args = run.kind === 'test' && run.args ? { args: run.args } : {}
-    started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found, ...args })
+    const product = run.product ? { product: run.product, verb: run.verb ?? '' } : {}
+    started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found, ...args, ...product })
   }
-  if (!current.activity.some(a => a.kind !== 'other')) openPane($)
+  if (!current.activity.some(a => a.kind !== 'other' || a.product)) openPane($)
   void rememberScripts($, runs)
   await record($, list => [...list, ...started])
   void refreshStatus($, settings)
@@ -402,7 +405,7 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
 /** A toast for what someone would want to hear about without looking. */
 const announce = ($: Engine, settings: Settings, a: Activity) => {
   if (a.kind === 'other' || a.kind === 'pull') {
-    if (a.outcome === 'failed' || a.outcome === 'blocked') toast($, settings, `${STATUS[levelOf(a)].icon} ${describe(a)}`)
+    if (a.outcome === 'failed' || a.outcome === 'blocked' || levelOf(a) === 'warning') toast($, settings, `${STATUS[levelOf(a)].icon} ${describe(a)}`)
     return
   }
   if (a.outcome !== 'ok' || a.kind === 'deploy' || a.kind === 'test') {
@@ -1581,6 +1584,7 @@ export const register: Register = (on, options) => {
           const aside = [ago(a.endedAt ?? a.startedAt, now), a.source === 'log' ? 'log' : undefined, spent ? `${formatTokens(spent)} tok` : undefined]
           return line(levelOf(a), describe(a), aside.filter(Boolean).join(' · '))
         })}
+        {feed.length > 0 && productSpendLine(current.activity, all) && note(productSpendLine(current.activity, all)!)}
         {steps.length > STEPS_PAGE && (
           <Box>
             {t(`  Showing ${feed.length} of ${steps.length}  `, { color: p.muted })}

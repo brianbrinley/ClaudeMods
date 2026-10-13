@@ -14,7 +14,7 @@ Mods for [Claude Code](https://claude.com/claude-code): plugins of function hook
 | Mod | What it does |
 |---|---|
 | [boomi-runtime](boomi-runtime/) | A temporary Boomi runtime for the session, handed to Boomi Companion: provision, smoke test, tear down. |
-| [boomi-dashboard](boomi-dashboard/) | A live summary of a Boomi Companion session: builds, tests, deploys, what to fix next, watched components and the session's cost, with a recap of the last session when a new one starts. |
+| [boomi-dashboard](boomi-dashboard/) | A live summary of a Boomi Companion session across all its plugins (integration, Data Hub, BDI, Agentstudio, connectors and Marketplace): what Claude did, what to fix next, watched components and the session's cost, with a recap of the last session when a new one starts. |
 
 **Ideas for what to build next** are on the [Ideas](IDEAS.md) page, ranked by business value and effort. Add your own, or claim one to build.
 

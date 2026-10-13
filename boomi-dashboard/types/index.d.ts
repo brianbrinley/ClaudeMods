@@ -4,6 +4,13 @@
  */
 export type ActivityKind = 'edit' | 'create' | 'push' | 'pull' | 'deploy' | 'undeploy' | 'test' | 'other'
 
+/**
+ * Which Boomi Companion plugin's script a step ran, beyond bc-integration's:
+ * Marketplace recipes, Data Hub, BDI (formerly Rivery), Agentstudio, or
+ * custom connector development. Absent for bc-integration's own.
+ */
+export type Product = 'marketplace' | 'datahub' | 'bdi' | 'agentstudio' | 'connectordev'
+
 /** How it went: `blocked` is a call another mod refused before it ran. */
 export type Outcome = 'running' | 'ok' | 'failed' | 'blocked'
 
@@ -25,6 +32,9 @@ export type Activity = {
   type?: string
   /** For `other`: the script's name without `boomi-` and `.sh`. */
   script?: string
+  /** Another Companion plugin's step: its product, and the script's subcommand (`deploy`, `run`, ...). */
+  product?: Product
+  verb?: string
   /** A pushed component's new version. */
   version?: string
   /** A test's execution status (COMPLETE, ERROR, ...) and ID. */
@@ -162,6 +172,8 @@ export type PastSession = {
   models: string[]
   /** Companion script runs by kind: push 3, deploy 1, ... */
   runs: Partial<Record<ActivityKind, number>>
+  /** Other Companion plugins' steps that changed something, by product: datahub 2, bdi 1, ... */
+  products?: Partial<Record<Product, number>>
   /** The components the runs named: their file names, else their IDs. */
   components: string[]
   /** What the session was about: its title, else the person's first request. */

@@ -1,7 +1,7 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.12.1",
-  "description": "Boomi Companion at a glance while you build: each component's stage, what needs attention, watched components and the session's cost",
+  "version": "0.13.0",
+  "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
     "paneTheme": {
