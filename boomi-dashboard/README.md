@@ -102,7 +102,7 @@ Boomi Companion is [six plugins](https://github.com/OfficialBoomi/boomi-companio
 
 | Plugin | Steps it shows |
 |---|---|
-| bc-marketplace | Recipes installed (`Marketplace: installed recipe Salesforce to NetSuite Orders`) and their supporting materials downloaded |
+| bc-marketplace | Recipes installed (`Marketplace: installed recipe Salesforce to NetSuite Orders · 4 components`) and their supporting materials downloaded. The components a recipe copied join **Components this session**, starting `✓ from recipe …`; pull one and its name and later stages fill in the same row |
 | bc-datahub | Models created, updated, published and given quality steps; sources and their initial loads; universes deployed; quarantined records approved or rejected; golden records updated, end-dated or restored |
 | bc-bdi | Flows run, cancelled, activated, created or restored; CDC turned on or off; connections, environments, variables and dataframes changed |
 | bc-agentstudio | Agents, tools and MCP servers created or updated; agents packaged and deployed; conversations with a deployed agent |

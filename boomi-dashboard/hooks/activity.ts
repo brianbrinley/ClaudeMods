@@ -225,6 +225,8 @@ export type Reading = {
   version?: string
   executionStatus?: string
   executionId?: string
+  /** The file a pull saved the component to, when the output names it. */
+  file?: string
 }
 
 const firstLine = (text: string, pattern: RegExp): string | undefined =>
@@ -273,6 +275,9 @@ export const readOutput = (kind: ActivityKind, output: string, isError: boolean)
   if (id) reading.componentId = id[1]
   const version = output.match(/now version (\d+)/)
   if (version) reading.version = version[1]
+  // A pull by component ID names its file only in its output.
+  const saved = output.match(/Component saved to (.+\.xml)\s*$/m)
+  if (saved) reading.file = saved[1]!.trim()
 
   if (kind === 'test') {
     const completed = output.match(/status=([A-Z_]+), executionId=(\S+)/)
@@ -578,6 +583,8 @@ export type ComponentRow = {
   lastAt: number
   /** Every activity of this component, for its total spend. */
   ids: number[]
+  /** The Marketplace recipe it came from, when a recipe installed it. */
+  recipe?: string
 }
 
 /** Each component Claude edited, saved, deployed or tested, most recent first. */
@@ -599,6 +606,7 @@ export const components = (activity: readonly Activity[]): ComponentRow[] => {
     if (!isPlaceholder(a.subject) || isPlaceholder(row.name)) row.name = a.subject
     row.type = a.type ?? row.type
     row.componentId = a.componentId ?? row.componentId
+    if (a.recipe) row.recipe = a.recipe
     row.lastAt = Math.max(row.lastAt, a.endedAt ?? a.startedAt)
     if (a.kind === 'edit') row.edited = a
     else if (a.kind === 'create' || a.kind === 'push' || a.kind === 'pull') row.saved = a
@@ -627,10 +635,12 @@ export const stages = (row: ComponentRow, runs: readonly Run[] = []): Stage[] =>
   const { edited, saved, deployed, tested } = row
   const savedOk = saved && saved.outcome === 'ok' && saved.kind !== 'pull'
 
+  // Where it came from, when a Marketplace recipe installed it; its install is its first save.
+  if (row.recipe) out.push({ level: 'healthy', text: `from recipe ${row.recipe}${saved?.recipe && saved.version ? ` (v${saved.version})` : ''}` })
   if (edited && (!saved || when(edited) > when(saved))) {
     out.push({ level: 'warning', text: saved ? 'edited since last save' : 'edited, not in Boomi yet' })
   }
-  if (saved) {
+  if (saved && !saved.recipe) {
     if (saved.outcome === 'running') out.push({ level: 'warning', text: 'saving…' })
     else if (saved.outcome === 'blocked') out.push({ level: 'serious', text: 'save blocked' })
     else if (saved.outcome === 'failed') out.push({ level: 'critical', text: 'save failed' })
@@ -1037,7 +1047,7 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   const byProduct = productSpendLine(dashboard.activity, all)
   if (byProduct) lines.push(`  ${byProduct}`)
 
-  const feed = dashboard.activity.slice(-8).reverse()
+  const feed = dashboard.activity.filter(a => !a.recipe).slice(-8).reverse()
   if (feed.length > 0) {
     lines.push('', "Claude's latest steps (what Claude just did with Companion, newest first):")
     for (const a of feed) {

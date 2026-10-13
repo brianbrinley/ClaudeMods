@@ -94,6 +94,7 @@ import {
 } from './activity'
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
+import { recipeComponents } from './products'
 import type { Credentials } from './platform'
 
 type Engine = EngineInterface
@@ -483,9 +484,12 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
   let id = nextId((await read($, dashboard)).activity)
   const finish = async (a: Activity, reading: Reading): Promise<Activity> => {
     // A create or pull writes the component's ID and name into its file.
-    const fresh = a.file && (a.kind === 'create' || a.kind === 'pull') ? await readComponent($, a.file) : {}
+    const path = a.file ?? reading.file
+    const fresh = path && (a.kind === 'create' || a.kind === 'pull') ? await readComponent($, path) : {}
+    const file = a.file ?? (reading.file ? componentPath(reading.file, settings.componentsDir) : undefined)
     return {
       ...a,
+      ...(file ? { file } : {}),
       outcome: reading.outcome,
       detail: reading.detail,
       endedAt,
@@ -497,6 +501,11 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
       executionId: reading.executionId,
     }
   }
+  // A Marketplace install's copied components join the session's components, as from that recipe.
+  const fromRecipes = (a: Activity) =>
+    a.product === 'marketplace' && a.script === 'boomi-marketplace-install' && ran.deny === undefined
+      ? recipeComponents(output).map(c => ({ ...c, recipe: a.subject }))
+      : []
   for (const a of started) {
     if (ran.deny !== undefined) {
       done.push({ ...a, outcome: 'blocked', detail: ran.deny.split('\n')[0]!.slice(0, 160), endedAt })
@@ -506,6 +515,13 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
     for (const extra of extras.get(a.id) ?? []) {
       // Another pass of the same script: its own component, not this run's file.
       added.push(await finish({ ...a, id: id++, file: undefined, componentId: undefined, subject: 'a component' }, extra))
+    }
+  }
+  for (const a of done) {
+    const copied = a.outcome === 'ok' ? fromRecipes(a) : []
+    if (copied.length > 0) a.detail = `${a.detail} · ${copied.length} component${copied.length === 1 ? '' : 's'}`
+    for (const c of copied) {
+      added.push({ id: id++, kind: 'create', outcome: 'ok', subject: c.componentId, detail: `installed from recipe ${c.recipe}`, startedAt: a.startedAt, endedAt: a.endedAt, componentId: c.componentId, recipe: c.recipe, ...(c.version ? { version: c.version } : {}) })
     }
   }
   await record($, list => [...list.map(a => done.find(d => d.id === a.id) ?? a), ...added])
@@ -1508,7 +1524,7 @@ export const register: Register = (on, options) => {
     const whys = await read($, diagnoses)
     const rows = components(current.activity)
     const stepsLimit = await read($, stepsShown)
-    const steps = current.activity.slice().reverse()
+    const steps = current.activity.filter(a => !a.recipe).reverse()
     const feed = steps.slice(0, stepsLimit)
     const all = spends(current.activity)
     // The pane's padding and the surface's own frame take a few columns: leave room for both.

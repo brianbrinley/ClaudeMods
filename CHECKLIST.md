@@ -109,3 +109,5 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** `Companion this month: $X of $Y`, where X matches **Past Companion sessions**' this month plus this session. **Fail:** no line, or X far off.
 - [ ] **H4. Full session ID.** Look at the pane's footer.
   **Pass:** `session` followed by the whole ID, and `claude --resume <that ID>` in a new terminal opens this session. **Fail:** a short ID, or the resume fails.
+- [ ] **G9. Recipe components.** Have Claude install a Marketplace recipe, then pull one of its components.
+  **Pass:** each copied component under **Components this session** with `✓ from recipe <name>`; after the pull, that row shows the component's name and `✓ pulled from Boomi`. **Fail:** no rows, or the pull makes a second row.

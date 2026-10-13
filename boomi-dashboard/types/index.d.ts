@@ -35,6 +35,8 @@ export type Activity = {
   /** Another Companion plugin's step: its product, and the script's subcommand (`deploy`, `run`, ...). */
   product?: Product
   verb?: string
+  /** A component a Marketplace recipe installed: the recipe's name. Its install is the step; this is the component. */
+  recipe?: string
   /** A pushed component's new version. */
   version?: string
   /** A test's execution status (COMPLETE, ERROR, ...) and ID. */

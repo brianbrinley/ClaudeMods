@@ -1234,3 +1234,33 @@ test("a monthly Companion amount adds this month's earlier sessions to this one"
   // $3.50 earlier this month, $1.25 so far in this session.
   expect((await $.command.run(dashboard('text'))).text).toContain('✓ Companion this month: $4.75 of $10')
 })
+
+test("a Marketplace recipe's components join the session's components, and a pull names them", async ($, on) => {
+  world(on, { 'active-development/processes/Order Sync.xml': `<bns:Component xmlns:bns="http://api.platform.boomi.com/" componentId="783e3c22-aaaa-bbbb-cccc-000000000001" name="Order Sync" type="process"></bns:Component>` })
+  const install = 'BOOMI_COMMON_SH=/x/boomi-common.sh bash scripts/boomi-marketplace-install.sh --bundle-id b-1 --folder-id 42'
+  const pull = 'bash scripts/boomi-component-pull.sh --component-id 783e3c22-aaaa-bbbb-cccc-000000000001'
+  productShell(on, {
+    [install]: {
+      out: [
+        'Installing marketplace recipe...',
+        '  Bundle ID: b-1',
+        "SUCCESS: Installed 'Salesforce to NetSuite Orders'",
+        '',
+        'Copied component IDs:',
+        '  783e3c22-aaaa-bbbb-cccc-000000000001 (v1)',
+        '  783e3c22-aaaa-bbbb-cccc-000000000002 (v3)',
+      ].join('\n'),
+    },
+    [pull]: { out: 'SUCCESS: Component saved to active-development/processes/Order Sync.xml' },
+  })
+  await $.tool.call({ tool: 'Bash', command: install })
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('✓ Marketplace: installed recipe Salesforce to NetSuite Orders')
+  expect(text).toContain('783e3c22-aaaa-bbbb-cccc-000000000002: ✓ from recipe Salesforce to NetSuite Orders (v3)')
+  // The install is one step in the feed, not one per component.
+  expect(text.match(/installed from recipe/g)).toBeNull()
+
+  await $.tool.call({ tool: 'Bash', command: pull })
+  const after = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(after).toContain('Order Sync (process): ✓ from recipe Salesforce to NetSuite Orders  ✓ pulled from Boomi')
+})

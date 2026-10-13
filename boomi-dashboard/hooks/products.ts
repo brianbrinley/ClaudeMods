@@ -260,3 +260,16 @@ export const productWords = (
   if (how === 'doing') return `${name}: ${phrase(found.does)}…`
   return `${name}: couldn't ${phrase(found.does)}`
 }
+
+/**
+ * The components a Marketplace install copied into the account, from its
+ * output: after "Copied component IDs:", one "  <id> (v<version>)" line each.
+ */
+export const recipeComponents = (output: string): { componentId: string; version?: string }[] => {
+  const at = output.indexOf('Copied component IDs:')
+  if (at < 0) return []
+  return [...output.slice(at).matchAll(/^\s+([0-9a-f][0-9a-f-]{7,})\s+\(v(\d+|\?)\)\s*$/gim)].map(m => ({
+    componentId: m[1]!,
+    ...(m[2] && m[2] !== '?' ? { version: m[2] } : {}),
+  }))
+}
