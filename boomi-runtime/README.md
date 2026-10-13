@@ -7,8 +7,6 @@
 
 A Claude Code mod that gives a session its own temporary Boomi runtime. It provisions the runtime, points [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) at it so Companion can build and test on it, and deletes it when you're done. No admin rights or Windows/Linux service needed.
 
-> **Prototype.** Linux only, built for Claude Code on the web. Verified end to end against a live Boomi account: provision, attach, smoke test and teardown.
-
 ## What it does
 
 ```mermaid
@@ -126,6 +124,7 @@ The mod is one folder of TypeScript that Claude Code loads into the session: no 
 
 Limits:
 
+- Linux only, as Claude Code on the web runs. Windows is under [To do](#to-do).
 - The mod API is early access and may change.
 - `session.end` doesn't run if the container is reclaimed first; `/boomi reap` cleans up.
 
