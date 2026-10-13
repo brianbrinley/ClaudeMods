@@ -1131,7 +1131,7 @@ test("other Companion plugins' steps show in the feed in their own words; read-o
   })
   for (const command of [list, deploy, run, install]) await $.tool.call({ tool: 'Bash', command })
   const text = (await $.command.run(dashboard('text'))).text ?? ''
-  expect(text).toContain('✓ Data Hub: deployed universe 7c1e9a40…')
+  expect(text).toContain('◐ Data Hub: universe 7c1e9a40… deploying')
   expect(text).toContain('◐ BDI: flow 65f0c2a1… run started')
   expect(text).toContain('✓ Marketplace: installed recipe Salesforce to NetSuite Orders')
   expect(text).not.toContain('list')
@@ -1421,4 +1421,70 @@ test('/bc-dashboard review takes a number, or asks which of the costliest recent
   expect(picked).toContain('$20 · 30 prompts')
   expect(picked).toContain('Switch with /model')
   expect((await $.command.run(dashboard('review 9'))).text).toContain("9 isn't one of these.")
+})
+
+test('a Data Hub deploy shows how it went once its status is known, and a failure needs attention', async ($, on) => {
+  world(on)
+  const deploy = `bash scripts/datahub-deployment.sh deploy ${UNIVERSE} repo-1 --version 3`
+  const check = `bash scripts/datahub-deployment.sh status ${UNIVERSE} dep-9`
+  let status = 'IN_PROGRESS'
+  on('tool.call', { tool: 'Bash' }, async (_$, e) => ({
+    result: {
+      stdout: String(e.command) === deploy ? `<mdm:UniverseDeployment xmlns:mdm="http://mdm.api.platform.boomi.com/"><mdm:id>dep-9</mdm:id><mdm:universeId>${UNIVERSE}</mdm:universeId><mdm:status>PENDING</mdm:status></mdm:UniverseDeployment>` : JSON.stringify({ id: 'dep-9', status }),
+      stderr: '',
+      interrupted: false,
+    },
+  }))
+  await $.tool.call({ tool: 'Bash', command: deploy })
+  expect((await $.command.run(dashboard('text'))).text).toContain('◐ Data Hub: universe 7c1e9a40… deploying')
+  await $.tool.call({ tool: 'Bash', command: check })
+  expect((await $.command.run(dashboard('text'))).text).toContain('✓ Nothing needs attention.')
+  status = 'FAILED'
+  await $.tool.call({ tool: 'Bash', command: check })
+  const failed = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(failed).toContain('✗ Data Hub: deploy of universe 7c1e9a40… failed')
+  expect(failed).toContain('ERROR: the deployment ended FAILED (deployment dep-9)')
+  status = 'SUCCESS'
+  await $.tool.call({ tool: 'Bash', command: check })
+  const done = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(done).toContain('✓ Data Hub: deployed universe 7c1e9a40…')
+  expect(done).toContain('✓ Nothing needs attention.')
+})
+
+const quarantineXml = (entries: [string, string, string][]) =>
+  `<QuarantineQueryResponse resultCount="${entries.length}">${entries
+    .map(([id, cause, reason]) => `<QuarantineEntry sourceId="SF" sourceEntityId="${id}"><cause>${cause}</cause><reason>${reason}</reason></QuarantineEntry>`)
+    .join('')}</QuarantineQueryResponse>`
+
+test('Data Hub quarantine Claude looks at is kept per universe: records in it need attention, and an empty list clears it', async ($, on) => {
+  const toasts = world(on, { 'filter.xml': '<QuarantineQueryRequest/>' })
+  const query = `bash scripts/datahub-quarantine.sh query --universe ${UNIVERSE}`
+  let answer = quarantineXml([
+    ['P1', 'PARSE_FAILURE', "Unknown element 'uniqueId'"],
+    ['P2', 'PARSE_FAILURE', 'Missing field group wrapper'],
+    ['P3', 'REQUIRED_FIELD', 'name is required'],
+  ])
+  on('tool.call', { tool: 'Bash' }, async (_$, e) => ({ result: { stdout: String(e.command).includes('filter.xml') ? quarantineXml([]) : answer, stderr: '', interrupted: false } }))
+  await $.tool.call({ tool: 'Bash', command: query })
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('◐ 3 records in Data Hub quarantine, universe 7c1e9a40…')
+  expect(text).toContain("2 PARSE_FAILURE, 1 REQUIRED_FIELD. First: Unknown element 'uniqueId'")
+  expect(text).toContain('Data Hub quarantine:\n  ◐ Universe 7c1e9a40…: 3 in quarantine (2 PARSE_FAILURE, 1 REQUIRED_FIELD), checked just now')
+  expect(toasts.some(t => t.includes('3 records in quarantine'))).toBe(true)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: 'DATA HUB' })).toBeDefined()
+
+  // A filtered query is only part of it: it doesn't change the count.
+  await $.tool.call({ tool: 'Bash', command: `${query} filter.xml` })
+  expect((await $.command.run(dashboard('text'))).text).toContain('3 records in Data Hub quarantine')
+
+  // Closed: out of Needs attention until there are more.
+  await $.command.run(dashboard('close 1'))
+  expect((await $.command.run(dashboard('text'))).text).toContain('✓ Nothing needs attention.')
+
+  answer = quarantineXml([])
+  await $.tool.call({ tool: 'Bash', command: query })
+  const cleared = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(cleared).toContain('✓ Universe 7c1e9a40…: nothing in quarantine')
+  expect(cleared).toContain('✓ Nothing needs attention.')
 })

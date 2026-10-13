@@ -311,3 +311,71 @@ export const bdiRunReading = (output: string): { status: BdiRunStatus | string; 
   if (status === 'failed' && reason && /^run cancel+ed$/i.test(reason.trim())) return { status: 'canceled' }
   return reason ? { status, reason } : { status }
 }
+
+// --- Data Hub deployments and quarantine ------------------------------------------
+
+/** How a deployment stands, from whatever status its response or a status check names. */
+export type DeployState = 'pending' | 'ok' | 'failed'
+
+/**
+ * A Data Hub status word as a state. The values aren't documented, so this
+ * reads them leniently: anything naming success or completion is done,
+ * anything naming failure or error failed, the rest still in progress.
+ */
+export const deployState = (status: string | undefined): DeployState | undefined => {
+  if (!status) return undefined
+  if (/fail|error|cancel/i.test(status)) return 'failed'
+  if (/success|succeeded|complete|deployed|done/i.test(status)) return 'ok'
+  return 'pending'
+}
+
+/** A universe deploy's response: its deployment ID and status, in XML (mdm:) or JSON. */
+export const datahubDeployReading = (output: string): { deploymentId?: string; status?: string } => {
+  const xml = (tag: string) => output.match(new RegExp(`<(?:mdm:)?${tag}>\\s*([^<\\s][^<]*?)\\s*</(?:mdm:)?${tag}>`))?.[1]
+  const json = (key: string) => output.match(new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`))?.[1]
+  const deploymentId = json('deploymentId') ?? xml('deploymentId') ?? json('id') ?? xml('id')
+  const status = json('status') ?? xml('status')
+  return { ...(deploymentId ? { deploymentId } : {}), ...(status ? { status } : {}) }
+}
+
+/** A `datahub-deployment.sh status <universe-id> <deployment-id>` in a command: Claude checking a deploy. */
+export const datahubStatusChecks = (command: string): { universe: string; deployment: string }[] =>
+  [...command.matchAll(/datahub-deployment\.sh\s+status\s+(?:'|")?([^\s'";&|]+)(?:'|")?\s+(?:'|")?([^\s'";&|]+)/g)].map(m => ({ universe: m[1]!, deployment: m[2]! }))
+
+/**
+ * A `datahub-quarantine.sh query --universe <id> [filter.xml]` in a command:
+ * Claude looking at a universe's quarantine. Without a filter file it lists
+ * every active entry, so its count is the universe's.
+ */
+export const quarantineChecks = (command: string): { universe: string; isAll: boolean }[] =>
+  [...command.matchAll(/datahub-quarantine\.sh\s+query\b([^;&|\n]*)/g)].flatMap(m => {
+    const words = m[1]!.trim().split(/\s+/).filter(Boolean)
+    const at = words.indexOf('--universe')
+    const universe = at >= 0 ? words[at + 1]?.replace(/^['"]|['"]$/g, '') : undefined
+    if (!universe) return []
+    const rest = words.filter((w, i) => i !== at && i !== at + 1)
+    return [{ universe, isAll: !rest.some(w => /\.xml['"]?$/.test(w)) }]
+  })
+
+/** One quarantined record: why, the reason given, and which source entity. */
+export type QuarantineEntry = { cause: string; reason?: string; sourceEntityId?: string }
+
+/** A quarantine query's response: its entries, from the Repository API's XML. Undefined when it isn't one. */
+export const quarantineReading = (output: string): QuarantineEntry[] | undefined => {
+  if (!/<(?:\w+:)?QuarantineQueryResponse\b|<(?:\w+:)?QuarantineEntry\b/.test(output)) return undefined
+  return [...output.matchAll(/<(?:\w+:)?QuarantineEntry\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?QuarantineEntry>/g)].map(m => {
+    const attrs = m[1]!
+    const body = m[2]!
+    const tag = (name: string) => body.match(new RegExp(`<(?:\\w+:)?${name}>([^<]*)</(?:\\w+:)?${name}>`))?.[1]?.trim()
+    const entity = attrs.match(/sourceEntityId="([^"]*)"/)?.[1]
+    const reason = tag('reason')
+    return { cause: tag('cause') ?? 'UNKNOWN', ...(reason ? { reason } : {}), ...(entity ? { sourceEntityId: entity } : {}) }
+  })
+}
+
+/** A quarantine's causes in a few words: "2 PARSE_FAILURE, 1 REQUIRED_FIELD". */
+export const causeWords = (entries: readonly QuarantineEntry[]): string => {
+  const counts = new Map<string, number>()
+  for (const e of entries) counts.set(e.cause, (counts.get(e.cause) ?? 0) + 1)
+  return [...counts].sort((a, b) => b[1] - a[1]).map(([cause, n]) => `${n} ${cause}`).join(', ')
+}

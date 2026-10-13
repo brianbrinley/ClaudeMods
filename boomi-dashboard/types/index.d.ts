@@ -39,7 +39,11 @@ export type Activity = {
   recipe?: string
   /** What another plugin's step acted on, in full (its subject may be shortened): a BDI flow's ID, say. */
   ref?: string
-  /** A BDI flow run: its ID, and its status as Claude's last status check found it. */
+  /**
+   * Work another plugin started that finishes later: a BDI flow run, a Data
+   * Hub deployment. Its ID, and its status as the latest response or status
+   * check Claude ran found it.
+   */
   runId?: string
   runStatus?: string
   /** A pushed component's new version. */
@@ -157,7 +161,16 @@ export type Dashboard = {
   seenRuns?: string[]
   /** Failed steps closed from Needs attention, by activity ID. */
   closedSteps?: number[]
+  /**
+   * Data Hub quarantine, by universe ID, as Claude's latest query of all its
+   * active entries found it: how many, their causes and the first reason.
+   * `seen` is the count closed from Needs attention, so only more is news.
+   */
+  quarantine?: Record<string, QuarantineSeen>
 }
+
+/** One universe's Data Hub quarantine, as the dashboard last saw it. */
+export type QuarantineSeen = { count: number; causes: string; reason?: string; checkedAt: number; seen?: number }
 
 /** Reading a failed execution's log: fetching, what it says, or why it couldn't be read. */
 export type DiagnosisState = {
