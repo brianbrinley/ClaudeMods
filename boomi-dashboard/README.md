@@ -11,7 +11,7 @@
 
 - **Know where every component stands.** Edited, saved with its version, deployed, tested: each component's stage updates as Claude works.
 - **Go from failure to fix in two clicks.** **Why?** reads a failed test's process log. **Ask Claude to fix** drafts the request with the log's lines in it, and **Run again** checks the fix without a turn of Claude's.
-- **Keep spend in sight.** Tokens, cost and how full the context is, per step and per component, with an optional budget that warns at 80%.
+- **Keep spend in sight.** Tokens, cost and how full the context is, per step and per component. On a Claude seat, your 5-hour and weekly usage limits and where your pace leads, read automatically, and an optional Companion budget of your own: a share of your limit per day, week or month, or a monthly amount.
 - **Pick up where you left off.** A new session opens with what the last one did and left to fix, and **Past Companion sessions** shows what earlier work cost.
 - **Every Companion plugin, not only integration.** Data Hub deploys, BDI flow runs, Agentstudio agents, custom connector releases and Marketplace recipes show up as steps too, with their failures under **Needs attention** and each product's share of the spend.
 - **Catch what happens outside the chat.** Companion's activity log adds script runs from a terminal, and watched components flag changes someone else makes in Boomi.
@@ -123,9 +123,28 @@ The headline counts **new tokens**: input, output and cache writes. **Cache read
 Tokens: 412k new (18k in · 44k out · 350k cache writes) · 3.30M cache reads
 ```
 
-Spend is the session's cost as `/cost` reports it. A step's share is what Claude spent since the previous step; a component's is all its steps.
+Spend is the session's cost as `/cost` reports it. On a Claude seat, that's what the same use would cost on the API, not a bill. A step's share is what Claude spent since the previous step; a component's is all its steps.
 
 **Budget:** set `budgetUsd` and the status line, summary and SPEND gauge warn from 80% (`◐ 84% of the $5.00 budget`) and once it's spent, with one toast at each mark. Nothing is stopped.
+
+### Your Claude usage limits
+
+On a Claude seat (Pro, Max, Team or Enterprise), the dashboard reads your usage limits as Claude Code reports them, with no setup. Those are the 5-hour and weekly windows, and an admin's spend limit when one is set.
+
+- **LIMITS** in the pane shows the busiest window, when it resets, and where your pace leads: `◐ used up in 1d 6h` when you'd run out before it resets, else `on pace for 64% by reset`.
+- The banner shows them in a few characters (`week 42% · 5h 12%`). The status line, `/bc-dashboard text` and the report say more.
+- A toast at 80% of a window, and one when it's used up, once per window.
+
+On an API key there are no limits to read, so none of this shows.
+
+### Your own Companion budget
+
+Two optional settings under `/config` give Companion work a budget of its own. Both warn in the gauges and the status line from 80%, toast at 80% and 100%, and stop nothing.
+
+- **Relative, `companionShare`:** a percent of your weekly limit that Companion may use, over `companionSharePeriod`: `week` (the last 7 days), `day` (today, a seventh of the share) or `month` (this month, the month's days in sevenths). With 30% per day, Companion gets 4.3% of your weekly limit each day: `Companion today: 2.1% of your weekly limit, 49% of its 4.3%`. From a session's first Companion step, the dashboard counts how far the weekly limit rises, by day, and adds up Companion sessions on this machine.
+- **Explicit, `companionMonthlyUsd`:** an amount for this calendar month's Companion sessions, counted in Claude Code's own cost figures: the earlier sessions from **Past Companion sessions** (scanned for you, about once an hour), plus this one live.
+
+The limit is shared, so in a Companion session anything else that uses Claude at the same time, on this machine or another, counts too. Sessions on other machines, and Claude Code on the web, aren't added up.
 
 ## Watched components
 
@@ -206,6 +225,9 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `toasts` | `true` | Toasts for failures, finished deploys and tests, and watched changes. |
 | `banner` | `true` | The banner above the prompt, and a new session's recap and tips. |
 | `budgetUsd` | `0` | The session's spend budget in US dollars; `0` turns it off. |
+| `companionShare` | `0` | Companion's share of your weekly usage limit, in percent; `0` turns it off. |
+| `companionSharePeriod` | `week` | What the share runs over: `day`, `week` or `month`. |
+| `companionMonthlyUsd` | `0` | A monthly amount for Companion sessions, in US dollars; `0` turns it off. |
 | `suggestions` | `true` | Suggest the next step after a turn. |
 | `historyDays` | `90` | How far back **Past Companion sessions** reads. |
 
@@ -261,7 +283,7 @@ The dashboard follows Claude's tool calls, so tracking the session costs no Plat
 |---|---|
 | `tool.call` on `Bash`, `Write`, `Edit` | Companion's script runs and component edits |
 | `turn.step`, `turn.start`, `turn.complete` | Each model call's tokens, and whether Claude is working |
-| `$.session.usage` | Cost, context and session length |
+| `$.session.usage` | Cost, context, session length and the seat's usage limits |
 | `$.http.fetch` | Read-only Platform API queries for watched components |
 | `$.fs` | Component XML, Companion's `.env` and its activity log |
 | `$.process.run` | **Why?**, **Run again** and the session scan |

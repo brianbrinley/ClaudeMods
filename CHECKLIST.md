@@ -96,3 +96,16 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** no step for it. **Fail:** a `list` step shows up.
 - [ ] **G7. Spend by product.** In a session that used two products, run `/bc-dashboard text`.
   **Pass:** a `By product:` line with each product's cost. **Fail:** no such line.
+
+## H. Usage limits and a Companion budget
+
+*boomi-dashboard 0.14.0, on a Claude seat (not an API key).*
+
+- [ ] **H1. Limits read themselves.** Open the pane in any session.
+  **Pass:** a **LIMITS** gauge with your weekly or 5-hour percent, close to what `/usage` shows, and when it resets; the banner ends with `week NN% · 5h NN%`. **Fail:** no gauge, or a percent far from `/usage`; send both.
+- [ ] **H2. Relative budget.** Under `/config`, set `companionShare` to `10` and `companionSharePeriod` to `day`, restart, and do some Companion work.
+  **Pass:** `/bc-dashboard text` shows `Companion today: N% of your weekly limit, M% of its 1.4%`, and N rises as you work. **Fail:** no line, or N stays at 0 after real work.
+- [ ] **H3. Monthly amount.** Set `companionMonthlyUsd` to a little over this month's Companion cost, restart, and wait a minute.
+  **Pass:** `Companion this month: $X of $Y`, where X matches **Past Companion sessions**' this month plus this session. **Fail:** no line, or X far off.
+- [ ] **H4. Full session ID.** Look at the pane's footer.
+  **Pass:** `session` followed by the whole ID, and `claude --resume <that ID>` in a new terminal opens this session. **Fail:** a short ID, or the resume fails.

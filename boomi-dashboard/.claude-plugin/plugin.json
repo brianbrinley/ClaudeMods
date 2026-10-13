@@ -69,6 +69,29 @@
       "description": "The session's spend budget: the status line and pane warn at 80% and when it's spent; 0 turns it off",
       "default": 0
     },
+    "companionShare": {
+      "type": "number",
+      "title": "Companion's share of your usage limit (%)",
+      "description": "How much of your weekly Claude usage limit Boomi Companion work may use, as a percent, over the period below: per week as it is, per day a seventh of it, per month the month's days in sevenths. The dashboard counts how far the limit moves in Companion sessions and warns at 80% and when it's used; 0 turns it off",
+      "default": 0
+    },
+    "companionSharePeriod": {
+      "type": "string",
+      "title": "Companion share period",
+      "description": "What the share runs over: day (today), week (the last 7 days) or month (this calendar month)",
+      "options": [
+        "day",
+        "week",
+        "month"
+      ],
+      "default": "week"
+    },
+    "companionMonthlyUsd": {
+      "type": "number",
+      "title": "Companion's monthly amount (USD)",
+      "description": "A monthly amount for Boomi Companion sessions, counted as Claude Code's own cost figures (on a seat, what the same use would cost on the API); warns at 80% and when it's reached; 0 turns it off",
+      "default": 0
+    },
     "suggestions": {
       "type": "boolean",
       "title": "Suggest the next step",

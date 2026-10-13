@@ -22,7 +22,13 @@ let clock: MockClock
 
 /** The surface, files, clock and session cost beneath the plugin; records the toasts. */
 /** What the surface does with a pane, and the session's id and origin remote. */
-type WorldOptions = { isPlaced?: boolean; sessionId?: string; remote?: string | null }
+type WorldOptions = {
+  isPlaced?: boolean
+  sessionId?: string
+  remote?: string | null
+  /** The seat's usage limits, read each time the session's usage is. */
+  limits?: () => { kind: string; percentUsed: number; resetsAt?: string }[]
+}
 
 /** The panes the plugin asked to open in the test running now. */
 let opens: Record<string, unknown>[] = []
@@ -56,7 +62,7 @@ const world = (on: On, files: Record<string, string> = {}, options: WorldOptions
     return { value: undefined }
   })
   on('session.usage', async () => ({
-    value: { startedAt: 0, context: { window: 200_000, percent: 12 }, rateLimits: [], cost: { usd: 1.25 } },
+    value: { startedAt: 0, context: { window: 200_000, percent: 12 }, rateLimits: options.limits?.() ?? [], cost: { usd: 1.25 } },
   }))
   return toasts
 }
@@ -340,7 +346,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   test(`on ${surface}, the footer names the session and links the repository's GitHub page`, async ($, on) => {
     world(on)
     const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
-    expect(await pane.find({ text: /session 3adaec6a/ })).toBeDefined()
+    expect(await pane.find({ text: /session 3adaec6a-0227-5e7b-a04b-eeeba5da8710/ })).toBeDefined()
     const link = await pane.find({ type: 'Link' })
     expect(link?.props).toMatchObject({ href: 'https://github.com/brianbrinley/ClaudeMods', label: 'github.com/brianbrinley/ClaudeMods' })
   })
@@ -1167,4 +1173,70 @@ test('a session with more than one product splits its spend by product', async (
   const report = (await $.command.run(dashboard('report'))).text ?? ''
   expect(report).toContain("## Companion's other plugins")
   expect(report).toContain('- ✓ BDI: ran flow flow-1')
+})
+
+// --- Usage limits and a personal Companion budget ---
+
+/** The weekly window, three days into a week that resets in four. */
+const WEEK_RESET = new Date(NOW + 4 * 86_400_000).toISOString()
+
+test('the seat\'s usage limits show in the pane, the banner and the text, and warn once at 80%', async ($, on) => {
+  let weekly = 42
+  const toasts = world(on, { [FILE]: ORDERS }, {
+    limits: () => [
+      { kind: 'five_hour', percentUsed: 12, resetsAt: new Date(NOW + 2 * 3_600_000).toISOString() },
+      { kind: 'seven_day', percentUsed: weekly, resetsAt: WEEK_RESET },
+    ],
+  })
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  await startSession($, on)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('Usage limits: ✓ weekly 42%, resets in 4d 0h, on pace for 98% by reset · ✓ 5-hour 12%, resets in 2h 0m')
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: 'LIMITS' })).toBeDefined()
+  expect(await pane.find({ text: /▰+▱+ 42%/ })).toBeDefined()
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await band.find({ text: /week 42% · 5h 12%/ })).toBeDefined()
+
+  weekly = 84
+  await clock.advance(5_000)
+  await clock.advance(5_000)
+  expect(toasts).toEqual(['◐ 84% of your weekly Claude limit used, resets in 3d 23h'])
+  expect((await $.command.run(dashboard('text'))).text).toContain('◐ weekly 84%')
+})
+
+test("off a subscription there are no limits to show", async ($, on) => {
+  world(on)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: 'LIMITS' })).toBeUndefined()
+  expect((await $.command.run(dashboard('text'))).text).not.toContain('Usage limits')
+})
+
+test("Companion's share of the limit counts how far Companion sessions move it, per day", { options: { companionShare: 30, companionSharePeriod: 'day' } }, async ($, on) => {
+  let weekly = 40
+  const store: Record<string, unknown> = {}
+  world(on, { [FILE]: ORDERS }, { limits: () => [{ kind: 'seven_day', percentUsed: weekly, resetsAt: WEEK_RESET }] })
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  await startSession($, on, store)
+  // Before any Companion work, the limit's moves aren't Companion's.
+  weekly = 41
+  await clock.advance(5_000)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  await clock.advance(5_000)
+  weekly = 43.1
+  await clock.advance(5_000)
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  // 30% of the weekly limit a week is 4.3% a day; 2.1% of it is 49%.
+  expect(text).toContain('Companion today: 2.1% of your weekly limit, 49% of its 4.3% (30% share per week, a seventh a day)')
+  expect(store.shareDays).toEqual({ '2026-10-12': 2.1 })
+})
+
+test("a monthly Companion amount adds this month's earlier sessions to this one", { options: { companionMonthlyUsd: 10 } }, async ($, on) => {
+  world(on)
+  mock.store(on)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: SCANNED, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await $.command.run(dashboard('history'))
+  // $3.50 earlier this month, $1.25 so far in this session.
+  expect((await $.command.run(dashboard('text'))).text).toContain('✓ Companion this month: $4.75 of $10')
 })
