@@ -45,6 +45,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** a green run. **Fail:** no run, or a red one.
 - [x] **D2.** *(Passed: both sections are live.)* On [the site](https://brianbrinley.github.io/ClaudeMods/), the Companion Dashboard page has a **Commands and tools** section, and the Boomi Runtime page has **Secure the API token**.
   **Pass:** both. **Fail:** the old pages.
+- [ ] **D3.** After the flamingo PR is merged, open [the Companion Dashboard page](https://brianbrinley.github.io/ClaudeMods/boomi-dashboard/) on a laptop-sized window, in Day and in Night.
+  **Pass:** the 8-bit flamingo stands to the right of the opening paragraph and its list, and every few seconds flaps and steps in place; in a narrow window it's gone. **Fail:** no flamingo, one overlapping the text, or a gap where it should be.
 
 ## E. Runtime regression
 
@@ -71,3 +73,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** a question dialog lists both, newest first, and picking one prints its log lines. With none, `Nothing to look into`. **Fail:** `Usage:` or an error.
 - [ ] **F7. No run polling.** Open the pane.
   **Pass:** no **Process runs in Boomi** section, and watching a component (`/bc-dashboard watch <id>`) still shows it under **Watched components**. **Fail:** the section is there, or the watch errors.
+- [ ] **F8. Status line in a new session.** Start a new session in the Companion workspace, as in F1.
+  **Pass:** the status line under the prompt reads `New session · last one <time> ago, …` and the session's cost, not a step from the last session. After Claude's first Companion step, it shows that step. **Fail:** it shows the last session's step, such as `✓ Test of a component passed`.
+- [ ] **F9. Reopen a past session.** Under **Past Companion sessions**, press **Scan**, then **Copy** beside an earlier session. Paste into a new terminal and press Enter.
+  **Pass:** `Copied. Paste it into a new terminal…` under the session, and the new terminal opens Claude Code in that session's folder with its conversation. Then `/bc-dashboard resume` asks which session and prints the command. **Fail:** nothing copied (say which terminal app), the command fails, or a different session opens.

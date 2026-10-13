@@ -67,6 +67,8 @@ import {
   choiceLabel,
   choiceFrom,
   choiceList,
+  resumeCommand,
+  resumable,
 } from '../hooks/activity'
 import type { Activity, Dashboard } from '../types'
 import type { ScannedSession } from '../hooks/activity'
@@ -222,6 +224,19 @@ test('the status line leads with the latest step, then what needs attention, the
     '✓ Saved Weather API to Boomi (v2) · ✗ 1 needs attention · 1.24M tokens · $1.84 this session',
   )
   expect(statusLine(dashboard(), NOW, 24 * HOUR)).toBe('waiting for Companion')
+})
+
+test("in a new session, the status line doesn't replay the last session's step", () => {
+  const restored = dashboard([act('test', 'ok', 'a component', NOW - 14 * HOUR, { componentId: ID, executionStatus: 'COMPLETE', isRestored: true })])
+  const recap = { endedAt: NOW - 14 * HOUR, components: 4, saves: 6, deploys: 2, tests: 3, testsFailed: 0, open: 0 }
+  expect(statusLine(restored, NOW, 24 * HOUR, { usd: 0 }, recap)).toBe('New session · last one 14h ago, nothing left to fix · $0.00 this session')
+  expect(statusLine(restored, NOW, 24 * HOUR, { usd: 0 })).toBe('waiting for Companion · $0.00 this session')
+  // A failure left over is still news, and counted once.
+  const failed = dashboard([act('test', 'failed', 'Orders Sync', NOW - HOUR, { componentId: ID, executionStatus: 'ERROR', isRestored: true })])
+  expect(statusLine(failed, NOW, 24 * HOUR, { usd: 0 }, { ...recap, open: 1 })).toBe('New session · last one 14h ago · ✗ 1 needs attention · $0.00 this session')
+  // Once Companion does something, the step leads again.
+  const working = dashboard([...restored.activity, act('push', 'ok', 'Weather API', NOW, { file: 'active-development/c/W.xml', version: '2' })])
+  expect(statusLine(working, NOW, 24 * HOUR, { usd: 0.5 }, recap)).toBe('✓ Saved Weather API to Boomi (v2) · $0.50 this session')
 })
 
 test('describe words each step for a person, not a script', () => {
@@ -805,4 +820,12 @@ test('a command picks its item by label or by number, from the items it fits', (
   expect(choiceList('Which?', choices, '/bc-dashboard why', NOW)).toBe(
     'Which?\n  1. ✗ Test of Orders Sync ended ERROR, just now\nRun /bc-dashboard why <number> with one of them.',
   )
+})
+
+test('the resume command quotes a folder only when it needs it', () => {
+  const s = { id: 'aaaaaaaa-1111', tokens: 0, cached: 0, models: [], runs: {}, components: [] }
+  expect(resumeCommand({ ...s, project: '/Users/me/orders' })).toBe('cd /Users/me/orders && claude --resume aaaaaaaa-1111')
+  expect(resumeCommand({ ...s, project: "/Users/me/pat's sync" })).toBe("cd '/Users/me/pat'\\''s sync' && claude --resume aaaaaaaa-1111")
+  expect(resumeCommand(s)).toBe('claude --resume aaaaaaaa-1111')
+  expect(resumable([s, { ...s, id: 'b' }], 'aaaaaaaa-1111').map(x => x.id)).toEqual(['b'])
 })

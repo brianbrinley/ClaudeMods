@@ -15,6 +15,7 @@ Credentials never go in a mod's files or in chat. Mods read them from the enviro
 `.github/workflows/pages.yml` publishes https://brianbrinley.github.io/ClaudeMods/ on every merge to `main` that touches the READMEs, `brand/`, `site/` or a mod:
 - `site/build.py` renders the READMEs listed in its `PAGES` with `site/template.html`, `brand/valence.css` and `site/assets/`. A `PAGES` entry whose nav label is `None` is built but left out of the top nav (the Style page, `site/style.md`). Code blocks get a Copy button.
 - Mermaid diagrams render in the browser and switch to `brand/mermaid-init-night.txt` in Night mode.
+- `<div data-flamingo></div>` in a README becomes the dashboard pane's 8-bit flamingo, drawn from the sprite in `boomi-dashboard/hooks/activity.ts` and floated beside the opening prose. It's hidden on narrow screens and stands still under reduced motion. GitHub shows nothing for it.
 
 To publish a new mod's README, add it to `PAGES`, its `assets/` folder to `COPY_PATHS`, and its folder to the `paths` that trigger `.github/workflows/pages.yml`. `IDEAS.md` stays in the repository but isn't published on the site; links to it go to GitHub. Keep README links relative: the build rewrites them for the site and sends anything not on the site to GitHub.
 

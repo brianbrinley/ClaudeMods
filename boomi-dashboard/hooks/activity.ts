@@ -892,12 +892,19 @@ export const headline = (activity: readonly Activity[]): Activity | undefined =>
 /**
  * The status line: the latest thing Companion did, then what needs attention,
  * then the session's tokens and cost. The engine prefixes it with the mod's name.
+ * Until Companion does something this session, a step from an earlier one isn't
+ * news: it says the session is new, and when the last one ended, as the banner does.
  */
-export const statusLine = (dashboard: Dashboard, now: number, windowMs: number, usage: Usage = {}): string => {
+export const statusLine = (dashboard: Dashboard, now: number, windowMs: number, usage: Usage = {}, recap?: SessionRecap): string => {
   const parts: string[] = []
-  const latest = headline(dashboard.activity)
-  if (latest) parts.push(`${STATUS[levelOf(latest)].icon} ${describe(latest)}`)
+  const isNew = !dashboard.activity.some(a => !a.isRestored)
+  const latest = isNew ? undefined : headline(dashboard.activity)
   const needs = attention(dashboard, now, windowMs)
+  if (latest) parts.push(`${STATUS[levelOf(latest)].icon} ${describe(latest)}`)
+  else if (recap) {
+    const left = needs.length > 0 ? '' : recap.open > 0 ? `, ${recap.open} left to fix` : ', nothing left to fix'
+    parts.push(`New session · last one ${ago(recap.endedAt, now)}${left}`)
+  }
   if (needs.length > 0) parts.push(`${STATUS[worst(needs.map(n => n.level))].icon} ${needs.length} need${needs.length === 1 ? 's' : ''} attention`)
   if (parts.length === 0) parts.push('waiting for Companion')
   const spent = [usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined, formatCost(usage.usd)].filter(Boolean)
@@ -1446,6 +1453,7 @@ export const historySummary = (sessions: readonly PastSession[], now: number, da
   ]
   if (sessions.length > 20) lines.push(`  …and ${sessions.length - 20} more`)
   lines.push('', "Costs are Claude Code's own, from each transcript. Claude Code on the web and other machines keep their transcripts elsewhere.")
+  lines.push('/bc-dashboard resume copies the command that reopens one of them in a new terminal.')
   return lines.join('\n')
 }
 
@@ -1710,3 +1718,20 @@ export const choiceFrom = (answer: string, choices: readonly Choice[]): Choice |
 /** The choices as a list to pick from by number, where no picker can be shown. */
 export const choiceList = (question: string, choices: readonly Choice[], command: string, now: number): string =>
   [question, ...choices.map(c => `  ${c.n}. ${STATUS[c.item.level].icon} ${c.item.title}, ${ago(c.item.at, now)}`), `Run ${command} <number> with one of them.`].join('\n')
+
+// --- Reopening a past session ------------------------------------------------------
+
+/** A path as one shell word: as it is when it's plain, else in single quotes. */
+const shellWord = (text: string): string => (/^[A-Za-z0-9_./~@%+=:,-]+$/.test(text) ? text : `'${text.replace(/'/g, "'\\''")}'`)
+
+/** What reopens a past session in a new terminal: its folder, then Claude Code resuming it by ID. */
+export const resumeCommand = (s: PastSession): string => `${s.project ? `cd ${shellWord(s.project)} && ` : ''}claude --resume ${shellWord(s.id)}`
+
+/** The past sessions there are to reopen, newest first: every one but this one. */
+export const resumable = (sessions: readonly PastSession[], currentId?: string): PastSession[] => sessions.filter(s => s.id !== currentId)
+
+/** A past session as an option of the picker: its number, when and what it was about. */
+export const resumeLabel = (s: PastSession, n: number, view: PastView = {}): string => {
+  const label = `${n}. ${pastParts(s, view).head}`
+  return label.length > 48 ? `${label.slice(0, 47)}…` : label
+}
