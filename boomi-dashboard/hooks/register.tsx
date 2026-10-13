@@ -52,6 +52,7 @@ import {
   modelName,
   modelSplits,
   pixelCells,
+  waveRows,
   readOutput,
   recentRuns,
   reopenAll,
@@ -1064,6 +1065,8 @@ type Palette = {
   accent: string
   /** The flamingo's pink. */
   bird: string
+  /** The water under it: Valence's seafoam. */
+  water: string
 }
 
 const PALETTES: Record<PaneTheme, Palette> = {
@@ -1077,6 +1080,7 @@ const PALETTES: Record<PaneTheme, Palette> = {
     bandText: '#FBF6EE',
     accent: '#0F766E',
     bird: '#C2185B',
+    water: '#9FDED6',
   },
   night: {
     bg: '#161A2E',
@@ -1088,8 +1092,9 @@ const PALETTES: Record<PaneTheme, Palette> = {
     bandText: '#161A2E',
     accent: '#5EEAD4',
     bird: '#F48FB1',
+    water: '#5EEAD4',
   },
-  terminal: { text: 'text', muted: 'inactive', heading: 'claude', rule: 'subtle', bandText: 'claude', accent: 'suggestion', bird: '#C2185B' },
+  terminal: { text: 'text', muted: 'inactive', heading: 'claude', rule: 'subtle', bandText: 'claude', accent: 'suggestion', bird: '#C2185B', water: '#9FDED6' },
 }
 
 // The footer's facts, read once per load: the session's id and the repository's GitHub page.
@@ -1473,17 +1478,27 @@ export const register: Register = (on, options) => {
               {(() => {
                 const view = flamingoView(working, flamingoFrame)
                 const pad = (n: number) => (n > 0 ? <Text backgroundColor={p.bg}>{' '.repeat(n)}</Text> : undefined)
-                return pixelCells(view.pixels, { P: p.bird, L: '#F7A8C4', K: '#0B0B0B' }).map(row => (
-                  <Text backgroundColor={p.bg}>
-                    {pad(view.offset)}
-                    {row.map(cell => (
-                      <Text color={cell.color} backgroundColor={cell.bg ?? p.bg}>
-                        {cell.char}
-                      </Text>
-                    ))}
-                    {pad(FLAMINGO_TRAVEL - view.offset)}
-                  </Text>
-                ))
+                const cells = (row: ReturnType<typeof pixelCells>[number]) =>
+                  row.map(cell => (
+                    <Text color={cell.color} backgroundColor={cell.bg ?? p.bg}>
+                      {cell.char}
+                    </Text>
+                  ))
+                return [
+                  ...pixelCells(view.pixels, { P: p.bird, L: '#F7A8C4', K: '#0B0B0B' }).map(row => (
+                    <Text backgroundColor={p.bg}>
+                      {pad(view.offset)}
+                      {cells(row)}
+                      {pad(FLAMINGO_TRAVEL - view.offset)}
+                    </Text>
+                  )),
+                  // The water it stands in, the width of the whole strip.
+                  ...pixelCells(waveRows(working, flamingoFrame), { W: p.water }).map(row => (
+                    <Text backgroundColor={p.bg}>
+                      {cells(row)}
+                    </Text>
+                  )),
+                ]
               })()}
             </Box>
           )}

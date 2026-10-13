@@ -177,7 +177,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | Setting | Default | |
 |---|---|---|
 | `paneTheme` | `day` | The pane's colors until you pick a theme. |
-| `flamingo` | `true` | The 8-bit flamingo: it paces while Claude works and stands on one leg while idle. |
+| `flamingo` | `true` | The 8-bit flamingo, standing in seafoam water: it paces and the water ripples while Claude works; it stands on one leg while idle. |
 | `recentHours` | `24` | How far back earlier sessions' steps and Companion's activity log count. |
 | `envFile` | `.env` | Companion's `.env`, relative to the working directory. |
 | `componentsDir` | `active-development` | Where Companion keeps component XML. |

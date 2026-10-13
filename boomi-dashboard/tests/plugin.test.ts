@@ -313,6 +313,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const bird = async () => JSON.stringify((await pane.findAll({ text: /^[ ▀▄█]+$/ })).map(f => f.text))
     const standing = await bird()
     expect(standing).toContain('▀')
+    // It stands in seafoam water, Valence Day's.
+    const water = await pane.findAll({ type: 'Text', text: /^[▀▄]$/ })
+    expect(water.some(w => w.props.color === '#9FDED6')).toBe(true)
     await $.turn.start({ text: 'go', turnId: 't1' } as never)
     const walking = await bird()
     expect(walking).not.toBe(standing)
