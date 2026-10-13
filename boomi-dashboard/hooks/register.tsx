@@ -77,6 +77,7 @@ import {
   choiceList,
   recapOf,
   welcomeLine,
+  budgetLines,
   shareView,
   monthSpend,
   monthView,
@@ -85,6 +86,7 @@ import {
   pruneDays,
   limitViews,
   limitsShort,
+  earlierLabel,
   productSpendLine,
   resumable,
   resumeCommand,
@@ -94,6 +96,8 @@ import {
 } from './activity'
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
+import { bdiRunId, bdiRunReading, bdiStatusChecks, recipeComponents } from './products'
+import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import type { Credentials } from './platform'
 
 type Engine = EngineInterface
@@ -160,6 +164,9 @@ const history = atom({ plugin: 'boomi-dashboard', key: 'history' } as const, { p
 const STEPS_PAGE = 6
 const stepsShown = atom({ plugin: 'boomi-dashboard', key: 'stepsShown' } as const, STEPS_PAGE)
 
+/** The past session whose cost review is open in the pane. */
+const reviewing = atom({ plugin: 'boomi-dashboard', key: 'reviewing' } as const, null as string | null)
+
 /** The past session whose resume command was last copied, and whether the copy took. */
 const copied = atom({ plugin: 'boomi-dashboard', key: 'copied' } as const, null as { id: string; isCopied: boolean } | null)
 
@@ -186,6 +193,8 @@ type Settings = {
   companionShare: number
   companionSharePeriod: SharePeriod
   companionMonthlyUsd: number
+  paneRows: number
+  paneColumns: number
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -204,6 +213,8 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   companionShare: Math.min(100, Math.max(0, Number(options.companionShare ?? 0) || 0)),
   companionSharePeriod: options.companionSharePeriod === 'day' || options.companionSharePeriod === 'month' ? options.companionSharePeriod : 'week',
   companionMonthlyUsd: Math.max(0, Number(options.companionMonthlyUsd ?? 0) || 0),
+  paneRows: Math.max(0, Math.round(Number(options.paneRows ?? 0) || 0)),
+  paneColumns: Math.max(0, Math.round(Number(options.paneColumns ?? 0) || 0)),
 })
 
 const PANE = 'boomi-dashboard'
@@ -232,9 +243,46 @@ const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit'])
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
+/** The pane's size, picked with /bc-dashboard size and kept; until then the settings'. 0 leaves it to Claude Code. */
+const paneSize = atom({ plugin: 'boomi-dashboard', key: 'paneSize' } as const, null as { rows: number; columns: number } | null)
+const SIZE_KEY = 'paneSize'
+
+/**
+ * The size the pane asks for as it opens: rows when it sits above the prompt,
+ * columns when it's docked beside a fullscreen transcript. A request: a size
+ * the person dragged it to wins.
+ */
+const sizeOf = async ($: Engine, settings: Settings) => {
+  const picked = await read($, paneSize)
+  const rows = picked?.rows ?? settings.paneRows
+  const columns = picked?.columns ?? settings.paneColumns
+  return { ...(rows > 0 ? { rows } : {}), ...(columns > 0 ? { columns } : {}) }
+}
+
 // The pane is a convenience: a surface that cannot seat one must not stop the work.
-const openPane = ($: Engine) => {
-  $.ui.open({ id: PANE, title: 'Boomi Companion Dashboard' }).catch(() => undefined)
+const openPane = async ($: Engine, settings: Settings) => {
+  const size = await sizeOf($, settings).catch(() => ({}))
+  $.ui.open({ id: PANE, title: 'Boomi Companion Dashboard', ...size }).catch(() => undefined)
+}
+
+/** /bc-dashboard size <rows> [columns]: the pane's size, now and for later sessions; with no numbers, back to the default. */
+const resize = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const [rows = '', columns = ''] = target.split(/\s+/).filter(Boolean)
+  if (!rows) {
+    await update($, paneSize, () => null)
+    await $.store.delete(SIZE_KEY).catch(() => undefined)
+    return 'The dashboard pane is back to its usual size. Drag its edge to resize it by hand.'
+  }
+  const r = Number(rows)
+  const c = columns ? Number(columns) : 0
+  if (!Number.isInteger(r) || r < 8 || r > 200 || (columns && (!Number.isInteger(c) || c < 40 || c > 400))) {
+    return 'Usage: /bc-dashboard size <rows 8-200> [columns 40-400]. With nothing after size, back to the default.'
+  }
+  const size = { rows: r, columns: c }
+  await update($, paneSize, () => size)
+  await $.store.set(SIZE_KEY, size).catch(() => undefined)
+  await $.ui.open({ id: PANE, title: 'Boomi Companion Dashboard', focus: true, closeOnEscape: true, ...(await sizeOf($, settings)) }).catch(() => undefined)
+  return `The dashboard pane asks for ${r} rows${c ? ` and ${c} columns` : ''}, now and in later sessions. A size you drag it to wins.`
 }
 
 const toast = ($: Engine, settings: Settings, text: string) => {
@@ -374,12 +422,17 @@ const activityKey = async ($: Engine) => `activity:${await $.session.cwd()}`
 const saveActivity = async ($: Engine, settings: Settings) => {
   try {
     const current = await read($, dashboard)
-    const list = current.activity.filter(a => a.outcome !== 'running')
+    // Older steps not shown are kept too: the window is what shows, not what's saved.
+    const shown = current.activity.filter(a => a.outcome !== 'running')
+    const ids = new Set(shown.map(a => a.id))
+    const list = [...(current.earlier ?? []).filter(a => !ids.has(a.id)), ...shown]
+      .map(({ isRestored, isEarlier, ...a }) => a)
+      .sort((a, b) => a.startedAt - b.startedAt)
     const { closedSteps, seenRuns } = current
     const now = await $.clock.now()
     // The recap is this session's once it has worked with Companion; until then the last one's stands.
     const last = recapOf(current, now, settings.windowMs, (await usageOf($)).usd) ?? (await read($, recap)) ?? undefined
-    await $.store.set(await activityKey($), { savedAt: now, activity: list.slice(-100), closedSteps, seenRuns, recap: last })
+    await $.store.set(await activityKey($), { savedAt: now, activity: list.slice(-KEPT_STEPS), closedSteps, seenRuns, recap: last })
   } catch {}
 }
 
@@ -395,19 +448,27 @@ const restoreActivity = async ($: Engine, settings: Settings) => {
       | undefined
     if (saved?.recap) await update($, recap, () => saved.recap!)
     const now = await $.clock.now()
-    const kept = (saved?.activity ?? [])
-      .filter(a => now - (a.endedAt ?? a.startedAt) <= settings.windowMs)
-      .map(a => ({ ...a, isRestored: true }))
-    if (kept.length === 0) return
+    const all = saved?.activity ?? []
+    idFloor = all.reduce((max, a) => Math.max(max, a.id), 0)
+    const isRecent = (a: Activity) => now - (a.endedAt ?? a.startedAt) <= settings.windowMs
+    const kept = all.filter(isRecent).map(a => ({ ...a, isRestored: true }))
+    const earlier = all.filter(a => !isRecent(a)).map(a => ({ ...a, isRestored: true, isEarlier: true }))
+    if (all.length === 0) return
     await update($, dashboard, c =>
       c.activity.length > 0
         ? c
-        : { ...c, activity: kept, restored: kept.length, closedSteps: saved?.closedSteps, seenRuns: saved?.seenRuns },
+        : { ...c, activity: kept, restored: kept.length, earlier, closedSteps: saved?.closedSteps, seenRuns: saved?.seenRuns },
     )
   } catch {}
 }
 
-const nextId = (list: readonly Activity[]) => list.reduce((max, a) => Math.max(max, a.id), 0) + 1
+/** The highest step ID this folder has kept, shown or not, so new steps never reuse one. */
+let idFloor = 0
+
+const nextId = (list: readonly Activity[]) => list.reduce((max, a) => Math.max(max, a.id), idFloor) + 1
+
+/** How many steps a folder keeps across sessions, whatever their age. */
+const KEPT_STEPS = 200
 
 /** A component file's name, ID and type, when the file can be read. */
 const readComponent = async ($: Engine, path: string) => {
@@ -455,10 +516,10 @@ const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun
   for (const run of runs) {
     const found = await subjectOf($, settings, run, current)
     const args = run.kind === 'test' && run.args ? { args: run.args } : {}
-    const product = run.product ? { product: run.product, verb: run.verb ?? '' } : {}
+    const product = run.product ? { product: run.product, verb: run.verb ?? '', ...(run.ref ? { ref: run.ref } : {}) } : {}
     started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found, ...args, ...product })
   }
-  if (!current.activity.some(a => a.kind !== 'other' || a.product)) openPane($)
+  if (!current.activity.some(a => a.kind !== 'other' || a.product)) void openPane($, settings)
   void rememberScripts($, runs)
   await record($, list => [...list, ...started])
   void refreshStatus($, settings)
@@ -483,9 +544,12 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
   let id = nextId((await read($, dashboard)).activity)
   const finish = async (a: Activity, reading: Reading): Promise<Activity> => {
     // A create or pull writes the component's ID and name into its file.
-    const fresh = a.file && (a.kind === 'create' || a.kind === 'pull') ? await readComponent($, a.file) : {}
+    const path = a.file ?? reading.file
+    const fresh = path && (a.kind === 'create' || a.kind === 'pull') ? await readComponent($, path) : {}
+    const file = a.file ?? (reading.file ? componentPath(reading.file, settings.componentsDir) : undefined)
     return {
       ...a,
+      ...(file ? { file } : {}),
       outcome: reading.outcome,
       detail: reading.detail,
       endedAt,
@@ -497,6 +561,11 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
       executionId: reading.executionId,
     }
   }
+  // A Marketplace install's copied components join the session's components, as from that recipe.
+  const fromRecipes = (a: Activity) =>
+    a.product === 'marketplace' && a.script === 'boomi-marketplace-install' && ran.deny === undefined
+      ? recipeComponents(output).map(c => ({ ...c, recipe: a.subject }))
+      : []
   for (const a of started) {
     if (ran.deny !== undefined) {
       done.push({ ...a, outcome: 'blocked', detail: ran.deny.split('\n')[0]!.slice(0, 160), endedAt })
@@ -506,6 +575,20 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
     for (const extra of extras.get(a.id) ?? []) {
       // Another pass of the same script: its own component, not this run's file.
       added.push(await finish({ ...a, id: id++, file: undefined, componentId: undefined, subject: 'a component' }, extra))
+    }
+  }
+  for (const a of done) {
+    if (a.product === 'bdi' && a.verb === 'run' && a.outcome === 'ok') {
+      const runId = bdiRunId(output)
+      if (runId) {
+        a.runId = runId
+        a.detail = `run ${runId}`
+      }
+    }
+    const copied = a.outcome === 'ok' ? fromRecipes(a) : []
+    if (copied.length > 0) a.detail = `${a.detail} · ${copied.length} component${copied.length === 1 ? '' : 's'}`
+    for (const c of copied) {
+      added.push({ id: id++, kind: 'create', outcome: 'ok', subject: c.componentId, detail: `installed from recipe ${c.recipe}`, startedAt: a.startedAt, endedAt: a.endedAt, componentId: c.componentId, recipe: c.recipe, ...(c.version ? { version: c.version } : {}) })
     }
   }
   await record($, list => [...list.map(a => done.find(d => d.id === a.id) ?? a), ...added])
@@ -554,9 +637,43 @@ const noteEdit = async ($: Engine, settings: Settings, path: string) => {
     }
     return [...list, edit]
   })
-  if (isFirst) openPane($)
+  if (isFirst) void openPane($, settings)
   void refreshStatus($, settings)
   void saveActivity($, settings)
+}
+
+/**
+ * Claude checking a BDI run with bdi-flow.sh status: what the check found
+ * updates that run's step, so a run that started shows how it ended without
+ * the dashboard calling BDI itself. A failure needs attention with BDI's
+ * reason; a cancelled run is cancelled, not failed.
+ */
+const followBdiRuns = async ($: Engine, settings: Settings, checks: readonly { flow: string; run: string }[], ran: Ran) => {
+  if (ran.deny !== undefined) return
+  const reading = bdiRunReading(outputOf(ran))
+  if (!reading || checks.length !== 1) return
+  const { flow, run } = checks[0]!
+  let changed: Activity | undefined
+  await update($, dashboard, c => {
+    const list = [...c.activity]
+    const at = list.map(a => a.product === 'bdi' && a.verb === 'run' && (a.runId === run || (!a.runId && a.ref === flow))).lastIndexOf(true)
+    if (at < 0 || list[at]!.runStatus === reading.status) return c
+    const step = list[at]!
+    changed = {
+      ...step,
+      runId: step.runId ?? run,
+      runStatus: reading.status,
+      outcome: reading.status === 'failed' ? 'failed' : 'ok',
+      detail: reading.status === 'failed' ? `ERROR: ${reading.reason ?? 'the run failed'} (run ${run})` : `run ${run}: ${reading.status}`,
+    }
+    list[at] = changed
+    return { ...c, activity: list }
+  })
+  if (changed && (changed.runStatus === 'failed' || changed.runStatus === 'succeeded')) announce($, settings, { ...changed, kind: 'test' })
+  if (changed) {
+    void refreshStatus($, settings)
+    void saveActivity($, settings)
+  }
 }
 
 // --- The Platform API --------------------------------------------------------
@@ -1001,6 +1118,48 @@ const resumeCommandFor = async ($: Engine, settings: Settings, target: string): 
     : `Run this in a new terminal to reopen that session:\n  ${command}`
 }
 
+/** Puts the request for Claude's closer look at a past session's cost in the prompt box, after whatever is typed there. */
+const askToReview = async ($: Engine, s: PastSession) => {
+  const draft = await $.prompt.read().catch(() => ({ text: '', cursor: 0 }))
+  const text = reviewPrompt(s)
+  await $.prompt.fill({ text: draft.text.trim() ? `\n${text}` : text, mode: draft.text.trim() ? 'append' : 'replace' }).catch(() => undefined)
+}
+
+/**
+ * /bc-dashboard review [number]: a past session's cost review, numbered as
+ * Past Companion sessions lists them, newest first. Without a number it asks
+ * which of the four costliest of the last 30 days, or lists them.
+ */
+const reviewCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  if ((await read($, history)).sessions === undefined) await scanHistory($, settings)
+  const sessions = (await read($, history)).sessions
+  if (sessions === undefined) return (await read($, history)).error ?? 'The transcript scan failed.'
+  if (sessions.length === 0) return `No Companion sessions on this machine from the last ${settings.historyDays} days to review.`
+  const view = { currentId: await $.session.id().catch(() => undefined) }
+  const numbered = sessions.map((s, i) => ({ s, n: i + 1 }))
+  const listed = () => ['Which session? Run /bc-dashboard review <number>:', ...numbered.slice(0, 20).map(({ s, n }) => `  ${reviewLabel(s, n)}`)].join('\n')
+  let picked: PastSession | undefined
+  if (target) {
+    picked = sessions[Number(target.replace(/^#/, '')) - 1]
+    if (!picked) return `${target} isn't one of these.\n${listed()}`
+  } else {
+    const now = await $.clock.now()
+    const costly = numbered
+      .filter(({ s }) => s.startedAt && now - Date.parse(s.startedAt) <= 30 * 86_400_000)
+      .sort((a, b) => (b.s.costUsd ?? 0) - (a.s.costUsd ?? 0))
+      .slice(0, 4)
+    if (costly.length === 1) picked = costly[0]!.s
+    else if (costly.length > 1) {
+      const labels = costly.map(({ s, n }) => reviewLabel(s, n))
+      const answer = await $.ui.ask('Which session should the dashboard review?', { header: 'Review', options: labels }).catch(() => undefined)
+      const typed = answer?.trim().replace(/^#|\.$/g, '')
+      picked = answer === undefined ? undefined : (costly[labels.indexOf(answer)]?.s ?? sessions[Number(typed) - 1])
+    }
+    if (!picked) return listed()
+  }
+  return reviewText(picked, view)
+}
+
 // --- The session report ------------------------------------------------------------
 
 const reportNow = async ($: Engine, settings: Settings) => {
@@ -1046,6 +1205,19 @@ const reopen = async ($: Engine, settings: Settings): Promise<string> => {
   return 'Closed items are back under Needs attention, where they still apply.'
 }
 
+/** Shows this folder's steps from before the window too, marked as earlier: Show earlier, or /bc-dashboard earlier. */
+const showEarlier = async ($: Engine): Promise<string> => {
+  const earlier = (await read($, dashboard)).earlier ?? []
+  if (earlier.length === 0) return 'No older steps in this folder: everything it kept is showing.'
+  await update($, dashboard, c => ({
+    ...c,
+    activity: [...(c.earlier ?? []), ...c.activity].sort((a, b) => a.startedAt - b.startedAt),
+    restored: (c.restored ?? 0) + (c.earlier?.length ?? 0),
+    earlier: [],
+  }))
+  return `Showing ${earlier.length} older step${earlier.length === 1 ? '' : 's'} from this folder. Their failures are history: they don't go under Needs attention.`
+}
+
 /** Picks the pane's theme, now and for later sessions. */
 const pickTheme = async ($: Engine, theme: PaneTheme) => {
   await update($, pickedTheme, () => theme)
@@ -1076,11 +1248,14 @@ const USAGE = [
   '/bc-dashboard unwatch <id>    stop watching it',
   '/bc-dashboard close <n|all>   close a Needs attention item by its number, or all of them',
   '/bc-dashboard reopen          bring closed items back',
+  '/bc-dashboard earlier         show this folder\'s steps from before the last 24 hours too',
+  '/bc-dashboard size <r> [c]    the pane\'s height in rows (and width in columns when docked); no numbers: the default',
   '/bc-dashboard why [n]         read the log of a failed test or run (no number: pick one)',
   '/bc-dashboard rerun [n]       run a failed test again, the same way Claude ran it (no number: pick one)',
   '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
   '/bc-dashboard history         past Companion sessions on this machine and what each cost',
   '/bc-dashboard resume [n]      copy the command that reopens a past session in a new terminal',
+  '/bc-dashboard review [n]      what made a past session cost what it did, and what to change next time',
   '/bc-dashboard seen            mark watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
@@ -1129,7 +1304,7 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       // leaves the transcript, the scrollback and the prompt as they were. Only
       // where no pane can be shown does the summary go into the transcript.
       const opened = await $.ui
-        .open({ id: PANE, title: 'Boomi Companion Dashboard', focus: true, closeOnEscape: true })
+        .open({ id: PANE, title: 'Boomi Companion Dashboard', focus: true, closeOnEscape: true, ...(await sizeOf($, settings)) })
         .catch(() => undefined)
       if (opened?.isPlaced) return 'Dashboard open. Esc closes it; /bc-dashboard text prints it here instead.'
       return summaryNow($, settings)
@@ -1157,8 +1332,14 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return historyCommand($, settings)
     case 'resume':
       return resumeCommandFor($, settings, target)
+    case 'review':
+      return reviewCommand($, settings, target)
     case 'reopen':
       return reopen($, settings)
+    case 'earlier':
+      return showEarlier($)
+    case 'size':
+      return resize($, settings, target)
     case 'theme':
       return theme($, settings, target)
     case 'banner':
@@ -1249,7 +1430,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | why [n] | rerun [n] | history | resume [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
+      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
     })
     await $.tool.register({
       name: 'summary',
@@ -1280,6 +1461,8 @@ export const register: Register = (on, options) => {
     // The watch list outlives the session; restore it the first time.
     const saved = await $.store.get(THEME_KEY)
     if (isTheme(saved)) await update($, pickedTheme, () => saved)
+    const size = (await $.store.get(SIZE_KEY)) as { rows?: number; columns?: number } | undefined
+    if (size && typeof size.rows === 'number') await update($, paneSize, () => ({ rows: size.rows!, columns: size.columns ?? 0 }))
 
     await restoreActivity($, settings)
 
@@ -1341,7 +1524,13 @@ export const register: Register = (on, options) => {
   // The dashboard only watches: its own trouble never stops the command.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const runs = scriptRuns(String(e.command ?? ''))
-    if (runs.length === 0) return next(e)
+    const checks = bdiStatusChecks(String(e.command ?? ''))
+    if (runs.length === 0 && checks.length === 0) return next(e)
+    if (runs.length === 0) {
+      const ran = await next(e)
+      await followBdiRuns($, settings, checks, ran).catch(() => undefined)
+      return ran
+    }
     const started = await noteStart($, settings, runs).catch(() => [] as Activity[])
     const ran = await next(e)
     await noteEnd($, settings, started, ran).catch(() => undefined)
@@ -1480,7 +1669,7 @@ export const register: Register = (on, options) => {
         </Box>
         <Box flexShrink={0}>
           <Text> </Text>
-          <Button key="open" label="Open" onPress={() => openPane($)} />
+          <Button key="open" label="Open" onPress={() => void openPane($, settings)} />
           <Text> </Text>
           <Button key="hide" label="Hide" onPress={() => update($, isBandHidden, () => true)} />
         </Box>
@@ -1495,6 +1684,7 @@ export const register: Register = (on, options) => {
     const past = await read($, history)
     const shown = await read($, historyShown)
     const copiedNow = await read($, copied)
+    const reviewingNow = await read($, reviewing)
     const sessionId = await $.session.id().catch(() => undefined)
     const footer = await footerOf($)
     const p = PALETTES[themeNow]
@@ -1508,7 +1698,7 @@ export const register: Register = (on, options) => {
     const whys = await read($, diagnoses)
     const rows = components(current.activity)
     const stepsLimit = await read($, stepsShown)
-    const steps = current.activity.slice().reverse()
+    const steps = current.activity.filter(a => !a.recipe).reverse()
     const feed = steps.slice(0, stepsLimit)
     const all = spends(current.activity)
     // The pane's padding and the surface's own frame take a few columns: leave room for both.
@@ -1518,9 +1708,9 @@ export const register: Register = (on, options) => {
       .map(a => all.get(a.id)?.tokens ?? 0)
     const last = feed[0] && all.get(feed[0].id)
 
-    const budget = budgetOf(usage.usd, settings.budgetUsd)
     const limitsNow = limitViews(usage.limits, now)
     const mine = await companionBudget($, settings, usage)
+    const budgets = budgetLines({ ...usage, ...(mine ? { companion: mine } : {}) }, settings)
     // Every Text carries the pane's colors, so it reads the same on any terminal.
     const t = (text: string, style: { color?: string; bold?: boolean; bg?: string } = {}) => (
       <Text color={style.color ?? p.text} backgroundColor={style.bg ?? p.bg} bold={style.bold}>
@@ -1598,8 +1788,6 @@ export const register: Register = (on, options) => {
                 'SPEND',
                 formatCost(usage.usd) ?? '—',
                 last?.usd ? `last step ${formatCost(last.usd)}` : undefined,
-                budget ? `${STATUS[budget.level].icon} ${budget.percent >= 100 ? 'budget spent' : `${Math.round(budget.percent)}% of ${formatCost(settings.budgetUsd)}`}` : undefined,
-                mine?.month ? `${STATUS[mine.month.level].icon} ${Math.round(mine.month.percent)}% of month` : undefined,
               )}
               {gauge(
                 'CONTEXT',
@@ -1612,7 +1800,12 @@ export const register: Register = (on, options) => {
                   `${limitsNow[0]!.name}${limitsNow[0]!.resetsIn ? `, resets ${limitsNow[0]!.resetsIn}` : ''}`,
                   limitsNow[0]!.pace ? `${STATUS[limitsNow[0]!.level].icon} ${limitsNow[0]!.pace}` : undefined,
                   ...limitsNow.slice(1).map(v => `${v.name} ${Math.round(v.percent)}%`),
-                  mine?.week ? `${STATUS[mine.week.level].icon} Companion ${Math.round(mine.week.percent)}% of ${settings.companionSharePeriod === 'day' ? 'today' : settings.companionSharePeriod === 'week' ? '7 days' : 'month'}` : undefined,
+                )}
+              {budgets.length > 0 &&
+                gauge(
+                  'BUDGET',
+                  `${meter(Math.min(100, budgets[0]!.percent), 8)} ${Math.round(budgets[0]!.percent)}%`,
+                  ...budgets.map(b => `${STATUS[b.level].icon} ${b.label}: ${b.detail}`),
                 )}
             </Box>
             {sparkline(trail) && (
@@ -1685,7 +1878,12 @@ export const register: Register = (on, options) => {
 
         {heading('Components this session')}
         {rows.length === 0 && t('Components show up here as Claude edits, saves, deploys and tests them.', { color: p.muted })}
-        {current.restored ? note(`Includes ${restoredNote(current.restored, settings.windowMs)}.`) : undefined}
+        {(current.restored || current.earlier?.length) ? (
+          <Box>
+            {current.restored ? note(`Includes ${restoredNote(current.restored, settings.windowMs, current.earlier?.length === 0)}.  `) : undefined}
+            {current.earlier?.length ? <Button key="earlier" label={earlierLabel(current.earlier.length)} onPress={() => void showEarlier($)} /> : undefined}
+          </Box>
+        ) : undefined}
         {rows.slice(0, 8).map(row => {
           const spent = formatSpend(spendOf(row.ids, all))
           return (
@@ -1743,7 +1941,7 @@ export const register: Register = (on, options) => {
           )}
         </Box>
         {past.phase === 'idle' && note(`What earlier Companion sessions on this machine cost, from Claude Code's transcripts. Scan reads the last ${settings.historyDays} days.`)}
-        {past.sessions && past.sessions.length > 0 && note('Copy puts the command that reopens a session on the clipboard, for a new terminal.')}
+        {past.sessions && past.sessions.length > 0 && note('Review shows what made a session cost what it did. Copy puts the command that reopens it on the clipboard, for a new terminal.')}
         {past.phase === 'loading' && note('Reading the transcripts…')}
         {past.phase === 'error' && line('warning', past.error ?? 'The transcript scan failed.')}
         {past.sessions && past.sessions.length === 0 && note(`No Companion sessions in the last ${settings.historyDays} days.`)}
@@ -1766,16 +1964,39 @@ export const register: Register = (on, options) => {
                           {t(`  ${head}`)}
                         </Text>
                       </Box>
-                      {!isThis && (
-                        <Box flexShrink={0}>
-                          {t(' ')}
-                          <Button key={`history-copy-${i}`} label="Copy" onPress={press => void copyResume($, s, press.surface)} />
-                        </Box>
-                      )}
+                      <Box flexShrink={0}>
+                        {t(' ')}
+                        <Button
+                          key={`history-review-${i}`}
+                          label={reviewingNow === s.id ? 'Close' : 'Review'}
+                          onPress={() => update($, reviewing, now => (now === s.id ? null : s.id))}
+                        />
+                        {!isThis && <Button key={`history-copy-${i}`} label="Copy" onPress={press => void copyResume($, s, press.surface)} />}
+                      </Box>
                     </Box>
                     <Text backgroundColor={p.bg} wrap="truncate-end">
                       {t(`      ${detail}`, { color: p.muted })}
                     </Text>
+                    {reviewingNow === s.id &&
+                      (() => {
+                        const review = reviewSession(s)
+                        return (
+                          <Box flexDirection="column">
+                            {t(`      ${review.summary}`, { color: p.accent })}
+                            {review.findings.length === 0 && line('healthy', 'Nothing stands out: its cost came from the work itself.')}
+                            {review.findings.map(f => (
+                              <Box flexDirection="column">
+                                {line(f.level, f.title)}
+                                {t(`      ${f.tip}`, { color: p.muted })}
+                              </Box>
+                            ))}
+                            <Box>
+                              {t('      ')}
+                              <Button key={`history-ask-${i}`} label="Ask Claude to review" onPress={() => void askToReview($, s)} />
+                            </Box>
+                          </Box>
+                        )
+                      })()}
                     {copiedNow?.id === s.id &&
                       (copiedNow.isCopied
                         ? line('healthy', 'Copied. Paste it into a new terminal to reopen this session.')

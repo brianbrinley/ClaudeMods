@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.13.1",
+  "version": "0.18.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -14,6 +14,18 @@
         "terminal"
       ],
       "default": "day"
+    },
+    "paneRows": {
+      "type": "number",
+      "title": "Pane height (rows)",
+      "description": "How many rows the dashboard pane asks for when it opens above the prompt; a size you drag it to wins. 0 leaves it to Claude Code (a third of the screen)",
+      "default": 0
+    },
+    "paneColumns": {
+      "type": "number",
+      "title": "Pane width (columns)",
+      "description": "How many columns the dashboard pane asks for when it's docked beside a fullscreen transcript; a width you drag it to wins. 0 leaves it to Claude Code",
+      "default": 0
     },
     "flamingo": {
       "type": "boolean",

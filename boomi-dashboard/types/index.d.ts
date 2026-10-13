@@ -35,6 +35,13 @@ export type Activity = {
   /** Another Companion plugin's step: its product, and the script's subcommand (`deploy`, `run`, ...). */
   product?: Product
   verb?: string
+  /** A component a Marketplace recipe installed: the recipe's name. Its install is the step; this is the component. */
+  recipe?: string
+  /** What another plugin's step acted on, in full (its subject may be shortened): a BDI flow's ID, say. */
+  ref?: string
+  /** A BDI flow run: its ID, and its status as Claude's last status check found it. */
+  runId?: string
+  runStatus?: string
   /** A pushed component's new version. */
   version?: string
   /** A test's execution status (COMPLETE, ERROR, ...) and ID. */
@@ -50,6 +57,11 @@ export type Activity = {
   model?: string
   /** Brought back from an earlier session in the same folder. */
   isRestored?: boolean
+  /**
+   * Older than the window, shown only when asked (Show earlier): history, so
+   * its failures don't need attention now.
+   */
+  isEarlier?: boolean
   /** A test's arguments to its script, so Run again can repeat it. */
   args?: string[]
   /**
@@ -139,6 +151,8 @@ export type Dashboard = {
   watched: Watched[]
   /** How many steps came back from an earlier session in this folder. */
   restored?: number
+  /** This folder's steps from before the window: kept, and shown when asked. */
+  earlier?: Activity[]
   /** Failed runs marked as seen (expected), by execution ID: they leave Needs attention. */
   seenRuns?: string[]
   /** Failed steps closed from Needs attention, by activity ID. */
@@ -174,6 +188,17 @@ export type PastSession = {
   runs: Partial<Record<ActivityKind, number>>
   /** Other Companion plugins' steps that changed something, by product: datahub 2, bdi 1, ... */
   products?: Partial<Record<Product, number>>
+  /** For the cost review: the person's prompts, the largest context one call sent, how often it compacted, its subagents' new tokens. */
+  prompts?: number
+  peakContext?: number
+  compactions?: number
+  subagentTokens?: number
+  /** Its main transcript, for a closer look. */
+  file?: string
+  /** New tokens by model id. */
+  modelTokens?: Record<string, number>
+  /** The same step on the same component three times or more: tests, pushes, deploys. */
+  repeats?: { name: string; kind: ActivityKind; count: number }[]
   /** The components the runs named: their file names, else their IDs. */
   components: string[]
   /** What the session was about: its title, else the person's first request. */
@@ -209,6 +234,6 @@ export type RuntimeSeen = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; historyShown: number; stepsShown: number }
+    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; paneSize: { rows: number; columns: number } | null; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; reviewing: string | null; historyShown: number; stepsShown: number }
   }
 }

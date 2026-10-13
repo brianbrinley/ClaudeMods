@@ -89,13 +89,25 @@ for my $file (sort @files) {
   while (my $line = <$fh>) {
     # Only these kinds carry what's kept; skipping the rest unread keeps it quick.
     my $is_title = $line =~ /"type":"(?:custom-title|ai-title|summary)"/;
-    my $is_user = $wants_prompt && index($line, '"type":"user"') >= 0;
+    # The person's own prompts, counted in the main transcript; a tool's result
+    # is a user line too, and is skipped unread.
+    my $is_user = !$is_subagent && index($line, '"type":"user"') >= 0 && index($line, '"tool_use_id"') < 0;
+    # Claude Code marks each time it compacts the conversation.
+    if (!$is_subagent && index($line, '"compact_boundary"') >= 0) {
+      my $c = eval { $json->decode($line) };
+      if (ref $c eq 'HASH') {
+        my $cid = $c->{sessionId} // $file_session // $file;
+        ($sessions{$cid} //= { id => $cid, models => {}, commands => [], costUsd => undef })->{compactions}++;
+      }
+      next;
+    }
     next unless $is_title || $is_user || index($line, '"type":"assistant"') >= 0 || index($line, '"type":"cost-state"') >= 0;
     my $o = eval { $json->decode($line) };
     unless (ref $o eq 'HASH') { $bad_lines++; next }
     my $id = $o->{sessionId} // $file_session // $file;
     my $s = $sessions{$id} //= { id => $id, models => {}, commands => [], costUsd => undef };
     $s->{project} //= $o->{cwd} if !$is_subagent && defined $o->{cwd};
+    $s->{file} //= $file unless $is_subagent;
     if (my $t = $o->{timestamp}) {
       $s->{startedAt} = $t if !defined $s->{startedAt} || $t lt $s->{startedAt};
       $s->{endedAt} = $t if !defined $s->{endedAt} || $t gt $s->{endedAt};
@@ -108,12 +120,15 @@ for my $file (sort @files) {
       next;
     }
     if (($o->{type} // '') eq 'user') {
-      next if $o->{isMeta} || $o->{isSidechain};
+      next if $o->{isMeta} || $o->{isSidechain} || $o->{isCompactSummary};
       my $text = first_text($o->{message});
       # Skip command echoes and system notes (<command-name>, <system-reminder>, ...).
       if (defined $text && $text !~ /^\s*(?:<|Caveat:)/ && $text =~ /\S/) {
-        $s->{firstPrompt} = short_text($text);
-        $wants_prompt = 0;
+        $s->{prompts}++;
+        if ($wants_prompt) {
+          $s->{firstPrompt} = short_text($text);
+          $wants_prompt = 0;
+        }
       }
       next;
     }
@@ -143,6 +158,13 @@ for my $file (sort @files) {
         $mm->{cacheRead} += $u->{cache_read_input_tokens} // 0;
         $mm->{cacheWrite} += $u->{cache_creation_input_tokens} // 0;
         $mm->{calls}++;
+        # How full the context got: the largest prompt any one call of the main conversation sent.
+        my $context = ($u->{input_tokens} // 0) + ($u->{cache_read_input_tokens} // 0) + ($u->{cache_creation_input_tokens} // 0);
+        if ($is_subagent) {
+          $s->{subagentTokens} += ($u->{input_tokens} // 0) + ($u->{output_tokens} // 0) + ($u->{cache_creation_input_tokens} // 0);
+        } elsif (!defined $s->{peakContext} || $context > $s->{peakContext}) {
+          $s->{peakContext} = $context;
+        }
       }
     }
     # The Bash commands that name a Companion script: the dashboard decides

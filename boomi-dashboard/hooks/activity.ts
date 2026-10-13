@@ -84,10 +84,11 @@ export type ScriptRun = {
   scriptsDir?: string
   /** A test's arguments, so it can be run again. */
   args?: string[]
-  /** Another Companion plugin's step: its product, subcommand and what it acted on. */
+  /** Another Companion plugin's step: its product, subcommand and what it acted on, shortened and in full. */
   product?: Product
   verb?: string
   target?: string
+  ref?: string
 }
 
 const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefined => {
@@ -225,6 +226,8 @@ export type Reading = {
   version?: string
   executionStatus?: string
   executionId?: string
+  /** The file a pull saved the component to, when the output names it. */
+  file?: string
 }
 
 const firstLine = (text: string, pattern: RegExp): string | undefined =>
@@ -273,6 +276,9 @@ export const readOutput = (kind: ActivityKind, output: string, isError: boolean)
   if (id) reading.componentId = id[1]
   const version = output.match(/now version (\d+)/)
   if (version) reading.version = version[1]
+  // A pull by component ID names its file only in its output.
+  const saved = output.match(/Component saved to (.+\.xml)\s*$/m)
+  if (saved) reading.file = saved[1]!.trim()
 
   if (kind === 'test') {
     const completed = output.match(/status=([A-Z_]+), executionId=(\S+)/)
@@ -471,8 +477,13 @@ const LEVEL_OF: Record<Outcome, Level> = { ok: 'healthy', running: 'warning', fa
 export const levelOf = (a: Activity): Level =>
   a.outcome === 'ok' && (isWarnStatus(a.executionStatus) || isSubmittedOnly(a) || isProductWarning(a)) ? 'warning' : LEVEL_OF[a.outcome]
 
-/** Another plugin's step that finished with a WARNING line, such as a descriptor accepted with warnings. */
-const isProductWarning = (a: Activity) => a.product !== undefined && /^WARNING:/.test(a.detail)
+/**
+ * Another plugin's step that finished with a WARNING line, such as a
+ * descriptor accepted with warnings; or a BDI run that started and hasn't
+ * been seen to finish.
+ */
+const isProductWarning = (a: Activity) =>
+  a.product !== undefined && (/^WARNING:/.test(a.detail) || (a.product === 'bdi' && a.verb === 'run' && !!a.runId && a.outcome === 'ok' && (!a.runStatus || a.runStatus === 'running' || a.runStatus === 'pending')))
 
 /** A test that was submitted and not waited for (--no-wait): no result yet. */
 const isSubmittedOnly = (a: Activity) => a.kind === 'test' && a.outcome === 'ok' && !a.executionStatus
@@ -507,6 +518,14 @@ const SCRIPT_WORDS: Record<string, string> = {
 
 /** One activity as a sentence: "Saved Orders Sync to Boomi (v4)". */
 export const describe = (a: Activity): string => {
+  if (a.product === 'bdi' && a.verb === 'run' && a.runId && a.outcome !== 'running') {
+    const flow = `BDI: flow ${a.subject}`
+    if (a.runStatus === 'succeeded') return `${flow} ran and succeeded`
+    if (a.runStatus === 'failed') return `${flow} run failed`
+    if (a.runStatus === 'canceled') return `${flow} run cancelled`
+    if (a.runStatus === 'skipped') return `${flow} run skipped`
+    if (a.outcome === 'ok') return `${flow} run ${a.runStatus === 'pending' ? 'pending' : 'started'}`
+  }
   if (a.product && a.script && a.verb !== undefined) {
     const run = { product: a.product, script: a.script, verb: a.verb, subject: a.subject }
     if (a.outcome === 'running') return productWords(run, 'doing')
@@ -578,6 +597,8 @@ export type ComponentRow = {
   lastAt: number
   /** Every activity of this component, for its total spend. */
   ids: number[]
+  /** The Marketplace recipe it came from, when a recipe installed it. */
+  recipe?: string
 }
 
 /** Each component Claude edited, saved, deployed or tested, most recent first. */
@@ -599,6 +620,7 @@ export const components = (activity: readonly Activity[]): ComponentRow[] => {
     if (!isPlaceholder(a.subject) || isPlaceholder(row.name)) row.name = a.subject
     row.type = a.type ?? row.type
     row.componentId = a.componentId ?? row.componentId
+    if (a.recipe) row.recipe = a.recipe
     row.lastAt = Math.max(row.lastAt, a.endedAt ?? a.startedAt)
     if (a.kind === 'edit') row.edited = a
     else if (a.kind === 'create' || a.kind === 'push' || a.kind === 'pull') row.saved = a
@@ -627,10 +649,12 @@ export const stages = (row: ComponentRow, runs: readonly Run[] = []): Stage[] =>
   const { edited, saved, deployed, tested } = row
   const savedOk = saved && saved.outcome === 'ok' && saved.kind !== 'pull'
 
+  // Where it came from, when a Marketplace recipe installed it; its install is its first save.
+  if (row.recipe) out.push({ level: 'healthy', text: `from recipe ${row.recipe}${saved?.recipe && saved.version ? ` (v${saved.version})` : ''}` })
   if (edited && (!saved || when(edited) > when(saved))) {
     out.push({ level: 'warning', text: saved ? 'edited since last save' : 'edited, not in Boomi yet' })
   }
-  if (saved) {
+  if (saved && !saved.recipe) {
     if (saved.outcome === 'running') out.push({ level: 'warning', text: 'saving…' })
     else if (saved.outcome === 'blocked') out.push({ level: 'serious', text: 'save blocked' })
     else if (saved.outcome === 'failed') out.push({ level: 'critical', text: 'save failed' })
@@ -706,7 +730,7 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
   const closedSteps = new Set(dashboard.closedSteps ?? [])
   for (const row of components(dashboard.activity)) {
     for (const a of [row.saved, row.deployed, row.tested]) {
-      if (!a || (a.outcome !== 'failed' && a.outcome !== 'blocked') || closedSteps.has(a.id)) continue
+      if (!a || a.isEarlier || (a.outcome !== 'failed' && a.outcome !== 'blocked') || closedSteps.has(a.id)) continue
       const hint =
         a.outcome === 'blocked'
           ? a.detail
@@ -725,7 +749,7 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
     }
   }
   for (const a of productIssues(dashboard.activity)) {
-    if (closedSteps.has(a.id)) continue
+    if (closedSteps.has(a.id) || a.isEarlier) continue
     items.push({ key: `step:${a.id}`, level: levelOf(a), title: describe(a), hint: a.detail, at: when(a) })
   }
   const seenRuns = new Set(dashboard.seenRuns ?? [])
@@ -1027,7 +1051,8 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   const rows = components(dashboard.activity)
   const runs = sessionRuns(dashboard, now, windowMs)
   lines.push('', rows.length > 0 ? 'Components this session:' : 'Components this session: none yet. They show up as Claude edits, saves, deploys and tests them.')
-  if (dashboard.restored) lines.push(`  (${restoredNote(dashboard.restored, windowMs)})`)
+  if (dashboard.restored) lines.push(`  (${restoredNote(dashboard.restored, windowMs, dashboard.earlier?.length === 0)})`)
+  if (dashboard.earlier?.length) lines.push(`  (${dashboard.earlier.length} older step${dashboard.earlier.length === 1 ? '' : 's'}: /bc-dashboard earlier shows them)`)
   for (const row of rows) {
     const type = friendlyType(row.type)
     const spent = formatSpend(spendOf(row.ids, all))
@@ -1037,7 +1062,7 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   const byProduct = productSpendLine(dashboard.activity, all)
   if (byProduct) lines.push(`  ${byProduct}`)
 
-  const feed = dashboard.activity.slice(-8).reverse()
+  const feed = dashboard.activity.filter(a => !a.recipe).slice(-8).reverse()
   if (feed.length > 0) {
     lines.push('', "Claude's latest steps (what Claude just did with Companion, newest first):")
     for (const a of feed) {
@@ -1067,8 +1092,11 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
 }
 
 /** Says that some steps came back from an earlier session in this folder. */
-export const restoredNote = (count: number, windowMs: number): string =>
-  `${count} step${count === 1 ? '' : 's'} from an earlier session in this folder, last ${Math.round(windowMs / 3_600_000)}h`
+export const restoredNote = (count: number, windowMs: number, isAll = false): string =>
+  `${count} step${count === 1 ? '' : 's'} from earlier sessions in this folder${isAll ? '' : `, last ${Math.round(windowMs / 3_600_000)}h`}`
+
+/** How many of this folder's older steps can still be shown, in words: "Show 12 earlier". */
+export const earlierLabel = (count: number): string => `Show ${count} earlier`
 
 /** The runs in one line, for a collapsed section: "10 in 24h, 1 failed". */
 export const runsSummary = (runs: readonly Run[], hours: number): { level: Level; text: string } => {
@@ -1415,6 +1443,11 @@ export type ScannedSession = {
   commands?: string[]
   title?: string
   firstPrompt?: string
+  prompts?: number
+  peakContext?: number
+  compactions?: number
+  subagentTokens?: number
+  file?: string
 }
 
 const fileName = (path: string) => (path.split('/').pop() ?? path).replace(/\.xml$/, '')
@@ -1431,10 +1464,18 @@ export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession
     const products: Partial<Record<Product, number>> = {}
     const files = new Set<string>()
     const ids = new Set<string>()
+    // The same step on the same component, counted, for the cost review.
+    const repeats = new Map<string, { name: string; kind: ActivityKind; count: number }>()
     for (const command of s.commands ?? []) {
       for (const run of scriptRuns(command)) {
         if (run.product) products[run.product] = (products[run.product] ?? 0) + 1
         if (run.kind === 'other') continue
+        const which = run.file ? fileName(run.file) : (run.processId ?? run.componentId)
+        if (which && (run.kind === 'test' || run.kind === 'push' || run.kind === 'deploy')) {
+          const key = `${run.kind}|${which}`
+          const seen = repeats.get(key) ?? { name: which.length > 12 && !run.file ? `${which.slice(0, 8)}…` : which, kind: run.kind, count: 0 }
+          repeats.set(key, { ...seen, count: seen.count + 1 })
+        }
         runs[run.kind] = (runs[run.kind] ?? 0) + 1
         if (run.file) files.add(fileName(run.file))
         else if (run.processId ?? run.componentId) ids.add((run.processId ?? run.componentId)!)
@@ -1455,6 +1496,13 @@ export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession
       models: models.map(([id]) => modelName(id) ?? id),
       runs,
       ...(Object.keys(products).length > 0 ? { products } : {}),
+      ...(typeof s.prompts === 'number' ? { prompts: s.prompts } : {}),
+      ...(typeof s.peakContext === 'number' ? { peakContext: s.peakContext } : {}),
+      ...(typeof s.compactions === 'number' ? { compactions: s.compactions } : {}),
+      ...(typeof s.subagentTokens === 'number' ? { subagentTokens: s.subagentTokens } : {}),
+      ...(s.file ? { file: s.file } : {}),
+      modelTokens: Object.fromEntries(models.map(([id, m]) => [id, (m.input ?? 0) + (m.output ?? 0) + (m.cacheWrite ?? 0)])),
+      repeats: [...repeats.values()].filter(r => r.count >= 3).sort((a, b) => b.count - a.count),
       // A file names a component; an ID only when the session named no file.
       components: files.size > 0 ? [...files] : [...ids].map(id => (id.length > 12 ? `${id.slice(0, 8)}…` : id)),
       label: s.title || s.firstPrompt || undefined,
@@ -1851,7 +1899,7 @@ export const productIssues = (activity: readonly Activity[]): Activity[] => {
     if (!a.product || a.outcome === 'running') continue
     latest.set(`${a.product}|${a.script}|${a.verb}|${a.subject}`, a)
   }
-  return [...latest.values()].filter(a => a.outcome === 'failed' || a.outcome === 'blocked' || isProductWarning(a))
+  return [...latest.values()].filter(a => a.outcome === 'failed' || a.outcome === 'blocked' || (isProductWarning(a) && !(a.product === 'bdi' && a.verb === 'run')))
 }
 
 /** Each product's share of the session: bc-integration's steps, then each other plugin's, by what they took. */
@@ -2043,4 +2091,31 @@ export const monthView = (spent: number, monthlyUsd: number): BudgetView | undef
   if (!monthlyUsd || monthlyUsd <= 0) return undefined
   const percent = (spent / monthlyUsd) * 100
   return { level: budgetLevel(percent), percent, text: `Companion this month: ${formatCost(spent)} of ${formatCost(monthlyUsd)}` }
+}
+
+/** A budget the person set, as the BUDGET gauge lists it: what it is and how full. */
+export type BudgetLine = { label: string; level: Level; percent: number; detail: string }
+
+/**
+ * Every budget the person set, for the BUDGET gauge: the session's spend, the
+ * month's Companion amount and Companion's share of the limit, the fullest
+ * first. Empty when none is set.
+ */
+export const budgetLines = (
+  usage: Usage,
+  settings: { budgetUsd: number; companionShare: number; companionSharePeriod: SharePeriod; companionMonthlyUsd: number },
+): BudgetLine[] => {
+  const lines: BudgetLine[] = []
+  const session = budgetOf(usage.usd ?? 0, settings.budgetUsd)
+  if (session) lines.push({ label: 'session', level: session.level, percent: session.percent, detail: `${formatCost(usage.usd ?? 0)} of ${formatCost(settings.budgetUsd)}` })
+  const month = usage.companion?.month
+  if (month) lines.push({ label: 'month', level: month.level, percent: month.percent, detail: month.text.replace(/^Companion this month: /, '') })
+  const share = usage.companion?.week
+  if (share) {
+    const period = settings.companionSharePeriod === 'day' ? 'today' : settings.companionSharePeriod === 'week' ? '7 days' : 'month'
+    lines.push({ label: `share, ${period}`, level: share.level, percent: share.percent, detail: `${Math.round(share.percent)}% of ${settings.companionShare}%` })
+  } else if (settings.companionShare > 0) {
+    lines.push({ label: 'share', level: 'healthy', percent: 0, detail: usage.limits?.length ? 'no Companion work yet' : 'needs a Claude seat' })
+  }
+  return lines.sort((a, b) => b.percent - a.percent)
 }

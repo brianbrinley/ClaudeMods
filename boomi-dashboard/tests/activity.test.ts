@@ -77,7 +77,8 @@ import {
   resumeCommand,
   resumable,
 } from '../hooks/activity'
-import { productWords } from '../hooks/products'
+import { bdiRunId, bdiRunReading, bdiStatusChecks, productWords } from '../hooks/products'
+import { reviewPrompt, reviewSession, reviewText } from '../hooks/review'
 import type { Activity, Dashboard } from '../types'
 import type { ScannedSession } from '../hooks/activity'
 
@@ -943,4 +944,61 @@ test("Companion's month: this month's earlier sessions on this machine, not this
   expect(monthSpend(sessions, now, 'now', 2)).toBe(5)
   expect(monthView(8.5, 10)).toMatchObject({ level: 'warning', text: 'Companion this month: $8.50 of $10' })
   expect(monthView(1, 0)).toBeUndefined()
+})
+
+test("BDI's run responses: the run ID, the status checks in a command, and how a run went", () => {
+  expect(bdiRunId('{"run_id":"6a1b","status":"pending"}')).toBe('6a1b')
+  expect(bdiStatusChecks('bash s/bdi-flow.sh status flow-1 run-9 && echo done')).toEqual([{ flow: 'flow-1', run: 'run-9' }])
+  expect(bdiStatusChecks("bash s/bdi-flow.sh status 'flow-1' \"run-9\"")).toEqual([{ flow: 'flow-1', run: 'run-9' }])
+  expect(bdiStatusChecks('bash s/bdi-flow.sh runs flow-1 --from a --to b')).toEqual([])
+  expect(bdiRunReading('{"status":"failed","error_description":"No such table"}')).toEqual({ status: 'failed', reason: 'No such table' })
+  expect(bdiRunReading('{"status":"failed","error_description":"Run canceled"}')).toEqual({ status: 'canceled' })
+  expect(bdiRunReading('{"run":{"status":"SUCCEEDED"}}')).toEqual({ status: 'succeeded' })
+  expect(bdiRunReading('NOTE: something\n{"status":"running"}')).toEqual({ status: 'running' })
+  expect(bdiRunReading('ERROR: HTTP 404')).toBeUndefined()
+})
+
+// --- Cost review ---
+
+test("a costly session's review names what drove its cost, each with a change for next time", () => {
+  const [s] = pastSessions({
+    sessions: [
+      {
+        id: 'big',
+        startedAt: '2026-10-10T09:00:00Z',
+        costUsd: 20.1,
+        models: { 'claude-opus-5-5': { input: 100_000, output: 300_000, cacheRead: 9_000_000, cacheWrite: 450_000 }, 'claude-haiku-5-5': { input: 50_000, output: 50_000 } },
+        commands: [...Array(6).fill(`bash s/boomi-test-execute.sh --process-id ${ID}`), 'bash s/boomi-component-push.sh active-development/p/Orders.xml'],
+        prompts: 46,
+        peakContext: 180_000,
+        compactions: 2,
+        subagentTokens: 500_000,
+        file: '/home/me/.claude/projects/-work/big.jsonl',
+      },
+    ],
+  })
+  const { summary, findings } = reviewSession(s!)
+  expect(summary).toBe('$20 · 46 prompts · 950k new tokens · 9.00M re-read · peak context 180k')
+  expect(findings.map(f => f.title)).toEqual([
+    'Opus 5.5 did 89% of the work',
+    '90% of its tokens were the conversation re-read, over 46 prompts',
+    'The conversation reached 180k tokens of context',
+    'It compacted 2 times',
+    `${ID.slice(0, 8)}… was tested 6 times`,
+    'Subagents used 53% of its new tokens',
+  ])
+  expect(findings[0]!.tip).toContain('/model')
+  expect(findings[1]!.tip).toContain('/clear')
+  expect(findings[2]!.tip).toContain('/compact')
+  const prompt = reviewPrompt(s!)
+  expect(prompt).toContain('Its transcript is /home/me/.claude/projects/-work/big.jsonl')
+  expect(prompt).toContain('- It compacted 2 times')
+})
+
+test('a lean session has nothing to point at', () => {
+  const [s] = pastSessions({
+    sessions: [{ id: 'small', costUsd: 0.4, models: { 'claude-sonnet-5-5': { input: 2000, output: 3000, cacheRead: 10_000 } }, commands: ['bash s/boomi-deploy.sh x/P.xml'], prompts: 3, peakContext: 20_000 }],
+  })
+  expect(reviewSession(s!).findings).toEqual([])
+  expect(reviewText(s!)).toContain('✓ Nothing stands out: its cost came from the work itself.')
 })

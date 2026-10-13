@@ -96,6 +96,13 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** no step for it. **Fail:** a `list` step shows up.
 - [ ] **G7. Spend by product.** In a session that used two products, run `/bc-dashboard text`.
   **Pass:** a `By product:` line with each product's cost. **Fail:** no such line.
+- [ ] **G8. Older steps.** In a folder where Companion was used more than a day ago, start a new session and open the pane.
+  **Pass:** under **Components this session**, a **Show N earlier** button; pressing it lists those older steps, and **Needs attention** doesn't grow. After a restart, the button is still there. **Fail:** no button when you know there was older work, or old failures under **Needs attention**.
+- [ ] **G9. Recipe components.** Have Claude install a Marketplace recipe, then pull one of its components.
+  **Pass:** each copied component under **Components this session** with `✓ from recipe <name>`; after the pull, that row shows the component's name and `✓ pulled from Boomi`. **Fail:** no rows, or the pull makes a second row.
+- [ ] **G10. BDI run result.** Have Claude run a BDI flow and check its status until it finishes.
+  **Pass:** `◐ BDI: flow … run started`, then `✓ BDI: flow … ran and succeeded`; or, if it fails, `✗ … run failed` under **Needs attention** with BDI's reason. **Fail:** it stays ◐ after Claude saw it finish; send the status output.
+
 
 ## H. Usage limits and a Companion budget
 
@@ -109,3 +116,18 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** `Companion this month: $X of $Y`, where X matches **Past Companion sessions**' this month plus this session. **Fail:** no line, or X far off.
 - [ ] **H4. Full session ID.** Look at the pane's footer.
   **Pass:** `session` followed by the whole ID, and `claude --resume <that ID>` in a new terminal opens this session. **Fail:** a short ID, or the resume fails.
+- [ ] **H5. BUDGET gauge.** Set `budgetUsd` and `companionMonthlyUsd` under `/config` and restart.
+  **Pass:** a **BUDGET** gauge listing `session:` and `month:` with their amounts. **Fail:** no gauge, or a budget missing.
+- [ ] **H6. Pane size.** Run `/bc-dashboard size 30`, then restart and open the pane.
+  **Pass:** the pane opens about 30 rows tall both times; dragging its edge still resizes it. **Fail:** the size doesn't change, or isn't kept.
+
+## I. Cost review
+
+*boomi-dashboard 0.18.0. Needs earlier Companion sessions on this machine.*
+
+- [ ] **I1. Review a session.** Under **Past Companion sessions**, press **Scan**, then **Review** beside your costliest session.
+  **Pass:** a line with its cost, prompts, tokens and peak context, then findings that match what you remember of it (each with a tip), or `Nothing stands out`. **Fail:** an error, or a finding that's plainly wrong; say which.
+- [ ] **I2. Ask Claude to review.** Press **Ask Claude to review**, then Enter.
+  **Pass:** the prompt box holds the request with the transcript's path; Claude reads the transcript in parts and suggests concrete changes. **Fail:** no path, or Claude can't open the file.
+- [ ] **I3. Compactions and prompts.** Review a session you know compacted.
+  **Pass:** `It compacted N times`, and a prompt count close to how many messages you sent. **Fail:** no compaction found; the transcript's marker may have changed.

@@ -211,7 +211,7 @@ const shortTarget = (word: string): string => {
 }
 
 /** One run of another plugin's script: its product, its verb and what it acted on. */
-export type ProductRun = { product: Product; script: string; verb: string; target?: string }
+export type ProductRun = { product: Product; script: string; verb: string; target?: string; ref?: string }
 
 /**
  * A run of another plugin's script, from its name and the words after it.
@@ -242,7 +242,10 @@ export const productRun = (name: string, args: readonly string[]): ProductRun | 
       ? positional[positional.length - 1]
       : positional[0]
   const run: ProductRun = { product: script.product, script: name.replace(/\.sh$/, ''), verb }
-  if (raw) run.target = shortTarget(raw)
+  if (raw) {
+    run.target = shortTarget(raw)
+    run.ref = raw
+  }
   return run
 }
 
@@ -259,4 +262,52 @@ export const productWords = (
   if (how === 'did') return `${name}: ${phrase(found.did)}`
   if (how === 'doing') return `${name}: ${phrase(found.does)}…`
   return `${name}: couldn't ${phrase(found.does)}`
+}
+
+/**
+ * The components a Marketplace install copied into the account, from its
+ * output: after "Copied component IDs:", one "  <id> (v<version>)" line each.
+ */
+export const recipeComponents = (output: string): { componentId: string; version?: string }[] => {
+  const at = output.indexOf('Copied component IDs:')
+  if (at < 0) return []
+  return [...output.slice(at).matchAll(/^\s+([0-9a-f][0-9a-f-]{7,})\s+\(v(\d+|\?)\)\s*$/gim)].map(m => ({
+    componentId: m[1]!,
+    ...(m[2] && m[2] !== '?' ? { version: m[2] } : {}),
+  }))
+}
+
+// --- BDI flow runs ------------------------------------------------------------------
+
+/** A BDI run's status, as BDI reports it: pending and running, then succeeded, failed, canceled or skipped. */
+export type BdiRunStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'skipped'
+
+/** The run ID a `bdi-flow.sh run` response carries. */
+export const bdiRunId = (output: string): string | undefined => output.match(/"run_id"\s*:\s*"([^"]+)"/)?.[1]
+
+/** A `bdi-flow.sh status <flow-id> <run-id>` in a command: Claude checking how a run went. */
+export const bdiStatusChecks = (command: string): { flow: string; run: string }[] =>
+  [...command.matchAll(/bdi-flow\.sh\s+status\s+(?:'|")?([^\s'";&|]+)(?:'|")?\s+(?:'|")?([^\s'";&|]+)/g)].map(m => ({ flow: m[1]!, run: m[2]! }))
+
+/**
+ * How a run went, from a status check's response: its status, and the
+ * reason a failed one gives. BDI reports a cancelled run as failed with
+ * "Run canceled"; that reads as cancelled. Undefined when the response
+ * names no status.
+ */
+export const bdiRunReading = (output: string): { status: BdiRunStatus | string; reason?: string } | undefined => {
+  let body: unknown
+  try {
+    body = JSON.parse(output.slice(output.indexOf('{'), output.lastIndexOf('}') + 1))
+  } catch {
+    return undefined
+  }
+  const top = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>
+  const run = (top.run && typeof top.run === 'object' ? top.run : top) as Record<string, unknown>
+  const raw = run.status ?? run.run_status
+  if (typeof raw !== 'string' || !raw) return undefined
+  const reason = typeof run.error_description === 'string' && run.error_description ? run.error_description : undefined
+  const status = raw.toLowerCase()
+  if (status === 'failed' && reason && /^run cancel+ed$/i.test(reason.trim())) return { status: 'canceled' }
+  return reason ? { status, reason } : { status }
 }

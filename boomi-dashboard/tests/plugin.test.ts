@@ -431,25 +431,42 @@ test('a build in a loop and on several lines shows every component', async ($, o
   expect(status.text).toContain('✓ Nothing needs attention.')
 })
 
-test("after a restart, this folder's steps from the last 24h come back", async ($, on) => {
-  world(on)
-  mock.store(on, {
+test("after a restart, this folder's steps from the last 24h come back; older ones are kept and shown when asked", async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  const store: Record<string, unknown> = {
     'activity:/work': {
       savedAt: NOW - 3_600_000,
       activity: [
         { id: 1, kind: 'deploy', outcome: 'ok', subject: LISTENER, detail: 'deployed', startedAt: NOW - 3_600_000, endedAt: NOW - 3_600_000, componentId: LISTENER_ID },
         { id: 2, kind: 'push', outcome: 'ok', subject: 'Old', detail: 'x', startedAt: NOW - 3 * 86_400_000, endedAt: NOW - 3 * 86_400_000, file: 'active-development/x/Old.xml' },
+        { id: 3, kind: 'test', outcome: 'failed', subject: 'Old', detail: 'ERROR', startedAt: NOW - 3 * 86_400_000, endedAt: NOW - 3 * 86_400_000, file: 'active-development/x/Old.xml', executionStatus: 'ERROR' },
       ],
     },
-  })
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
-  on('command.register', async () => ({ value: undefined }) as never)
-  on('tool.register', async () => ({ value: undefined }) as never)
-  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  }
+  await startSession($, on, store)
   const status = await $.command.run(dashboard('text'))
   expect(status.text).toContain(`${LISTENER}: ✓ deployed`)
   expect(status.text).not.toContain('Old')
-  expect(status.text).toContain('1 step from an earlier session in this folder, last 24h')
+  expect(status.text).toContain('1 step from earlier sessions in this folder, last 24h')
+  expect(status.text).toContain('2 older steps: /bc-dashboard earlier shows them')
+
+  // A new step doesn't drop the older ones from what the folder keeps, or reuse their IDs.
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  await clock.advance(1)
+  const kept = (store['activity:/work'] as { activity: { id: number; subject: string }[] }).activity
+  expect(kept.map(a => a.subject)).toEqual(['Old', 'Old', LISTENER, 'Orders Sync'])
+  expect(new Set(kept.map(a => a.id)).size).toBe(4)
+
+  // In the pane: Show 2 earlier, and then they're there, their failure as history.
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect((await pane.find({ type: 'Button', key: 'earlier' }))?.props.label).toBe('Show 2 earlier')
+  await pane.press({ key: 'earlier' })
+  const after = await $.command.run(dashboard('text'))
+  expect(after.text).toContain('Old: ✓ saved')
+  expect(after.text).toContain('3 steps from earlier sessions in this folder)')
+  expect(after.text).toContain('✓ Nothing needs attention.')
+  expect((await $.command.run(dashboard('earlier'))).text).toContain('No older steps')
 })
 
 test('/bc-dashboard opens the pane with the keyboard and leaves the transcript a single line', async ($, on) => {
@@ -1115,7 +1132,7 @@ test("other Companion plugins' steps show in the feed in their own words; read-o
   for (const command of [list, deploy, run, install]) await $.tool.call({ tool: 'Bash', command })
   const text = (await $.command.run(dashboard('text'))).text ?? ''
   expect(text).toContain('✓ Data Hub: deployed universe 7c1e9a40…')
-  expect(text).toContain('✓ BDI: ran flow 65f0c2a1…')
+  expect(text).toContain('◐ BDI: flow 65f0c2a1… run started')
   expect(text).toContain('✓ Marketplace: installed recipe Salesforce to NetSuite Orders')
   expect(text).not.toContain('list')
   expect(text).toContain('✓ Nothing needs attention.')
@@ -1233,4 +1250,175 @@ test("a monthly Companion amount adds this month's earlier sessions to this one"
   await $.command.run(dashboard('history'))
   // $3.50 earlier this month, $1.25 so far in this session.
   expect((await $.command.run(dashboard('text'))).text).toContain('✓ Companion this month: $4.75 of $10')
+})
+
+test("a Marketplace recipe's components join the session's components, and a pull names them", async ($, on) => {
+  world(on, { 'active-development/processes/Order Sync.xml': `<bns:Component xmlns:bns="http://api.platform.boomi.com/" componentId="783e3c22-aaaa-bbbb-cccc-000000000001" name="Order Sync" type="process"></bns:Component>` })
+  const install = 'BOOMI_COMMON_SH=/x/boomi-common.sh bash scripts/boomi-marketplace-install.sh --bundle-id b-1 --folder-id 42'
+  const pull = 'bash scripts/boomi-component-pull.sh --component-id 783e3c22-aaaa-bbbb-cccc-000000000001'
+  productShell(on, {
+    [install]: {
+      out: [
+        'Installing marketplace recipe...',
+        '  Bundle ID: b-1',
+        "SUCCESS: Installed 'Salesforce to NetSuite Orders'",
+        '',
+        'Copied component IDs:',
+        '  783e3c22-aaaa-bbbb-cccc-000000000001 (v1)',
+        '  783e3c22-aaaa-bbbb-cccc-000000000002 (v3)',
+      ].join('\n'),
+    },
+    [pull]: { out: 'SUCCESS: Component saved to active-development/processes/Order Sync.xml' },
+  })
+  await $.tool.call({ tool: 'Bash', command: install })
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('✓ Marketplace: installed recipe Salesforce to NetSuite Orders')
+  expect(text).toContain('783e3c22-aaaa-bbbb-cccc-000000000002: ✓ from recipe Salesforce to NetSuite Orders (v3)')
+  // The install is one step in the feed, not one per component.
+  expect(text.match(/installed from recipe/g)).toBeNull()
+
+  await $.tool.call({ tool: 'Bash', command: pull })
+  const after = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(after).toContain('Order Sync (process): ✓ from recipe Salesforce to NetSuite Orders  ✓ pulled from Boomi')
+})
+
+test("a BDI run started shows how it ended once Claude checks its status: a failure needs attention with BDI's reason", async ($, on) => {
+  const toasts = world(on)
+  const run = 'bash scripts/bdi-flow.sh run orders-flow'
+  const check = 'bash scripts/bdi-flow.sh status orders-flow r-77'
+  let status = { run_id: 'r-77', status: 'running' } as Record<string, string>
+  on('tool.call', { tool: 'Bash' }, async (_$, e) => ({
+    result: { stdout: String(e.command) === run ? '{"run_id":"r-77","river_id":"orders-flow"}' : JSON.stringify(status), stderr: '', interrupted: false },
+  }))
+  await $.tool.call({ tool: 'Bash', command: run })
+  expect((await $.command.run(dashboard('text'))).text).toContain('◐ BDI: flow orders-flow run started')
+
+  await $.tool.call({ tool: 'Bash', command: check })
+  expect((await $.command.run(dashboard('text'))).text).toContain('✓ Nothing needs attention.')
+
+  status = { run_id: 'r-77', status: 'failed', error_description: 'Target table orders_stg does not exist' }
+  await $.tool.call({ tool: 'Bash', command: check })
+  const failed = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(failed).toContain('Needs attention (1):')
+  expect(failed).toContain('✗ BDI: flow orders-flow run failed')
+  expect(failed).toContain('ERROR: Target table orders_stg does not exist (run r-77)')
+  expect(toasts.some(t => t.includes('run failed'))).toBe(true)
+
+  // The same run, checked again after a rerun succeeds: the failure clears.
+  status = { run_id: 'r-77', status: 'succeeded' }
+  await $.tool.call({ tool: 'Bash', command: check })
+  expect((await $.command.run(dashboard('text'))).text).toContain('✓ Nothing needs attention.')
+})
+
+test('a BDI run cancelled reads as cancelled, not failed', async ($, on) => {
+  world(on)
+  const outputs: Record<string, string> = {
+    'bash scripts/bdi-flow.sh run f-1': '{"run_id":"r-1"}',
+    'bash scripts/bdi-flow.sh status f-1 r-1': '{"run_id":"r-1","status":"failed","error_description":"Run canceled"}',
+    'bash scripts/bdi-flow.sh run f-2': '{"run_id":"r-2"}',
+    'bash scripts/bdi-flow.sh status f-2 r-2': '{"run_id":"r-2","status":"succeeded"}',
+  }
+  on('tool.call', { tool: 'Bash' }, async (_$, e) => ({ result: { stdout: outputs[String(e.command)] ?? '', stderr: '', interrupted: false } }))
+  for (const command of Object.keys(outputs)) await $.tool.call({ tool: 'Bash', command })
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('✓ BDI: flow f-1 run cancelled')
+  expect(text).toContain('✓ BDI: flow f-2 ran and succeeded')
+  expect(text).toContain('✓ Nothing needs attention.')
+})
+
+test('every budget the person set shows in a BUDGET gauge, the fullest first', { options: { budgetUsd: 5, companionMonthlyUsd: 2 } }, async ($, on) => {
+  world(on)
+  mock.store(on)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: 'BUDGET' })).toBeDefined()
+  // $1.25 of a $2 month is 63%; $1.25 of a $5 session is 25%.
+  expect(await pane.find({ text: /▰+▱+ 63%/ })).toBeDefined()
+  expect(await pane.find({ text: '✓ month: $1.25 of $2.00' })).toBeDefined()
+  expect(await pane.find({ text: '✓ session: $1.25 of $5.00' })).toBeDefined()
+})
+
+test('without a budget set, there is no BUDGET gauge', async ($, on) => {
+  world(on)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: 'BUDGET' })).toBeUndefined()
+})
+
+test('/bc-dashboard size asks for a pane size, keeps it, and goes back to the default', async ($, on) => {
+  world(on, {}, { isPlaced: true })
+  const store: Record<string, unknown> = {}
+  await startSession($, on, store)
+  const answer = await $.command.run(dashboard('size 30 90'))
+  expect(answer.text).toContain('asks for 30 rows and 90 columns')
+  expect(opens.at(-1)).toMatchObject({ rows: 30, columns: 90 })
+  expect(store.paneSize).toEqual({ rows: 30, columns: 90 })
+  await $.command.run(dashboard())
+  expect(opens.at(-1)).toMatchObject({ rows: 30, columns: 90 })
+  expect((await $.command.run(dashboard('size 3'))).text).toContain('Usage: /bc-dashboard size')
+  expect((await $.command.run(dashboard('size'))).text).toContain('back to its usual size')
+  await $.command.run(dashboard())
+  expect(opens.at(-1)?.rows).toBeUndefined()
+})
+
+const COSTLY_SCANNED = JSON.stringify({
+  version: 1,
+  scanned: 2,
+  sessions: [
+    { id: 'cheap-1', project: '/work', startedAt: '2026-10-11T09:00:00Z', costUsd: 0.5, commands: [`bash scripts/boomi-component-push.sh ${FILE}`], prompts: 4, models: { 'claude-sonnet-5-5': { input: 1000, output: 1000 } } },
+    {
+      id: 'costly-2',
+      project: '/work',
+      startedAt: '2026-10-10T09:00:00Z',
+      costUsd: 20.1,
+      commands: Array(5).fill(`bash scripts/boomi-test-execute.sh --process-id ${ID}`),
+      prompts: 30,
+      peakContext: 150_000,
+      models: { 'claude-opus-5-5': { input: 10_000, output: 90_000, cacheRead: 2_000_000, cacheWrite: 50_000 } },
+      file: '/home/me/.claude/projects/-work/costly-2.jsonl',
+    },
+  ],
+})
+
+test('Review on a past session shows what drove its cost, and Ask Claude to review drafts the request', async ($, on) => {
+  world(on)
+  mock.store(on)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: COSTLY_SCANNED, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const fills: string[] = []
+  on('prompt.read', async () => ({ value: { text: '', cursor: 0 } }))
+  on('prompt.fill', async (_$, e) => {
+    fills.push(String(e.text))
+    return { isFilled: true }
+  })
+  await $.command.run(dashboard('history'))
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect((await pane.find({ type: 'Button', key: 'history-review-1' }))?.props.label).toBe('Review')
+  await pane.press({ key: 'history-review-1' })
+  expect(await pane.find({ text: /Opus 5\.5 did 100% of the work/ })).toBeDefined()
+  expect(await pane.find({ text: /was tested 5 times/ })).toBeDefined()
+  expect(await pane.find({ text: /reached 150k tokens of context/ })).toBeDefined()
+  await pane.press({ key: 'history-ask-1' })
+  expect(fills.at(-1)).toContain('Review my earlier Claude Code session costly-2')
+  expect(fills.at(-1)).toContain('/home/me/.claude/projects/-work/costly-2.jsonl')
+  // Close folds it again.
+  await pane.press({ key: 'history-review-1' })
+  expect(await pane.find({ text: /did 100% of the work/ })).toBeUndefined()
+})
+
+test('/bc-dashboard review takes a number, or asks which of the costliest recent sessions', async ($, on) => {
+  world(on)
+  mock.store(on)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: COSTLY_SCANNED, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const asked: string[][] = []
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    const q = e.questions[0]!
+    asked.push(q.options.map(o => o.label))
+    return { result: { questions: [q], answers: { [q.question]: q.options[0]!.label } } as never }
+  })
+  const one = (await $.command.run(dashboard('review 1'))).text ?? ''
+  expect(one).toContain('✓ Nothing stands out')
+  const picked = (await $.command.run(dashboard('review'))).text ?? ''
+  // The costliest first.
+  expect(asked[0]![0]).toMatch(/^2\. .*\$20/)
+  expect(picked).toContain('$20 · 30 prompts')
+  expect(picked).toContain('Switch with /model')
+  expect((await $.command.run(dashboard('review 9'))).text).toContain("9 isn't one of these.")
 })
