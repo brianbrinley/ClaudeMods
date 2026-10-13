@@ -997,3 +997,81 @@ test('/bc-dashboard why lists the failures to pick from when the question is dis
   expect((await $.command.run(dashboard('why 2'))).text).toContain('(execution execution-aaaa1111):')
   expect((await $.command.run(dashboard('why 7'))).text).toContain("7 isn't one of these.")
 })
+
+// --- Reopening a past session ---
+
+/** Two past sessions, the second in a folder whose name needs quoting. */
+const TWO_SCANNED = JSON.stringify({
+  version: 1,
+  scanned: 2,
+  sessions: [
+    { id: 'aaaaaaaa-1111', project: '/Users/me/orders', startedAt: '2026-10-11T09:00:00Z', costUsd: 3.5, commands: [`bash scripts/boomi-component-push.sh ${FILE}`] },
+    { id: 'bbbbbbbb-2222', project: "/Users/me/pat's sync", startedAt: '2026-10-10T09:00:00Z', costUsd: 1.25, commands: [`bash scripts/boomi-deploy.sh ${FILE}`] },
+  ],
+})
+
+/** The scan answers with `scanned`; the clipboard takes copies when `isCopying`, and records them. */
+const pastWorld = (on: On, scanned: string, isCopying = true, sessionId?: string) => {
+  world(on, {}, { sessionId })
+  mock.store(on)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: scanned, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const copies: string[] = []
+  on('ui.copy', async (_$, e) => {
+    copies.push(e.text)
+    return { value: isCopying ? { isCopied: true as const } : { isCopied: false as const, reason: 'no-clipboard' as const } }
+  })
+  return copies
+}
+
+test('Copy on a past session puts the command that reopens it on the clipboard', async ($, on) => {
+  const copies = pastWorld(on, TWO_SCANNED)
+  await $.command.run(dashboard('history'))
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  await pane.press({ key: 'history-copy-1' })
+  expect(copies).toEqual(["cd '/Users/me/pat'\\''s sync' && claude --resume bbbbbbbb-2222"])
+  expect(await pane.find({ text: /Copied\. Paste it into a new terminal/ })).toBeDefined()
+})
+
+test('where the clipboard can\'t take it, Copy shows the command to type instead', async ($, on) => {
+  pastWorld(on, SCANNED, false)
+  await $.command.run(dashboard('history'))
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  await pane.press({ key: 'history-copy-0' })
+  expect(await pane.find({ text: /Run this in a new terminal: cd \/Users\/me\/orders && claude --resume aaaaaaaa-1111/ })).toBeDefined()
+})
+
+test('the current session has no Copy: it is already open', async ($, on) => {
+  pastWorld(on, SCANNED, true, 'aaaaaaaa-1111')
+  await $.command.run(dashboard('history'))
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ type: 'Button', key: 'history-copy-0' })).toBeUndefined()
+})
+
+test('/bc-dashboard resume copies the one past session there is, scanning first', async ($, on) => {
+  const copies = pastWorld(on, SCANNED)
+  const answer = await $.command.run(dashboard('resume'))
+  expect(answer.text).toBe('Copied. Paste it into a new terminal to reopen that session:\n  cd /Users/me/orders && claude --resume aaaaaaaa-1111')
+  expect(copies).toHaveLength(1)
+})
+
+test('/bc-dashboard resume asks which of several, or takes a number', async ($, on) => {
+  const copies = pastWorld(on, TWO_SCANNED)
+  const asked: string[][] = []
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    const q = e.questions[0]!
+    asked.push(q.options.map(o => o.label))
+    return { result: { questions: [q], answers: { [q.question]: q.options[1]!.label } } as never }
+  })
+  const answer = await $.command.run(dashboard('resume'))
+  expect(asked[0]).toHaveLength(2)
+  expect(asked[0]![0]).toMatch(/^1\. Oct 11/)
+  expect(answer.text).toContain('claude --resume bbbbbbbb-2222')
+  await $.command.run(dashboard('resume 1'))
+  expect(copies.at(-1)).toBe('cd /Users/me/orders && claude --resume aaaaaaaa-1111')
+  expect((await $.command.run(dashboard('resume 9'))).text).toContain("9 isn't one of these.")
+})
+
+test('/bc-dashboard resume with no earlier sessions says so', async ($, on) => {
+  pastWorld(on, JSON.stringify({ version: 1, scanned: 0, sessions: [] }))
+  expect((await $.command.run(dashboard('resume'))).text).toBe('No earlier Companion sessions on this machine from the last 90 days to reopen.')
+})

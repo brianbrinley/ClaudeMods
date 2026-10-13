@@ -56,7 +56,7 @@ Never read, print or copy my .env or any Boomi credentials. The mod reads them i
 - **Watched components:** components you asked to watch, and who last changed them in Boomi.
 - **Themes:** **Day**, **Night** or **Terminal** (your terminal's colors), from the buttons or `/bc-dashboard theme night`. The choice is kept.
 
-A banner above the prompt shows the latest step and what needs attention, and the status line and toasts carry the same news:
+A banner above the prompt shows the latest step and what needs attention, and the status line and toasts carry the same news. In a new session, before Companion does anything, the status line says so (`New session · last one 14h ago, nothing left to fix · $0.00 this session`) rather than repeating the last session's step:
 
 ```text
 ◆ BC Dashboard ✓ Saved Orders Sync to Boomi (v4) 2m ago │ ✗ 1 needs attention │ 3 components │ 338k tokens · $0.54   [ Open ]  [ Hide ]
@@ -139,6 +139,7 @@ Boomi Companion sessions on this machine, last 90 days:
 
 - The cost is Claude Code's own, as `/cost` showed it, read from the transcript. Older Claude Code versions didn't record it; those sessions show tokens only.
 - A session counts only if it ran a Companion script, not if it only looked at one. The folder shows on each line only when sessions come from different folders.
+- **Reopen one:** **Copy** beside a session puts the command that reopens it on the clipboard, `cd <its folder> && claude --resume <session ID>`, to paste into a new terminal. `/bc-dashboard resume` does the same from the prompt: with several sessions it asks which, and `resume <n>` takes the nth newest. Where the clipboard can't be reached, the command is shown to type instead.
 - Transcripts are often tens of MB, past the 4 MiB a mod can read at once, so `scripts/scan-sessions.pl` reads them a line at a time and returns only each session's totals and the commands that name a Companion script. It needs Perl, which macOS and Linux have. **On Windows, run Claude Code in WSL.**
 
 ## Session report
@@ -159,6 +160,7 @@ Boomi Companion sessions on this machine, last 90 days:
 | `/bc-dashboard watch <id\|file>` / `unwatch <id>` | `watch` | Watches a component, or stops. |
 | `/bc-dashboard report [save]` | `report` | The session report. |
 | `/bc-dashboard history` | `history` | Past Companion sessions and their cost. |
+| `/bc-dashboard resume [n]` | | Copies the command that reopens a past session in a new terminal; without a number, asks which. |
 | `/bc-dashboard theme [name]` | | Picks the pane's theme, or lists them. |
 | `/bc-dashboard banner` | | Shows the banner again after **Hide**. |
 
@@ -243,7 +245,8 @@ The dashboard follows Claude's tool calls, so tracking the session costs no Plat
 | `$.fs` | Component XML, Companion's `.env` and its activity log |
 | `$.process.run` | **Why?**, **Run again** and the session scan |
 | `$.prompt.fill`, `$.prompt.suggest` | **Ask Claude to fix** and the next-step suggestion |
-| `$.ui.ask` | Which failure `why` and `rerun` act on |
+| `$.ui.ask` | Which failure `why` and `rerun` act on, and which session `resume` reopens |
+| `$.ui.copy` | **Copy** and `resume`: the command that reopens a past session |
 | `$.state`, `$.store` | What the views draw, what's kept across sessions, and the other Boomi mods' state for **Guardrails** |
 | `ui.render`, `$.ui.status`, `$.ui.toast` | The banner, pane, status line and toasts |
 
