@@ -67,7 +67,8 @@ import {
   choiceLabel,
   choiceFrom,
   choiceList,
-  waveRows,
+  pondRows,
+  FLAMINGO_DRINK,
   resumeCommand,
   resumable,
 } from '../hooks/activity'
@@ -832,13 +833,30 @@ test('the resume command quotes a folder only when it needs it', () => {
   expect(resumable([s, { ...s, id: 'b' }], 'aaaaaaaa-1111').map(x => x.id)).toEqual(['b'])
 })
 
-test('the flamingo stands in water the width of its strip, rippling only while Claude works', () => {
-  expect(waveRows(false, 0)).toEqual(['.WW..WW..WW..WW..W', 'W..WW..WW..WW..WW.'])
-  expect(waveRows(false, 7)).toEqual(waveRows(false, 0))
-  expect(waveRows(true, 1)).toEqual(['WW..WW..WW..WW..WW', '..WW..WW..WW..WW..'])
-  expect(waveRows(true, 4)).toEqual(waveRows(true, 0))
-  // Drawn as one row of half blocks: crests on top, troughs below.
-  expect(pixelCells(waveRows(false, 0), { W: '#9FDED6' })[0]!.map(c => c.char).join('')).toBe('▄▀▀▄▄▀▀▄▄▀▀▄▄▀▀▄▄▀')
+test('the flamingo stands in a small pond that splashes as it drinks or a step lands', () => {
+  const right = { offset: 0, facing: 'right' as const }
+  // Standing: still water under its feet, no drops.
+  expect(pondRows(right, { isWorking: false, frame: 0 })).toEqual(['..................', '...WWW.WWWW.......'])
+  // Drinking: drops around the beak, bobbing between two frames.
+  expect(pondRows(right, { isWorking: false, frame: 0, isDrinking: true })[0]).toBe('........W..W......')
+  expect(pondRows(right, { isWorking: false, frame: 1, isDrinking: true })[0]).toBe('.......W..W.......')
+  // Walking: drops beside the feet as a wide step lands, none mid-step.
+  expect(pondRows(right, { isWorking: true, frame: 0 })[0]).toBe('..W......W........')
+  expect(pondRows(right, { isWorking: true, frame: 1 })[0]).toBe('..................')
+  // It moves and turns with the bird.
+  expect(pondRows({ offset: 6, facing: 'left' }, { isWorking: false, frame: 0 })[1]).toBe('.......WWWW.WWW...')
+  // One row of half blocks: drops above, water below.
+  expect(pixelCells(pondRows(right, { isWorking: false, frame: 0, isDrinking: true }), { W: '#9FDED6' })[0]!.map(c => c.char).join('')).toBe('   ▄▄▄ ▄█▄▄▀      ')
+})
+
+test('now and then while idle the flamingo bends over to drink, its beak in the water', () => {
+  expect(flamingo(false, 0, true)).toBe(FLAMINGO_DRINK)
+  // Never mid-walk.
+  expect(flamingo(true, 0, true)).toBe(FLAMINGO_WALK[0])
+  expect(FLAMINGO_DRINK).toHaveLength(FLAMINGO_IDLE.length)
+  expect(FLAMINGO_DRINK.every(row => row.length === 12)).toBe(true)
+  // The beak's black tip is on the bottom row, at the water.
+  expect(FLAMINGO_DRINK[FLAMINGO_DRINK.length - 1]).toContain('K')
 })
 
 // --- Companion's other plugins ---
