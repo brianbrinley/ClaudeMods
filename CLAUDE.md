@@ -10,6 +10,8 @@ The engine follows `$` only within one file: helpers that take `$` live in the h
 
 Credentials never go in a mod's files or in chat. Mods read them from the environment or from the user's own gitignored files.
 
+No Claude attribution in commits or pull requests: commit messages end with their last line of text, with no `Co-Authored-By: Claude` or `Claude-Session:` trailer, and pull request descriptions end with their last section, with no "Generated with Claude Code" line and no Claude session link.
+
 ## Docs site (GitHub Pages)
 
 `.github/workflows/pages.yml` publishes https://brianbrinley.github.io/ClaudeMods/ on every merge to `main` that touches the READMEs, `brand/`, `site/` or a mod:

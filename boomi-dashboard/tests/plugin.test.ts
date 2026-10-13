@@ -304,17 +304,14 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(propsOf(await pane.drawn()).backgroundColor).toBe('#FBF6EE')
   })
 
-  test(`on ${surface}, the flamingo walks while Claude works and stands while idle`, async ($, on) => {
+  test(`on ${surface}, the flamingo stands in its water, and now and then changes its pose`, async ($, on) => {
     world(on)
     mock.store(on)
-    on('turn.start', async (_$, e) => ({ turnId: e.turnId }) as never)
-    on('turn.complete', async () => ({ text: '' }))
     on('session.start', async (_$, e) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }) as never)
     on('tool.register', async () => ({ value: undefined }) as never)
-    // The session starts on the mocked clock, so its animation timer does too.
+    // The session starts on the mocked clock, so its scene timer does too.
     await $.session.start({ cwd: '/work', surface, isInteractive: true })
-    await $.turn.complete({ reason: 'answer', turnId: 't0', answer: '' } as never)
     const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
     const bird = async () => JSON.stringify((await pane.findAll({ text: /^[ ▀▄█]+$/ })).map(f => f.text))
     const standing = await bird()
@@ -322,17 +319,14 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // It stands in seafoam water, Valence Day's.
     const water = await pane.findAll({ type: 'Text', text: /^[▀▄]$/ })
     expect(water.some(w => w.props.color === '#9FDED6')).toBe(true)
-    await $.turn.start({ text: 'go', turnId: 't1' } as never)
-    const walking = await bird()
-    expect(walking).not.toBe(standing)
-    await clock.advance(500)
-    expect(await bird()).not.toBe(walking)
-    // Idle again: it stands still, and so does the water.
-    await $.turn.complete({ reason: 'answer', turnId: 't1', answer: '' } as never)
-    await clock.advance(500)
-    const idle = await bird()
-    await clock.advance(30_000)
-    expect(await bird()).toBe(idle)
+    // A few seconds on, nothing has changed: it stands still.
+    await clock.advance(5_000)
+    expect(await bird()).toBe(standing)
+    // Fifteen seconds in, it looks back over its shoulder, then forward again.
+    await clock.advance(10_500)
+    expect(await bird()).not.toBe(standing)
+    await clock.advance(3_000)
+    expect(await bird()).toBe(standing)
   })
 
   test(`on ${surface}, the pane names the model that answered`, async ($, on) => {
