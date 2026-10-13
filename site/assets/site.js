@@ -42,9 +42,12 @@ async function renderDiagrams() {
   await mermaid.run({ nodes });
 }
 
-// A Copy button on each code block (not diagrams): the install prompt is meant to be pasted.
+// A Copy button only on blocks meant to be pasted somewhere else: shell commands and prompts (```prompt).
+// Sample output and config examples don't get one.
+const COPYABLE = ['bash', 'sh', 'shell', 'prompt'].map((l) => `pre > code.language-${l}`).join(', ');
 function addCopyButtons() {
-  document.querySelectorAll('pre:not(.mermaid)').forEach((pre) => {
+  document.querySelectorAll(COPYABLE).forEach((code) => {
+    const pre = code.parentElement;
     if (pre.querySelector('.copy-button')) return;
     const button = document.createElement('button');
     button.type = 'button';

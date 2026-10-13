@@ -5,13 +5,20 @@
 
 # Boomi Companion Dashboard Mod
 
-A Claude Code mod that shows where your [Boomi Companion](https://github.com/OfficialBoomi/bc-integration) build stands while Claude works: each component's stage, what failed and what to do about it, what the session has cost, and the environment's recent runs.
+**See your whole Boomi build at a glance, right beside the conversation.** While Claude builds with [Boomi Companion](https://github.com/OfficialBoomi/bc-integration), the dashboard follows every edit, save, deploy and test. It tells you what broke and what to do next, and keeps a running total of what the session costs. You don't leave Claude Code, and you don't scroll back through the transcript.
+
+- **Know where every component stands.** Edited, saved with its version, deployed, tested: each component's stage updates as Claude works.
+- **Go from failure to fix in two clicks.** **Why?** reads a failed test's process log. **Ask Claude to fix** drafts the request with the log's lines in it, and **Run again** checks the fix without a turn of Claude's.
+- **Keep spend in sight.** Tokens, cost and how full the context is, per step and per component, with an optional budget that warns at 80%.
+- **Pick up where you left off.** A new session opens with what the last one did and left to fix, and **Past Companion sessions** shows what earlier work cost.
+- **Catch what happens outside the chat.** Companion's activity log adds script runs from a terminal, and watched components flag changes someone else makes in Boomi.
+- **Hand it off.** `/bc-dashboard report` writes the session up as Markdown for a pull request, a ticket or the next person.
 
 ## Install
 
 Copy this prompt into a Claude Code session started from your Boomi Companion workspace (the folder with Companion's `.env`). It works for any Claude account. On Windows, run Claude Code in WSL and paste it there.
 
-```text
+```prompt
 Install the boomi-dashboard Claude Code mod from https://github.com/brianbrinley/ClaudeMods for my user account, so it loads in every Claude Code session on this computer.
 
 1. Clone the repo (main branch) to ~/ClaudeMods. If it's already there, run `git -C ~/ClaudeMods pull` instead.
@@ -26,7 +33,9 @@ Install the boomi-dashboard Claude Code mod from https://github.com/brianbrinley
 Never read, print or copy my .env or any Boomi credentials. The mod reads them itself.
 ```
 
-**After the restart:** `/bc-dashboard` should open the pane with nothing needing attention, and `/bc-dashboard poll` checks the connection to Boomi (**Process runs in Boomi** says what's missing, if anything). Perl is only for **Past Companion sessions**; macOS and Linux have it.
+**After the restart:** `/bc-dashboard` should open the pane with nothing needing attention. Perl is only for **Past Companion sessions**; macOS and Linux have it.
+
+**Optional:** add `BOOMI_COMPANION_LOG_ACTIVITY=1` to Companion's `.env` so its scripts keep an activity log, which the dashboard reads as a [second source](#companions-activity-log).
 
 **To update:** `git -C ~/ClaudeMods pull`, then restart Claude Code.
 
@@ -34,15 +43,15 @@ Never read, print or copy my .env or any Boomi credentials. The mod reads them i
 
 `/bc-dashboard` opens the pane; Esc closes it. Where no pane can be shown, including Claude Code on the web, it prints the same thing as text.
 
-<img alt="The dashboard pane in the Day theme: title band, gauges for tokens, spend and context beside an 8-bit flamingo, then Needs attention with a failed test's log lines, Components this session, Claude's latest steps, Process runs in Boomi and Past Companion sessions" src="assets/pane-day.png" width="420"> <img alt="The same pane in the Night theme" src="assets/pane-night.png" width="420">
+<img alt="The dashboard pane in the Day theme: title band, gauges for tokens, spend and context beside an 8-bit flamingo, then Needs attention with a failed test's log lines, Components this session, Claude's latest steps and Past Companion sessions" src="assets/pane-day.png" width="420"> <img alt="The same pane in the Night theme" src="assets/pane-night.png" width="420">
 
 - **Gauges:** tokens, spend and how full the context is, with the last step's share.
 - **Needs attention:** what's still broken, each with a next step.
 - **Components this session:** each component's stages, tokens and cost.
 - **Claude's latest steps:** what Claude just did with Companion. **More** shows older steps.
-- **Process runs in Boomi:** runs of this session's components in the last 24 hours. **Hide** folds it to one line.
 - **Guardrails:** with [boomi-standards](../boomi-standards/README.md) or [boomi-runtime](../boomi-runtime/README.md) loaded, the last standards check (what it blocked, and why) and the runtime's state and smoke test.
 - **Past Companion sessions:** what earlier sessions on this machine did and cost. **More** pages through them.
+- **Watched components:** components you asked to watch, and who last changed them in Boomi.
 - **Themes:** **Day**, **Night** or **Terminal** (your terminal's colors), from the buttons or `/bc-dashboard theme night`. The choice is kept.
 
 A banner above the prompt shows the latest step and what needs attention, and the status line and toasts carry the same news:
@@ -50,6 +59,15 @@ A banner above the prompt shows the latest step and what needs attention, and th
 ```text
 ◆ BC Dashboard ✓ Saved Orders Sync to Boomi (v4) 2m ago │ ✗ 1 needs attention │ 3 components │ 338k tokens · $0.54   [ Open ]  [ Hide ]
 ```
+
+**A new session** in a Companion workspace opens with what the last session in that folder did, then turns through tips every 20 seconds until Companion does something:
+
+```text
+◆ BC Dashboard ✓ Last session 14h ago: 4 components · 6 saves · 2 deploys · 3 tests (1 failed) · nothing left to fix · $3.10 │ $0.00 this session   [ Open ]  [ Hide ]
+◆ BC Dashboard Tip: Why? on a failed test reads its log; Ask Claude to fix drafts the request │ $0.00 this session   [ Open ]  [ Hide ]
+```
+
+Anything left to fix from the last session stays under **Needs attention**, and the banner counts it. Outside a Companion workspace (no component folder, activity log or earlier session there), the banner stays hidden.
 
 ## Stages and what needs attention
 
@@ -60,7 +78,6 @@ A banner above the prompt shows the latest step and what needs attention, and th
 | ✓ saved v4 | Companion pushed it; Boomi has version 4. |
 | ✓ deployed / ◐ redeploy needed | Deployed, or saved again since, so the environment runs an older version. |
 | ✓ test passed / ✗ test ERROR | The latest test execution's result. |
-| ✗ 1 of 5 listener runs failed | Its runs in Boomi in the last 24 hours, matched by component ID. |
 | ⚠ save blocked | Another mod, such as [boomi-standards](../boomi-standards/README.md), refused the push. |
 | ✗ save failed, ✗ deploy failed | Companion's script reported an error. |
 
@@ -69,10 +86,10 @@ Icons always come with a label: ✓ done, ◐ in progress or still to do, ⚠ bl
 Each item under **Needs attention** has buttons:
 
 - **☐** closes it, for a failure you expected or handled another way. Closed items stay closed across restarts; **Reopen** brings them back.
-- **Why?** (failed tests and runs) runs Companion's `boomi-execution-query.sh --logs` and shows the log's `SEVERE` lines. **Ask Claude to fix** then puts a fix request with those lines in the prompt box, after anything you've typed. Nothing is sent until you press Enter.
+- **Why?** (failed tests) runs Companion's `boomi-execution-query.sh --logs` and shows the log's `SEVERE` lines. **Ask Claude to fix** then puts a fix request with those lines in the prompt box, after anything you've typed. Nothing is sent until you press Enter.
 - **Run again** (failed tests Claude ran) repeats the same `boomi-test-execute.sh` call, without a turn of Claude's. A pass clears the failure.
 
-Without a pane: `/bc-dashboard close <n>`, `why <n>` and `rerun <n>`, with the numbers from `/bc-dashboard text`.
+Without a pane: `/bc-dashboard close <n>`, `why` and `rerun`. With nothing that fits, `why` and `rerun` say so; with one failure, they act on it; with several, they ask which in Claude Code's question dialog (the four newest, and **Other** takes a number). A number from `/bc-dashboard text` skips the question.
 
 When Claude finishes a turn with a process saved but not deployed, or deployed but not tested, the prompt box suggests the next step ("Deploy Orders Sync and test it"). Tab takes it.
 
@@ -88,14 +105,22 @@ Spend is the session's cost as `/cost` reports it. A step's share is what Claude
 
 **Budget:** set `budgetUsd` and the status line, summary and SPEND gauge warn from 80% (`◐ 84% of the $5.00 budget`) and once it's spent, with one toast at each mark. Nothing is stopped.
 
-## Process runs in Boomi
+## Watched components
 
-With Companion's credentials, the dashboard reads (never writes) the runs on the runtimes attached to `BOOMI_ENVIRONMENT_ID`: every 60 seconds, soon after a deploy or test, and every 10 seconds while a run is in progress. It shows only runs of the components this session worked on, matched by process ID: tests, listener calls and schedules of those. Other processes' runs in the environment aren't shown, flagged or toasted.
+`/bc-dashboard watch <component ID or XML file>` watches a component across sessions. Every 60 seconds the dashboard reads (never writes) its version in Boomi; when someone other than Companion's API user changes it, it shows under **Needs attention**: pull before you push. `/bc-dashboard seen` clears the changes you expected. With nothing watched, the dashboard makes no Platform API calls.
 
-- A component's row shows its runs, and a failed run names its component under **Needs attention**. `/bc-dashboard seen` moves an expected failure out.
-- `/bc-dashboard watch <component ID or XML file>` watches a component across sessions. When someone other than Companion's API user changes it, it shows under **Needs attention**: pull before you push.
+Credentials come from Companion's `.env`, falling back to environment variables: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID`. The token goes only into requests' `Authorization` header; the dashboard never stores, shows or logs it, and its errors carry only the HTTP status. Without credentials, everything else still works.
 
-Credentials come from Companion's `.env`, falling back to environment variables: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID`, `BOOMI_ENVIRONMENT_ID`. The token goes only into requests' `Authorization` header; the dashboard never stores, shows or logs it, and its errors carry only the HTTP status. Without credentials, everything else still works.
+Up to 0.10.0 the dashboard also polled the environment's process runs. That's set aside for now and will come back; see [IDEAS](../IDEAS.md#dashboard-follow-ups).
+
+## Companion's activity log
+
+With `BOOMI_COMPANION_LOG_ACTIVITY=1` in its `.env`, Companion's scripts append each operation to `.activity-log/activity.jsonl` in the workspace, on this machine only. The dashboard reads it every 10 seconds while it changes, and adds what Claude's tool calls didn't show: a script run in a terminal, by another tool, or before the mod loaded. Those steps say **log** in the pane and "from Companion's log" in `/bc-dashboard text`.
+
+- Creates, pushes, pulls, deploys, undeploys and tests become steps, with the same stages and **Needs attention** items as Claude's own. Searches, folder lists and the like are left out.
+- A script Claude ran is in both places; its log entry matches the step Claude's tool call made, so it shows once.
+- Only the last 24 hours (`recentHours`) count. A log over 3.5 MB is read from its end.
+- `activityLog` under `/config` turns it off.
 
 ## Past Companion sessions
 
@@ -124,11 +149,11 @@ Boomi Companion sessions on this machine, last 90 days:
 |---|---|---|
 | `/bc-dashboard` | | Opens the pane (Esc closes it), or prints the dashboard where no pane fits. |
 | `/bc-dashboard text` | `summary` | The dashboard as text. |
-| `/bc-dashboard poll` | | Checks Boomi now. |
-| `/bc-dashboard why <n>` | | The `SEVERE` lines of a failed item's log. |
-| `/bc-dashboard rerun <n>` | | Runs a failed test again. |
+| `/bc-dashboard poll` | | Checks the watched components in Boomi now. |
+| `/bc-dashboard why [n]` | | The `SEVERE` lines of a failed test's log; without a number, asks which. |
+| `/bc-dashboard rerun [n]` | | Runs a failed test again; without a number, asks which. |
 | `/bc-dashboard close <n\|all>` / `reopen` | | Closes items, or brings them back. |
-| `/bc-dashboard seen` | | Moves current failed runs and watched changes out of **Needs attention**. |
+| `/bc-dashboard seen` | | Moves watched changes out of **Needs attention**. |
 | `/bc-dashboard watch <id\|file>` / `unwatch <id>` | `watch` | Watches a component, or stops. |
 | `/bc-dashboard report [save]` | `report` | The session report. |
 | `/bc-dashboard history` | `history` | Past Companion sessions and their cost. |
@@ -143,18 +168,19 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 - **Claude Code on the web:** add the folder to `CLAUDE_CODE_PLUGIN_DIRS`, separating mods with `:`.
 - **One terminal session:** `claude --plugin-dir boomi-dashboard`.
 
-**Process runs in Boomi** needs network access to `api.boomi.com`. Settings are under `/config`:
+**Watched components** need network access to `api.boomi.com`. Settings are under `/config`:
 
 | Setting | Default | |
 |---|---|---|
 | `paneTheme` | `day` | The pane's colors until you pick a theme. |
 | `flamingo` | `true` | The 8-bit flamingo: it paces while Claude works and stands on one leg while idle. |
-| `recentHours` | `24` | How far back **Process runs in Boomi** goes. |
+| `recentHours` | `24` | How far back earlier sessions' steps and Companion's activity log count. |
 | `envFile` | `.env` | Companion's `.env`, relative to the working directory. |
 | `componentsDir` | `active-development` | Where Companion keeps component XML. |
-| `pollSeconds` | `60` | How often to check Boomi; `0` turns it off. |
+| `pollSeconds` | `60` | How often to check the watched components; `0` turns it off. |
+| `activityLog` | `true` | Read [Companion's activity log](#companions-activity-log) as a second source. |
 | `toasts` | `true` | Toasts for failures, finished deploys and tests, and watched changes. |
-| `banner` | `true` | The banner above the prompt. |
+| `banner` | `true` | The banner above the prompt, and a new session's recap and tips. |
 | `budgetUsd` | `0` | The session's spend budget in US dollars; `0` turns it off. |
 | `suggestions` | `true` | Suggest the next step after a turn. |
 | `historyDays` | `90` | How far back **Past Companion sessions** reads. |
@@ -180,12 +206,13 @@ flowchart LR
     D -- failed --> X["error: needs attention,<br/>with a next step"]
     R --> S["Banner, pane,<br/>status line, /bc-dashboard"]
     X --> S
-    P[("Boomi Platform API")] -. "every 60 s: recent runs,<br/>watched components" .-> S
+    L[("Companion's activity log")] -. "every 10 s:<br/>runs Claude didn't make" .-> R
+    P[("Boomi Platform API")] -. "every 60 s:<br/>watched components" .-> S
     U["Session cost<br/>and context"] -.-> S
     class R focus
     class D decision
     class W,A,S highlight
-    class P external
+    class P,L external
     class X error
     classDef focus fill:#F7A8C4,stroke:#C2185B,stroke-width:2px,color:#0B0B0B
     classDef decision fill:#9FDED6,stroke:#0F766E,stroke-width:2px,color:#0B0B0B
@@ -210,18 +237,19 @@ The dashboard follows Claude's tool calls, so tracking the session costs no Plat
 | `tool.call` on `Bash`, `Write`, `Edit` | Companion's script runs and component edits |
 | `turn.step`, `turn.start`, `turn.complete` | Each model call's tokens, and whether Claude is working |
 | `$.session.usage` | Cost, context and session length |
-| `$.http.fetch` | Read-only Platform API queries |
+| `$.http.fetch` | Read-only Platform API queries for watched components |
+| `$.fs` | Component XML, Companion's `.env` and its activity log |
 | `$.process.run` | **Why?**, **Run again** and the session scan |
 | `$.prompt.fill`, `$.prompt.suggest` | **Ask Claude to fix** and the next-step suggestion |
+| `$.ui.ask` | Which failure `why` and `rerun` act on |
 | `$.state`, `$.store` | What the views draw, what's kept across sessions, and the other Boomi mods' state for **Guardrails** |
 | `ui.render`, `$.ui.status`, `$.ui.toast` | The banner, pane, status line and toasts |
 
-## To do
+## What's coming next
 
-- [ ] Run it against a live Boomi account and Companion session.
-- [ ] Show a failed run's documents, not only its log, once the [execution debugger](../IDEAS.md#execution-debugger) can read them from a local runtime.
-- [ ] Show [mock endpoints](../IDEAS.md#mock-endpoints) traffic once that mod exists.
-- [ ] Read Companion's activity log (`.activity-log/activity.jsonl`) as a second source.
+- **Process runs in Boomi, back again:** the environment's runs of this session's components, set aside in 0.11.0.
+- **A failed run's documents**, not only its log, once the [execution debugger](../IDEAS.md#execution-debugger) can read them from a local runtime.
+- **[Mock endpoints](../IDEAS.md#mock-endpoints) traffic**, once that mod exists.
 
 ## Development
 

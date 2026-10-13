@@ -4,10 +4,11 @@ Ideas for mods we could build next, starting with Boomi and integration work. Th
 
 **Built from this page so far:**
 - The Companion guardrail, now the [boomi-standards](boomi-standards/README.md) mod.
-- The deployment watcher, folded into the [boomi-dashboard](boomi-dashboard/README.md) mod: a live summary of a Companion session that also polls the environment's runs and watches components for changes.
+- The deployment watcher, folded into the [boomi-dashboard](boomi-dashboard/README.md) mod: a live summary of a Companion session that watches components for changes. (Polling the environment's runs is set aside for now; see [Dashboard follow-ups](#dashboard-follow-ups).)
 - The first half of the execution debugger, in the dashboard: **Why?** reads a failed run's process log and **Ask Claude to fix** drafts the request. A session report (`/bc-dashboard report`) came with it.
 - Dashboard follow-ups: **Run again** for a failed test, a spend budget (`budgetUsd`), and the next step (deploy, then test) suggested in the prompt box.
 - Guardrails at a glance: the dashboard's **Guardrails** section shows what boomi-standards blocked and the runtime's state.
+- Companion's activity log as a second source, and a new-session banner with the last session's recap and tips.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
 
@@ -129,6 +130,7 @@ quadrantChart
 
 Smaller additions to the [boomi-dashboard](boomi-dashboard/README.md) mod that build on what it already tracks:
 
+- **Process runs in Boomi, again:** up to 0.10.0 the dashboard polled the runs on the runtimes attached to `BOOMI_ENVIRONMENT_ID` and showed this session's components' runs (tests, listener calls, schedules), toasting new failures. It was set aside in 0.11.0 to come back to later. The plain functions (`recentRuns`, `sessionRuns`, `runsOf`, `newFailures`) and the Platform API client's `environmentAtoms` and `recentRuns` are still in the mod with their tests; what's needed is the polling, the pane section and the text and report sections again.
 - **Promotion diff and mock endpoints** would each show up as a section in the pane once they exist.
 
 ## Add an idea or claim one

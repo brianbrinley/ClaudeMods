@@ -7,8 +7,6 @@
 
 A Claude Code mod that holds [Boomi Companion](https://github.com/OfficialBoomi/bc-integration)'s components to your team's standards. Before Companion creates, pushes or deploys a component, the mod reads the component XML and refuses the call if the component breaks a rule, listing what's wrong. Claude fixes the component and tries again, so nothing that breaks the standards reaches the platform.
 
-> **Prototype.** Built and tested against Companion's scripts and XML format. Not yet run against a live Boomi account. Works anywhere Companion does, including Claude Code on the web.
-
 ## What it does
 
 ```mermaid

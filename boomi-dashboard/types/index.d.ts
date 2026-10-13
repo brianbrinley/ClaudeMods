@@ -42,6 +42,29 @@ export type Activity = {
   isRestored?: boolean
   /** A test's arguments to its script, so Run again can repeat it. */
   args?: string[]
+  /**
+   * Read from Companion's activity log rather than seen in Claude's tool calls:
+   * a script run outside them (a terminal, before the mod loaded). `logKey`
+   * names the log entry, so it's added once.
+   */
+  source?: 'log'
+  logKey?: string
+}
+
+/**
+ * What a session that worked with Companion did, kept for the next session in
+ * the same folder: the banner's "Last session" line.
+ */
+export type SessionRecap = {
+  endedAt: number
+  components: number
+  saves: number
+  deploys: number
+  tests: number
+  testsFailed: number
+  /** How many items still needed attention when it ended. */
+  open: number
+  usd?: number
 }
 
 /** Tokens by kind, as the API reports them. */
@@ -174,6 +197,6 @@ export type RuntimeSeen = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; isRunsCollapsed: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; suggested: string; history: HistoryState; historyShown: number; stepsShown: number }
+    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; suggested: string; history: HistoryState; historyShown: number; stepsShown: number }
   }
 }

@@ -36,6 +36,10 @@ const world = (on: On, files: Record<string, string> = {}, options: WorldOptions
     const text = files[local(e.path)]
     return text === undefined ? { deny: `ENOENT: ${e.path}` } : { value: text }
   })
+  on('fs.stat', async (_$, e) => {
+    const text = files[local(e.path)]
+    return text === undefined ? { deny: `ENOENT: ${e.path}` } : { value: { kind: 'file' as const, size: text.length, mtimeMs: text.length, isLink: false } }
+  })
   on('ui.status', async () => ({ value: undefined }))
   on('ui.open', async (_$, e) => {
     opens.push({ ...e })
@@ -158,11 +162,29 @@ test('commands that are not Companion scripts are left alone', async ($, on) => 
   expect(status.text).toContain('Components this session: none yet')
 })
 
-test('without credentials the live environment is off and says why', async ($, on) => {
+test('without credentials, a watched component says why it is not checked', async ($, on) => {
   world(on)
+  mock.store(on)
   mock.env(on, {})
+  await $.command.run(dashboard(`watch ${ID}`))
   const status = await $.command.run(dashboard('poll'))
+  expect(status.text).toContain('Watched components:')
   expect(status.text).toContain('Not connected')
+})
+
+test('with nothing watched, the dashboard makes no Platform API calls', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-1' })
+  shell(on, "SUCCESS: Deployed 'Orders Sync' (package: p1)")
+  const urls: string[] = []
+  on('http.fetch', async (_$, e) => {
+    urls.push(e.url)
+    return { value: { status: 200, ok: true, headers: {}, text: '{"result":[]}' } }
+  })
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-deploy.sh ${FILE}` })
+  const status = await $.command.run(dashboard('poll'))
+  expect(urls).toEqual([])
+  expect(status.text).not.toContain('Process runs')
 })
 
 test('watching a component polls its version, and a change by someone else needs attention', async ($, on) => {
@@ -193,59 +215,6 @@ test('watching a component polls its version, and a change by someone else needs
   await $.command.run(dashboard('seen'))
   const after = await $.command.run(dashboard())
   expect(after.text).toContain('✓ Nothing needs attention.')
-})
-
-test('after a deploy, the dashboard checks Boomi again within seconds', async ($, on) => {
-  world(on, { [FILE]: ORDERS })
-  mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-1' })
-  shell(on, "SUCCESS: Deployed 'Orders Sync' (package: p1)")
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
-  on('command.register', async () => ({ value: undefined }) as never)
-  on('tool.register', async () => ({ value: undefined }) as never)
-  mock.store(on)
-  const urls: string[] = []
-  on('http.fetch', async (_$, e) => {
-    urls.push(e.url)
-    const result = e.url.endsWith('EnvironmentAtomAttachment/query') ? [{ atomId: 'atom-1' }] : []
-    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
-  })
-  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
-  await clock.advance(3_000)
-  const before = urls.length
-  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-deploy.sh ${FILE}` })
-  await clock.advance(5_000)
-  expect(urls.length).toBeGreaterThan(before)
-})
-
-test("new failures of this session's components are toasted; old runs and other processes don't count", async ($, on) => {
-  const toasts = world(on, { [FILE]: ORDERS })
-  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
-  mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-1' })
-  let runs = [
-    { executionId: 'e0', processName: 'JMX Capability Scan', status: 'ERROR', executionTime: '2026-09-07T09:45:11Z' },
-    { executionId: 'e1', processName: 'Orders Sync', status: 'COMPLETE', executionTime: '2026-10-12T10:00:00Z' },
-  ]
-  on('http.fetch', async (_$, e) => {
-    const result = e.url.endsWith('EnvironmentAtomAttachment/query') ? [{ atomId: 'atom-1' }] : runs
-    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
-  })
-
-  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
-  const first = await $.command.run(dashboard('poll'))
-  expect(first.text).toContain('✓ Nothing needs attention.')
-  expect(first.text).toContain('✓ Orders Sync completed, 2h ago')
-  expect(first.text).not.toContain('JMX')
-
-  runs = [{ executionId: 'e2', processName: 'Orders Sync', status: 'ERROR', executionTime: '2026-10-12T11:55:00Z' }, ...runs]
-  const status = await $.command.run(dashboard('poll'))
-  expect(status.text).toContain('Run of Orders Sync ended ERROR')
-  expect(toasts.some(t => t.includes('Orders Sync failed'))).toBe(true)
-
-  // A failure of a process this session never touched: not shown, not toasted.
-  runs = [{ executionId: 'e3', processName: 'Nightly Cleanup', status: 'ERROR', executionTime: '2026-10-12T11:58:00Z' }, ...runs]
-  const other = await $.command.run(dashboard('poll'))
-  expect(other.text).not.toContain('Nightly Cleanup')
-  expect(toasts.some(t => t.includes('Nightly Cleanup'))).toBe(false)
 })
 
 /** A drawn tree's root props. */
@@ -359,30 +328,6 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await pane.find({ text: /VALENCE/ })).toBeUndefined()
   })
 
-  test(`on ${surface}, Process runs in Boomi folds to one line and stays folded for the session`, async ($, on) => {
-    world(on, { [LISTENER_FILE]: LISTENER_XML })
-    mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-test' })
-    on('http.fetch', async (_$, e) => {
-      const result = e.url.endsWith('EnvironmentAtomAttachment/query') ? [{ atomId: 'atom-1' }] : RUNS
-      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
-    })
-    await deployListener($, on)
-    await $.command.run(dashboard('poll'))
-    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
-    expect(await pane.find({ text: /listener|Listener/ })).toBeDefined()
-    expect((await pane.find({ type: 'Button', key: 'runs-toggle' }))?.props.label).toBe('Hide')
-    await pane.press({ key: 'runs-toggle' })
-    expect(await pane.find({ text: '5 in 24h, 1 failed' })).toBeDefined()
-    // Folded: the run lines are gone, the one-line summary stands in for them.
-    expect(await pane.find({ text: /completed, / })).toBeUndefined()
-    await pane.unmount()
-    const again = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
-    expect(await again.find({ text: '5 in 24h, 1 failed' })).toBeDefined()
-    // Needs attention stays: folding the list never hides a failure.
-    expect(await again.find({ text: /ended ERROR/ })).toBeDefined()
-    await again.press({ key: 'runs-toggle' })
-  })
-
   test(`on ${surface}, the footer names the session and links the repository's GitHub page`, async ($, on) => {
     world(on)
     const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
@@ -407,14 +352,10 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await pane.press({ key: 'close-0' })
   })
 
-  test(`on ${surface}, Why? reads a failed run's log, and Ask Claude to fix drafts the request`, async ($, on) => {
+  test(`on ${surface}, Why? reads a failed test's log, and Ask Claude to fix drafts the request`, async ($, on) => {
     world(on, { [LISTENER_FILE]: LISTENER_XML })
     mock.store(on)
-    mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-test' })
-    on('http.fetch', async (_$, e) => {
-      const result = e.url.endsWith('EnvironmentAtomAttachment/query') ? [{ atomId: 'atom-1' }] : RUNS
-      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
-    })
+    mock.env(on, CREDENTIALS)
     const ran: string[][] = []
     on('process.run', async (_$, e) => {
       ran.push([...e.argv])
@@ -428,8 +369,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
       fills.push(`${e.mode}:${e.text}`)
       return { isFilled: true }
     })
-    await deployListener($, on)
-    await $.command.run(dashboard('poll'))
+    const command = `bash ${SKILL}/scripts/boomi-test-execute.sh --process-id ${LISTENER_ID}`
+    scriptedShell(on, { [command]: 'Execution completed: status=ERROR, executionId=execution-81f61084-fd93-4565-9bda-9bf0d4b4f102' })
+    await $.tool.call({ tool: 'Bash', command })
     const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
     expect((await pane.find({ type: 'Button', key: 'why-0' }))?.props.label).toBe('Why?')
     await pane.press({ key: 'why-0' })
@@ -439,43 +381,27 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await pane.find({ text: /secret-token-value/ })).toBeUndefined()
     await pane.press({ key: 'fix-0' })
     expect(fills.at(-1)).toContain('append:\n')
-    expect(fills.at(-1)).toContain(`Listener run of ${LISTENER} ended ERROR (execution execution-81f61084-fd93-4565-9bda-9bf0d4b4f102)`)
+    expect(fills.at(-1)).toContain(`Test of ${LISTENER_ID} ended ERROR (execution execution-81f61084-fd93-4565-9bda-9bf0d4b4f102)`)
   })
 }
 
 
-// --- The live OrderValidator session: rows, runs and attention ---
+// --- The live OrderValidator session: rows and attention ---
 
 const SKILL = '/Users/me/.claude/plugins/cache/boomi-companion/bc-integration/1.0.76/skills/boomi-integration'
 const LISTENER = 'OrderValidator - Listener Validate Order'
 const LISTENER_ID = '33333333-1111-1111-1111-111111111111'
 const LISTENER_XML = `<bns:Component xmlns:bns="http://api.platform.boomi.com/" componentId="${LISTENER_ID}" name="${LISTENER}" type="process"></bns:Component>`
 const LISTENER_FILE = 'active-development/processes/Listener.xml'
-const RUNS = [
-  ...['a', 'b', 'c', 'd'].map(x => ({ executionId: `execution-${x}`, processName: LISTENER, processId: LISTENER_ID, status: 'COMPLETE', executionTime: '2026-10-12T11:00:00Z', executionType: 'exec_listener' })),
-  { executionId: 'execution-81f61084-fd93-4565-9bda-9bf0d4b4f102', processName: LISTENER, processId: LISTENER_ID, status: 'ERROR', executionTime: '2026-10-12T11:05:00Z', executionType: 'exec_listener' },
-]
 
 /** The shell beneath the plugins, answering each command with its own output. */
 const scriptedShell = (on: On, outputs: Record<string, string>) => {
   on('tool.call', { tool: 'Bash' }, async (_$, e) => ({ result: { stdout: outputs[String(e.command)] ?? '', stderr: '', interrupted: false } }))
 }
 
-/** The session deploys the listener, so its runs in Boomi are this session's to show. */
-const deployListener = async ($: Engine, on: On) => {
-  const command = `bash scripts/boomi-deploy.sh ${LISTENER_FILE}`
-  scriptedShell(on, { [command]: `Packaging '${LISTENER}' (${LISTENER_ID}) from the account default branch\nSUCCESS: Deployed '${LISTENER}' (package: p1)` })
-  await $.tool.call({ tool: 'Bash', command })
-}
-
-test('a build in a loop and on several lines shows every component, and a failed listener run names its component', async ($, on) => {
+test('a build in a loop and on several lines shows every component', async ($, on) => {
   world(on, { [LISTENER_FILE]: LISTENER_XML })
   mock.store(on)
-  mock.env(on, { ...CREDENTIALS, BOOMI_ENVIRONMENT_ID: 'env-test' })
-  on('http.fetch', async (_$, e) => {
-    const result = e.url.endsWith('EnvironmentAtomAttachment/query') ? [{ atomId: 'atom-1' }] : RUNS
-    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
-  })
   const createLoop = `cd /work && for f in active-development/profiles/*.xml; do bash ${SKILL}/scripts/boomi-component-create.sh "$f"; done`
   const twoLines = [`bash ${SKILL}/scripts/boomi-component-create.sh ${LISTENER_FILE}`, `bash ${SKILL}/scripts/boomi-deploy.sh ${LISTENER_FILE}`].join('\n')
   scriptedShell(on, {
@@ -489,18 +415,11 @@ test('a build in a loop and on several lines shows every component, and a failed
   })
   await $.tool.call({ tool: 'Bash', command: createLoop })
   await $.tool.call({ tool: 'Bash', command: twoLines })
-  const status = await $.command.run(dashboard('poll'))
+  const status = await $.command.run(dashboard('text'))
   expect(status.text).toContain('OrderValidator - Order Request Profile: ✓ created in Boomi')
   expect(status.text).toContain('OrderValidator - Order Response Profile: ✓ created in Boomi')
-  expect(status.text).toContain(`${LISTENER} (process): ✓ created in Boomi  ✓ deployed  ✗ 1 of 5 listener runs failed`)
-  expect(status.text).toContain(`✗ Listener run of ${LISTENER} ended ERROR`)
-  expect(status.text).toContain('Execution 81f61084…. Press Why?')
-
-  const seen = await $.command.run(dashboard('seen'))
-  expect(seen.text).toContain('1 failed run')
-  const after = await $.command.run(dashboard('text'))
-  expect(after.text).toContain('✓ Nothing needs attention.')
-  expect(after.text).toContain(`✗ ${LISTENER} failed`)
+  expect(status.text).toContain(`${LISTENER} (process): ✓ created in Boomi  ✓ deployed`)
+  expect(status.text).toContain('✓ Nothing needs attention.')
 })
 
 test("after a restart, this folder's steps from the last 24h come back", async ($, on) => {
@@ -566,7 +485,7 @@ test('/bc-dashboard why <n> reads the log in text, and says why when it can\'t',
   const why = await $.command.run(dashboard('why 1'))
   expect(why.text).toContain('(execution execution-0490202b-2e2f):')
   expect(why.text).toContain('SEVERE · x · y')
-  expect((await $.command.run(dashboard('why 5'))).text).toContain('Usage: /bc-dashboard why <1-1>')
+  expect((await $.command.run(dashboard('why 5'))).text).toContain("5 isn't one of these.")
 })
 
 test('/bc-dashboard report prints the session as Markdown, saves it, and Claude can ask for it', async ($, on) => {
@@ -611,7 +530,7 @@ test('Run again repeats a failed test the way Claude ran it, and a pass clears i
   expect(again.text).toContain('✓')
   const text = await $.command.run(dashboard('text'))
   expect(text.text).toContain('✓ Nothing needs attention.')
-  expect((await $.command.run(dashboard('rerun 1'))).text).toContain('Usage: /bc-dashboard rerun')
+  expect((await $.command.run(dashboard('rerun 1'))).text).toContain('Nothing to run again')
 })
 
 test('the spend budget shows in the summary and toasts once as it nears', { options: { budgetUsd: 1.5 } }, async ($, on) => {
@@ -866,4 +785,215 @@ test("Claude's latest steps page too: More shows older steps, Fewer goes back", 
   expect(await pane.find({ type: 'Button', key: 'steps-more' })).toBeUndefined()
   await pane.press({ key: 'steps-fewer' })
   expect(await pane.find({ text: /Showing 6 of 14/ })).toBeDefined()
+})
+
+// --- A new session's banner, and Companion's activity log ---
+
+/** Starts the session the way the engine does, with the store's values. */
+const startSession = async ($: Engine, on: On, store: Record<string, unknown> = {}) => {
+  // The store in memory, so a test can read what the plugin kept.
+  on('store.get', async (_$, e) => ({ value: store[e.key] }))
+  on('store.set', async (_$, e) => {
+    store[e.key] = JSON.parse(JSON.stringify(e.value))
+    return { value: undefined }
+  })
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', async () => ({ value: undefined }) as never)
+  on('tool.register', async () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+}
+
+const RECAP = { endedAt: NOW - 14 * 3_600_000, components: 4, saves: 6, deploys: 2, tests: 3, testsFailed: 1, open: 0, usd: 3.1 }
+
+test('a new session in a Companion workspace: the banner recaps the last session, then turns through tips, until Companion does something', async ($, on) => {
+  world(on, { [FILE]: ORDERS, 'active-development': '' })
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  await startSession($, on, { 'activity:/work': { savedAt: RECAP.endedAt, activity: [], recap: RECAP } })
+
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await band.find({ text: 'Last session 14h ago: 4 components · 6 saves · 2 deploys · 3 tests (1 failed) · nothing left to fix · $3.10' })).toBeDefined()
+  expect(await band.find({ text: / │ \$1\.25 this session/ })).toBeDefined()
+  // Not the step-by-step banner of a session at work.
+  expect(await band.find({ text: /components? │/ })).toBeUndefined()
+
+  await clock.advance(20_000)
+  const next = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await next.find({ text: /^Tip: / })).toBeDefined()
+  expect(await next.find({ text: /Last session/ })).toBeUndefined()
+
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  const working = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await working.find({ text: /Saved Orders Sync to Boomi \(v4\)/ })).toBeDefined()
+  expect(await working.find({ text: /Tip: |Last session/ })).toBeUndefined()
+})
+
+test('outside a Companion workspace, a new session has no banner', async ($, on) => {
+  world(on)
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return h(Box, {}) as RenderElement
+  })
+  await startSession($, on)
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await band.find({ text: /BC Dashboard/ })).toBeUndefined()
+})
+
+test('a session that worked with Companion leaves its recap for the next one', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  shell(on, 'Execution completed: status=ERROR, executionId=execution-9')
+  const store: Record<string, unknown> = {}
+  await startSession($, on, store)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
+  await clock.advance(1)
+  const saved = store['activity:/work'] as { recap?: Record<string, unknown> }
+  expect(saved.recap).toMatchObject({ components: 1, tests: 1, testsFailed: 1, open: 1, usd: 1.25 })
+})
+
+/** A line of Companion's activity log, as its log_activity writes it (v1.0.83). */
+const logLine = (at: string, operation: string, result: string, http: number | null, details: Record<string, unknown>) =>
+  JSON.stringify({
+    timestamp: at,
+    skill_name: 'boomi-integration',
+    skill_version: '1.0.83',
+    workspace: 'work',
+    operation,
+    script: `boomi-${operation}`,
+    user: 'me',
+    boomi_user: 'me@example.com',
+    account_id: 'acct-1',
+    environment_id: 'env-1',
+    result,
+    http_code: http,
+    details,
+  })
+
+const LOG = '.activity-log/activity.jsonl'
+
+test("Companion's activity log adds the script runs Claude's tool calls didn't show, once each", async ($, on) => {
+  const files: Record<string, string> = {
+    [FILE]: ORDERS,
+    [LOG]: [
+      logLine('2026-10-12T11:50:00Z', 'component-search', 'success', 200, { query: 'Orders' }),
+      logLine('2026-10-12T11:51:00Z', 'component-push', 'success', 200, { component_name: 'Orders Sync', component_id: ID, file_path: FILE, branch: 'account-default', version: '5' }),
+      logLine('2026-10-12T11:55:00Z', 'test-execute', 'success', 200, { process_id: ID, atom_id: 'atom-1', request_id: 'r1', execution_id: 'execution-77', status: 'ERROR', waited: true }),
+    ].join('\n'),
+  }
+  const toasts = world(on, files)
+  await startSession($, on)
+  const status = await $.command.run(dashboard('text'))
+  expect(status.text).toContain("✓ Saved Orders Sync to Boomi (v5), 9m ago (from Companion's log)")
+  expect(status.text).toContain('Needs attention (1):')
+  expect(status.text).toContain('Execution 77…: press Why? to read what failed.')
+  // A search isn't a step of a component.
+  expect(status.text).not.toContain('Searched')
+  expect(toasts.some(t => t.includes('ended ERROR'))).toBe(true)
+
+  // Read again: nothing new, nothing twice.
+  files[LOG] += `\n${logLine('2026-10-12T11:59:00Z', 'deploy', 'fail', 400, { component_name: 'Orders Sync', component_id: ID, environment_id: 'env-1', error: 'Process is not deployable' })}`
+  await clock.advance(10_000)
+  const after = await $.command.run(dashboard('text'))
+  expect(after.text?.match(/Saved Orders Sync to Boomi \(v5\)/g)?.length).toBe(1)
+  expect(after.text).toContain('ERROR: deploy failed (HTTP 400): Process is not deployable')
+  expect(after.text).toContain('Needs attention (2):')
+})
+
+test("a script Claude ran is one step, though Companion's log records it too", async ($, on) => {
+  const files: Record<string, string> = { [FILE]: ORDERS, [LOG]: '' }
+  world(on, files)
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  await startSession($, on)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  files[LOG] = logLine('2026-10-12T12:00:00Z', 'component-push', 'success', 200, { component_name: 'Orders Sync', component_id: ID, file_path: FILE, version: '4' })
+  await clock.advance(10_000)
+  const status = await $.command.run(dashboard('text'))
+  expect(status.text?.match(/Saved Orders Sync to Boomi \(v4\)/g)?.length).toBe(1)
+  expect(status.text).not.toContain("Companion's log")
+})
+
+test("with activityLog off, Companion's log isn't read", { options: { activityLog: false } }, async ($, on) => {
+  world(on, { [LOG]: logLine('2026-10-12T11:51:00Z', 'component-push', 'success', 200, { component_name: 'Orders Sync', component_id: ID, version: '5' }) })
+  await startSession($, on)
+  const status = await $.command.run(dashboard('text'))
+  expect(status.text).not.toContain('Orders Sync')
+})
+
+// --- /bc-dashboard why and rerun without a number ---
+
+const OTHER_ID = '2b3c4d5e-1111-2222-3333-444455556666'
+
+type Question = { question: string; header: string; options: { label: string }[] }
+
+/** Two failed tests Claude ran; `answer` picks in the question dialog, or dismisses it with undefined. */
+const twoFailedTests = async ($: Engine, on: On, answer: (q: Question) => string | undefined) => {
+  world(on, { [FILE]: ORDERS, 'scripts/boomi-execution-query.sh': '' })
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    const q = e.questions[0] as unknown as Question
+    const picked = answer(q)
+    return picked === undefined ? { deny: 'dismissed' } : { result: { questions: [q], answers: { [q.question]: picked } } as never }
+  })
+  mock.store(on)
+  scriptedShell(on, {
+    [`bash scripts/boomi-test-execute.sh --process-id ${ID}`]: 'Execution completed: status=ERROR, executionId=execution-aaaa1111',
+    [`bash scripts/boomi-test-execute.sh --process-id ${OTHER_ID}`]: 'Execution completed: status=ERROR, executionId=execution-bbbb2222',
+  })
+  const ran: string[][] = []
+  on('process.run', async (_$, e) => {
+    ran.push([...e.argv])
+    return { value: { exitCode: 0, stdout: e.argv[1] === '-c' ? '' : 'SEVERE\tMap\tbad field', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
+  await clock.advance(60_000)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${OTHER_ID}` })
+  return ran
+}
+
+test('/bc-dashboard why with nothing failed says there is nothing to look into', async ($, on) => {
+  world(on)
+  const asked: unknown[] = []
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    asked.push(e)
+    return { deny: 'not expected' }
+  })
+  const why = await $.command.run(dashboard('why'))
+  expect(why.text).toBe('Nothing to look into: no failed test or run under Needs attention has a log to read.')
+  const rerun = await $.command.run(dashboard('rerun'))
+  expect(rerun.text).toBe('Nothing to run again: no failed test Claude ran is under Needs attention.')
+  expect(asked).toEqual([])
+})
+
+test('/bc-dashboard why with one failure reads it without asking', async ($, on) => {
+  world(on, { [FILE]: ORDERS, 'scripts/boomi-execution-query.sh': '' })
+  mock.store(on)
+  shell(on, 'Execution completed: status=ERROR, executionId=execution-0490202b-2e2f')
+  on('process.run', async (_$, e) => ({
+    value: { exitCode: 0, stdout: e.argv[1] === '-c' ? '' : 'SEVERE\tx\ty', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+  }))
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
+  const why = await $.command.run(dashboard('why'))
+  expect(why.text).toContain('(execution execution-0490202b-2e2f):')
+})
+
+test('/bc-dashboard why with several failures asks which, newest first, and reads the one picked', async ($, on) => {
+  const asked: Question[] = []
+  const ran = await twoFailedTests($, on, q => {
+    asked.push(q)
+    return q.options[1]!.label
+  })
+  const why = await $.command.run(dashboard('why'))
+  expect(asked[0]?.question).toBe('Which failure should the dashboard read the log of?')
+  expect(asked[0]?.header).toBe('Why?')
+  expect(asked[0]?.options.map(o => o.label)).toEqual([`1. Test of ${OTHER_ID.slice(0, 8)}`, `2. Test of ${ID.slice(0, 8)}`].map(start => expect.stringContaining(start) as never))
+  expect(ran.at(-1)).toContain('execution-aaaa1111')
+  expect(why.text).toContain('(execution execution-aaaa1111):')
+})
+
+test('/bc-dashboard why lists the failures to pick from when the question is dismissed, and takes a number', async ($, on) => {
+  await twoFailedTests($, on, () => undefined)
+  const why = await $.command.run(dashboard('why'))
+  expect(why.text).toContain('Which failure should the dashboard read the log of?')
+  expect(why.text).toContain(`  1. ✗ Test of ${OTHER_ID}`)
+  expect(why.text).toContain(`  2. ✗ Test of ${ID}`)
+  expect(why.text).toContain('Run /bc-dashboard why <number> with one of them.')
+  expect((await $.command.run(dashboard('why 2'))).text).toContain('(execution execution-aaaa1111):')
+  expect((await $.command.run(dashboard('why 7'))).text).toContain("7 isn't one of these.")
 })
