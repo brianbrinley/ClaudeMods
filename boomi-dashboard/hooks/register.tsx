@@ -44,8 +44,8 @@ import {
   friendlyType,
   githubUrl,
   headline,
-  FLAMINGO_TRAVEL,
-  flamingoView,
+  sceneAt,
+  sceneRows,
   levelOf,
   meter,
   modelMix,
@@ -127,8 +127,11 @@ const isCompanionFolder = atom({ plugin: 'boomi-dashboard', key: 'isCompanionFol
 /** What each failed execution's log says, by execution ID, once someone asks Why?. */
 const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const, {} as Record<string, DiagnosisState>)
 
-/** The flamingo's animation frame, moved on while Claude works. */
+/** The tick the flamingo's scene last changed at: the pane draws sceneAt(it). */
 const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
+
+/** Half-second ticks since the mod loaded, for the flamingo's scene. */
+let sceneTick = 0
 
 /**
  * Companion's share of the weekly limit: how far Companion sessions on this
@@ -1293,10 +1296,12 @@ export const register: Register = (on, options) => {
     }
 
     $.clock.every(5_000, () => refreshStatus($, settings))
-    // The flamingo walks while Claude works: a frame every half second, a column every second.
+    // The flamingo's scene: what it does next is checked every half second.
     if (settings.hasFlamingo) {
+      // It stands in one place, working or not; the pane redraws only when the scene changes.
       $.clock.every(FLAMINGO_TICK_MS, async () => {
-        if (await read($, isWorking)) await update($, frame, n => (n + 1) % 1000)
+        sceneTick++
+        if (JSON.stringify(sceneAt(sceneTick)) !== JSON.stringify(sceneAt(await read($, frame)))) await update($, frame, () => sceneTick)
       })
     }
     if (settings.pollSeconds > 0) {
@@ -1620,8 +1625,6 @@ export const register: Register = (on, options) => {
           {settings.hasFlamingo && (
             <Box flexDirection="column" flexShrink={0} marginLeft={1}>
               {(() => {
-                const view = flamingoView(working, flamingoFrame)
-                const pad = (n: number) => (n > 0 ? <Text backgroundColor={p.bg}>{' '.repeat(n)}</Text> : undefined)
                 const cells = (row: ReturnType<typeof pixelCells>[number]) =>
                   row.map(cell => (
                     <Text color={cell.color} backgroundColor={cell.bg ?? p.bg}>
@@ -1629,19 +1632,11 @@ export const register: Register = (on, options) => {
                     </Text>
                   ))
                 return [
-                  ...pixelCells(view.pixels, { P: p.bird, L: '#F7A8C4', K: '#0B0B0B' }).map(row => (
-                    <Text backgroundColor={p.bg}>
-                      {pad(view.offset)}
-                      {cells(row)}
-                      {pad(FLAMINGO_TRAVEL - view.offset)}
-                    </Text>
+                  ...pixelCells(sceneRows(sceneAt(flamingoFrame)), { P: p.bird, L: '#F7A8C4', K: '#0B0B0B' }).map(row => (
+                    <Text backgroundColor={p.bg}>{cells(row)}</Text>
                   )),
-                  // The water it walks in, across the strip, splashing as a step lands.
-                  ...pixelCells(pondRows(view, { isWorking: working, frame: flamingoFrame }), { W: p.water }).map(row => (
-                    <Text backgroundColor={p.bg}>
-                      {cells(row)}
-                    </Text>
-                  )),
+                  // The still water it stands in, across the strip.
+                  ...pixelCells(pondRows(), { W: p.water }).map(row => <Text backgroundColor={p.bg}>{cells(row)}</Text>),
                 ]
               })()}
             </Box>

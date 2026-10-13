@@ -24,11 +24,7 @@ import {
   components,
   describe,
   FLAMINGO_IDLE,
-  FLAMINGO_WALK,
   flamingo,
-  flamingoView,
-  mirror,
-  pace,
   cachedTokens,
   formatTokens,
   newTokens,
@@ -68,6 +64,8 @@ import {
   choiceFrom,
   choiceList,
   pondRows,
+  sceneAt,
+  sceneRows,
   limitViews,
   limitsLine,
   limitsShort,
@@ -325,17 +323,54 @@ test('modelName reads model ids in words, and modelMix lists each model biggest 
   expect(mix).toBe('Opus 5.5 312k · Haiku 5.5 26k')
 })
 
-test('the 8-bit flamingo stands on one leg when idle and walks through its frames', () => {
-  expect(flamingo(false, 3)).toBe(FLAMINGO_IDLE)
-  expect(flamingo(true, 0)).toBe(FLAMINGO_WALK[0])
-  expect(flamingo(true, 5)).toBe(FLAMINGO_WALK[1])
-  for (const f of [FLAMINGO_IDLE, ...FLAMINGO_WALK]) {
-    expect(f.length).toBe(16)
-    expect(f.every(row => row.length === 12)).toBe(true)
+test('the 8-bit flamingo stands in one place: it looks back, shifts its weight and turns around now and then', () => {
+  const at = (tick: number) => sceneAt(tick)
+  expect(at(0)).toEqual({ facing: 'right', leg: 'one', isLookingBack: false, visitor: 0 })
+  expect(flamingo(at(0))).toEqual([...FLAMINGO_IDLE])
+  // Looks back for three seconds, then forward again.
+  expect(at(30).isLookingBack).toBe(true)
+  expect(at(36).isLookingBack).toBe(false)
+  // Shifts to the other leg, turns around, and back again over three minutes.
+  expect(at(90).leg).toBe('other')
+  expect(at(180)).toMatchObject({ facing: 'left', leg: 'one' })
+  expect(at(270)).toMatchObject({ facing: 'left', leg: 'other' })
+  expect(at(360)).toEqual(at(0))
+  // Every pose is the same 12-by-16 sprite, so nothing jumps.
+  for (const tick of [0, 30, 90, 180, 230, 270]) {
+    const pixels = flamingo(at(tick))
+    expect(pixels).toHaveLength(16)
+    expect(pixels.every(row => row.length === 12)).toBe(true)
   }
-  // Resting on one leg: a single leg reaches the ground, the other is folded up.
-  expect(FLAMINGO_IDLE[FLAMINGO_IDLE.length - 1]).toBe('.....PP.....')
-  expect(FLAMINGO_IDLE[FLAMINGO_IDLE.length - 2]).toBe('......P.....')
+  // Looking back turns the beak the other way; the body stays.
+  const back = flamingo(at(30))
+  expect(back[2]).toBe('...LLPPPP...')
+  expect(back.slice(8)).toEqual(FLAMINGO_IDLE.slice(8))
+  // The other leg: standing and tucked legs trade places.
+  expect(flamingo(at(90)).slice(12)).toEqual(['....PPP.P...', '.....P..P...', '........P...', '........PP..'])
+  // Facing left is the whole bird reflected.
+  expect(flamingo(at(180))[2]).toBe('...LLPPPP...')
+  expect(pixelCells(FLAMINGO_IDLE, { P: 'p', L: 'l', K: 'k' }).length).toBe(8)
+})
+
+test('once in a while a neighbour peeks in from the side the flamingo faces, looks, and goes', () => {
+  const visit = [400, 401, 402, 404, 407, 408, 409].map(tick => sceneAt(tick).visitor)
+  expect(visit).toEqual([2, 4, 6, 6, 4, 2, 0])
+  expect(sceneAt(399).visitor).toBe(0)
+  expect(sceneAt(400 + 720).visitor).toBe(2)
+  // Facing right, it comes in at the right edge, its beak toward the flamingo.
+  const rows = sceneRows({ facing: 'right', leg: 'one', isLookingBack: false, visitor: 6 })
+  expect(rows).toHaveLength(16)
+  expect(rows.every(r => r.length === 18)).toBe(true)
+  expect(rows[2]!.slice(12)).toBe('LLPPPP')
+  // Not there between visits: only the flamingo, in the middle of its strip.
+  expect(sceneRows(sceneAt(0))[0]).toBe('.......PPP........')
+  // Facing left, it comes in at the left edge.
+  expect(sceneRows({ facing: 'left', leg: 'one', isLookingBack: false, visitor: 6 })[2]!.slice(0, 6)).toBe('PPPPLL')
+})
+
+test('the flamingo stands in a thin line of still water across its strip', () => {
+  expect(pondRows()).toEqual(['..................', 'WWW.WWW.WWW.WWW.WW'])
+  expect(pixelCells(pondRows(), { W: '#9FDED6' })[0]!.map(c => c.char).join('')).toBe('▄▄▄ ▄▄▄ ▄▄▄ ▄▄▄ ▄▄')
 })
 
 test('pixelCells packs two pixel rows into each cell with half blocks', () => {
@@ -385,31 +420,6 @@ test('one component named two ways is one row, and its failure needs attention o
 
 test("a step that names no component stays out of the components list", () => {
   expect(components([act('deploy', 'ok', 'a component', NOW)])).toEqual([])
-})
-
-test('the flamingo paces across its strip and turns at each end', () => {
-  expect([0, 1, 5, 6, 7, 11, 12].map(f => pace(f, 6))).toEqual([
-    { offset: 0, facing: 'right' },
-    { offset: 1, facing: 'right' },
-    { offset: 5, facing: 'right' },
-    { offset: 6, facing: 'left' },
-    { offset: 5, facing: 'left' },
-    { offset: 1, facing: 'left' },
-    { offset: 0, facing: 'right' },
-  ])
-})
-
-test('facing left, the flamingo is drawn mirrored', () => {
-  expect(mirror(['P..L'])).toEqual(['L..P'])
-  // It moves a column every second frame: frame 14 is step 7, on the way back.
-  const right = flamingoView(true, 1)
-  const left = flamingoView(true, 14)
-  expect(right.facing).toBe('right')
-  expect(left.facing).toBe('left')
-  expect(left.pixels).toEqual(mirror(flamingo(true, 14)))
-  expect(flamingoView(true, 2).offset).toBe(1)
-  expect(flamingoView(true, 3).offset).toBe(1)
-  expect(right.pixels).toEqual([...flamingo(true, 1)])
 })
 
 test('new tokens leave out cache reads, which are counted apart', () => {
@@ -838,21 +848,6 @@ test('the resume command quotes a folder only when it needs it', () => {
   expect(resumeCommand({ ...s, project: "/Users/me/pat's sync" })).toBe("cd '/Users/me/pat'\\''s sync' && claude --resume aaaaaaaa-1111")
   expect(resumeCommand(s)).toBe('claude --resume aaaaaaaa-1111')
   expect(resumable([s, { ...s, id: 'b' }], 'aaaaaaaa-1111').map(x => x.id)).toEqual(['b'])
-})
-
-test('the flamingo walks in a thin line of water across its strip, splashing as a step lands', () => {
-  const right = { offset: 0, facing: 'right' as const }
-  // Standing: still water across the whole strip, no drops.
-  expect(pondRows(right, { isWorking: false, frame: 0 })).toEqual(['..................', 'WWW.WWW.WWW.WWW.WW'])
-  expect(pondRows(right, { isWorking: false, frame: 3 })).toEqual(pondRows(right, { isWorking: false, frame: 0 }))
-  // Walking: the ripples drift, and drops splash beside the feet as a wide step lands, none mid-step.
-  expect(pondRows(right, { isWorking: true, frame: 1 })[1]).toBe('WW.WWW.WWW.WWW.WWW')
-  expect(pondRows(right, { isWorking: true, frame: 0 })[0]).toBe('..W......W........')
-  expect(pondRows(right, { isWorking: true, frame: 1 })[0]).toBe('..................')
-  // The drops follow the bird wherever it is.
-  expect(pondRows({ offset: 6, facing: 'left' }, { isWorking: true, frame: 4 })[0]).toBe('........W......W..')
-  // One thin row of half blocks under the bird: drops above, water below.
-  expect(pixelCells(pondRows(right, { isWorking: true, frame: 0 }), { W: '#9FDED6' })[0]!.map(c => c.char).join('')).toBe('▄▄█.▄▄▄.▄█▄.▄▄▄.▄▄'.replace(/\./g, ' '))
 })
 
 // --- Companion's other plugins ---

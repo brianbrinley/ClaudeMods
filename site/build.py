@@ -136,45 +136,58 @@ def status_html(status):
 FLAMINGO_SOURCE = "boomi-dashboard/hooks/activity.ts"
 # Pixel letters as CSS classes: P the bird, L its pastel wing, K its eye.
 FLAMINGO_CLASSES = {"P": "fl-p", "L": "fl-l", "K": "fl-k"}
-# One cycle: standing on one leg, then a few flapping steps in place, as the pane does while Claude works.
-FLAMINGO_CYCLE_S = 9.0
-FLAMINGO_WALK_S = 0.35
+# One cycle, as the pane's flamingo does it: standing, a look back, the other leg, turned around, then back.
+# Each pose and how many seconds it holds.
+FLAMINGO_SCENE = [("stand", 6), ("look back", 2), ("stand", 4), ("other leg", 5), ("turned", 5), ("turned, look back", 2), ("turned", 3)]
+
+
+def reflect(rows, about):
+    """A sprite's rows reflected across a vertical line, as the pane's reflect(): x becomes about - x, within 12 pixels."""
+    out = []
+    for row in rows:
+        line = ["."] * 12
+        for x, c in enumerate(row):
+            if c != "." and 0 <= about - x < 12:
+                line[about - x] = c
+        out.append("".join(line))
+    return out
 
 
 def flamingo_frames():
-    """The idle frame and the walk frames, as pixel rows, from the dashboard's source."""
+    """Each pose of the scene as pixel rows, built from the dashboard's own sprite rows."""
     src = open(os.path.join(ROOT, FLAMINGO_SOURCE), encoding="utf-8").read()
     parts = {}
-    for name in ("HEAD", "WING_DOWN", "WING_UP", "ONE_LEG", "STRIDE", "STEP"):
+    for name in ("HEAD", "WING_DOWN", "ONE_LEG"):
         m = re.search(r"^const " + name + r" = \[(.*?)\]", src, re.S | re.M)
         parts[name] = re.findall(r"'([.PLK]+)'", m.group(1))
-    idle = parts["HEAD"] + parts["WING_DOWN"] + parts["ONE_LEG"]
-    walk = [parts["HEAD"] + parts[w] + parts[l] for w, l in
-            (("WING_DOWN", "STRIDE"), ("WING_UP", "STEP"), ("WING_DOWN", "STEP"), ("WING_UP", "STRIDE"))]
-    return idle, walk
+    head, wing, leg = parts["HEAD"], parts["WING_DOWN"], parts["ONE_LEG"]
+    poses = {
+        "stand": head + wing + leg,
+        "look back": reflect(head, 11) + wing + leg,
+        "other leg": head + wing + reflect(leg, 14),
+        "turned": reflect(head + wing + leg, 11),
+        "turned, look back": reflect(reflect(head, 11) + wing + leg, 11),
+    }
+    return [(poses[name], seconds) for name, seconds in FLAMINGO_SCENE]
 
 
 def flamingo_html():
-    """An inline SVG of the flamingo: it stands on one leg, then now and then flaps and steps in place."""
-    idle, walk = flamingo_frames()
-    frames = [idle] + walk + [idle]
-    width, height = max(len(r) for r in idle), len(idle)
-    groups = []
-    for i, rows in enumerate(frames):
+    """An inline SVG of the flamingo standing in its water: now and then it looks back, shifts its weight and turns."""
+    frames = flamingo_frames()
+    cycle = sum(seconds for _, seconds in frames)
+    width, height = 12, len(frames[0][0])
+    groups, keyframes, start = [], [], 0.0
+    for i, (rows, seconds) in enumerate(frames):
         rects = "".join(f'<rect class="{FLAMINGO_CLASSES[c]}" x="{x}" y="{y}" width="1" height="1"/>'
                         for y, row in enumerate(rows) for x, c in enumerate(row) if c in FLAMINGO_CLASSES)
         groups.append(f'<g class="fl-frame fl-f{i}">{rects}</g>')
-    # Frame 0 (standing) shows except during the walk; each walk frame shows for its slot.
-    walk_start = 100 * (1 - (len(walk) + 1) * FLAMINGO_WALK_S / FLAMINGO_CYCLE_S)
-    slot = 100 * FLAMINGO_WALK_S / FLAMINGO_CYCLE_S
-    keyframes = [f"@keyframes fl-f0 {{ 0%, {walk_start:.2f}% {{ opacity: 1 }} {walk_start + 0.01:.2f}%, 100% {{ opacity: 0 }} }}"]
-    for i in range(1, len(frames)):
-        a = walk_start + (i - 1) * slot
-        b = a + slot
-        keyframes.append(f"@keyframes fl-f{i} {{ 0%, {a:.2f}% {{ opacity: 0 }} {a + 0.01:.2f}%, {b:.2f}% {{ opacity: 1 }} "
+        a, b = 100 * start / cycle, 100 * (start + seconds) / cycle
+        before = f"0%, {a:.2f}% {{ opacity: 0 }} " if i > 0 else ""
+        keyframes.append(f"@keyframes fl-f{i} {{ {before}{a + (0.01 if i else 0):.2f}%, {b:.2f}% {{ opacity: 1 }} "
                          f"{b + 0.01:.2f}%, 100% {{ opacity: 0 }} }}")
+        start += seconds
     style = ("<style>" + " ".join(keyframes) + " "
-             + " ".join(f".fl-f{i} {{ animation: fl-f{i} {FLAMINGO_CYCLE_S}s steps(1) infinite; }}" for i in range(len(frames)))
+             + " ".join(f".fl-f{i} {{ animation: fl-f{i} {cycle}s steps(1) infinite; }}" for i in range(len(frames)))
              + " @media (prefers-reduced-motion: reduce) { .fl-frame { animation: none; opacity: 0; } .fl-f0 { opacity: 1; } }"
              + "</style>")
     return (f'<div class="flamingo" aria-hidden="true"><svg viewBox="0 -1 {width} {height + 3}" '

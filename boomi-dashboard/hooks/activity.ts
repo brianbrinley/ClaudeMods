@@ -1167,87 +1167,94 @@ const HEAD = [
 ]
 
 const WING_DOWN = ['....PPPPPP..', '...PPLLLLPPP', '...PPPLLLPP.', '.....PPPP...']
-const WING_UP = ['....PPLLLP..', '...PPLLLLPPP', '...PPPPPPPP.', '.....PPPP...']
-
 /** Resting: one straight leg down to its foot, the other folded up beside it, knee out. */
 const ONE_LEG = ['......P.PPP.', '......P..P..', '......P.....', '.....PP.....']
-const STRIDE = ['......P.....', '.....P.P....', '....P...P...', '...PP...PP..']
-const STEP = ['......P.....', '......PP....', '.....P..P...', '....PP...PP.']
 
-/** Standing on one leg while Claude is idle. */
+/** A sprite's rows reflected across a vertical line: x becomes `about - x`, within 12 pixels. */
+const reflect = (rows: readonly string[], about: number): string[] =>
+  rows.map(row => {
+    const out = Array.from({ length: 12 }, () => '.')
+    ;[...row].forEach((c, x) => {
+      if (c !== '.' && about - x >= 0 && about - x < 12) out[about - x] = c
+    })
+    return out.join('')
+  })
+
+/** Standing on the other leg: the standing leg and the tucked one trade places under the body. */
+const OTHER_LEG = reflect(ONE_LEG, 14)
+
+/** The head turned to look back over its shoulder: the head and neck reflected about the neck. */
+const LOOKING_BACK = reflect(HEAD, 11)
+
+/** Standing on one leg, as the flamingo mostly does. */
 export const FLAMINGO_IDLE: readonly string[] = [...HEAD, ...WING_DOWN, ...ONE_LEG]
 
-/** Walking, wings flapping, while Claude works: one frame per tick. */
-export const FLAMINGO_WALK: readonly (readonly string[])[] = [
-  [...HEAD, ...WING_DOWN, ...STRIDE],
-  [...HEAD, ...WING_UP, ...STEP],
-  [...HEAD, ...WING_DOWN, ...STEP],
-  [...HEAD, ...WING_UP, ...STRIDE],
-]
-
-/** The flamingo's pixels for a frame: walking while working, else standing. */
-export const flamingo = (isWorking: boolean, frame: number): readonly string[] =>
-  isWorking ? FLAMINGO_WALK[frame % FLAMINGO_WALK.length]! : FLAMINGO_IDLE
-
-/** How many animation frames it takes the flamingo to move one column: it steps in place between moves. */
-export const FRAMES_PER_STEP = 2
-
-/** How many columns the flamingo paces across while Claude works. */
-export const FLAMINGO_TRAVEL = 6
-
-/** The flamingo's width in pixels, and the strip it paces along: its width plus how far it walks. */
+/** The flamingo's width in pixels, and the strip it stands in: room either side for it to turn, and for a visitor. */
 export const FLAMINGO_WIDTH = 12
-export const STRIP_WIDTH = FLAMINGO_WIDTH + FLAMINGO_TRAVEL
+export const STRIP_WIDTH = 18
+/** Where it stands in the strip: in the middle. */
+const STAND_AT = 3
 
-/** The water across the flamingo's strip: one thin pixel row, three on and one off, so it reads as ripples. */
-const WATER = 'WWW.'
+/** What the flamingo is doing: which way it faces, which leg it stands on, whether it looks back, and how far a visitor has peeked in. */
+export type FlamingoScene = { facing: 'right' | 'left'; leg: 'one' | 'other'; isLookingBack: boolean; visitor: number }
 
-/** Drops thrown up beside the feet as a walking step lands, as the sprite faces right. */
-const STEP_SPLASH = '..W......W..'
+/** Ticks of half a second. Over 3 minutes it turns once each way, shifts its weight twice, and looks back four times. */
+const SCENE_TICKS = 360
+const LOOKS = [30, 130, 220, 320]
+const LOOK_TICKS = 6
+/** Once every 6 minutes another flamingo's head peeks in from the edge, has a look, and goes: columns shown, tick by tick. */
+const VISIT_EVERY = 720
+const VISIT_AT = 400
+const VISIT = [2, 4, 6, 6, 6, 6, 6, 4, 2]
 
 /**
- * The water the flamingo walks in, as two pixel rows across its whole strip:
- * drops above, the water below. The ripples drift while Claude works and lie
- * still while idle; drops splash up beside the feet, wherever the bird is, as
- * a wide step lands.
+ * The flamingo at a tick: standing in one place, as flamingos do, looking
+ * back now and then, shifting to the other leg, turning around, and once in
+ * a while greeted by a neighbour who looks in and leaves.
  */
-export const pondRows = (
-  view: { offset: number; facing: 'right' | 'left' },
-  how: { isWorking: boolean; frame: number },
-  width = STRIP_WIDTH,
-): string[] => {
-  const step = ((how.frame % 4) + 4) % 4
-  const isLanding = how.isWorking && (step === 0 || step === 3)
-  const shift = how.isWorking ? ((how.frame % WATER.length) + WATER.length) % WATER.length : 0
-  const water = Array.from({ length: width }, (_, x) => WATER[(x + shift) % WATER.length]).join('')
-  const drops = isLanding ? (view.facing === 'right' ? STEP_SPLASH : [...STEP_SPLASH].reverse().join('')) : ''
-  const splash = ('.'.repeat(view.offset) + drops).padEnd(width, '.').slice(0, width)
-  return [splash, water]
+export const sceneAt = (tick: number): FlamingoScene => {
+  const t = ((tick % SCENE_TICKS) + SCENE_TICKS) % SCENE_TICKS
+  const v = ((tick % VISIT_EVERY) + VISIT_EVERY) % VISIT_EVERY
+  return {
+    facing: t < SCENE_TICKS / 2 ? 'right' : 'left',
+    leg: (t >= 90 && t < 180) || t >= 270 ? 'other' : 'one',
+    isLookingBack: LOOKS.some(at => t >= at && t < at + LOOK_TICKS),
+    visitor: v >= VISIT_AT && v < VISIT_AT + VISIT.length ? VISIT[v - VISIT_AT]! : 0,
+  }
 }
 
-/** The sprite facing the other way: each pixel row reversed. The sprite faces right. */
-export const mirror = (pixels: readonly string[]): string[] => pixels.map(row => [...row].reverse().join(''))
-
-/**
- * Where the flamingo is on its strip at a frame, and which way it faces: it
- * walks one column a frame to the end of the strip, turns, and walks back.
- */
-export const pace = (frame: number, travel = FLAMINGO_TRAVEL): { offset: number; facing: 'right' | 'left' } => {
-  const cycle = travel * 2
-  const at = ((frame % cycle) + cycle) % cycle
-  return at < travel ? { offset: at, facing: 'right' } : { offset: cycle - at, facing: 'left' }
+/** The flamingo's own pixels for a scene, 12 wide: head, wing and legs as the scene has them, reflected to face left. */
+export const flamingo = (scene: FlamingoScene): string[] => {
+  const pixels = [...(scene.isLookingBack ? LOOKING_BACK : HEAD), ...WING_DOWN, ...(scene.leg === 'one' ? ONE_LEG : OTHER_LEG)]
+  return scene.facing === 'right' ? pixels : reflect(pixels, 11)
 }
 
 /**
- * The flamingo as drawn: its pixels, mirrored when it faces left, and how many
- * columns in from the strip's left edge. Standing still while idle, it keeps
- * the spot and the way it faced when Claude stopped.
+ * The whole strip for a scene, 16 pixel rows: the flamingo in the middle, and
+ * the visitor's head and neck peeking in from the edge it faces, looking at
+ * it. A visitor shows the columns nearest the edge first.
  */
-export const flamingoView = (isWorking: boolean, frame: number, travel = FLAMINGO_TRAVEL) => {
-  const { offset, facing } = pace(Math.floor(frame / FRAMES_PER_STEP), travel)
-  const pixels = flamingo(isWorking, frame)
-  return { pixels: facing === 'right' ? [...pixels] : mirror(pixels), offset, facing }
+export const sceneRows = (scene: FlamingoScene, width = STRIP_WIDTH): string[] => {
+  const rows = flamingo(scene).map(row => ('.'.repeat(STAND_AT) + row).padEnd(width, '.').slice(0, width).split(''))
+  if (scene.visitor > 0) {
+    // The neighbour comes in from the side the flamingo faces, facing it.
+    const fromRight = scene.facing === 'right'
+    const head = fromRight ? reflect(HEAD, 11) : [...HEAD]
+    const cols = [...Array(12).keys()].filter(x => head.some(r => r[x] !== '.'))
+    const near = fromRight ? Math.min(...cols) : Math.max(...cols)
+    head.forEach((row, y) =>
+      [...row].forEach((c, x) => {
+        if (c === '.') return
+        const at = fromRight ? width - scene.visitor + (x - near) : scene.visitor - 1 - (near - x)
+        if (at >= 0 && at < width) rows[y]![at] = c
+      }),
+    )
+  }
+  return rows.map(r => r.join(''))
 }
+
+/** The water the flamingo stands in: one thin, still pixel row across the strip, three on and one off, under an empty row. */
+export const pondRows = (width = STRIP_WIDTH): string[] => ['.'.repeat(width), Array.from({ length: width }, (_, x) => 'WWW.'[x % 4]).join('')]
 
 /** One terminal cell: a character, its color and its background, either absent for clear. */
 export type Cell = { char: string; color?: string; bg?: string }
