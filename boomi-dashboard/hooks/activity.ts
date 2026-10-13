@@ -947,6 +947,9 @@ export const statusLine = (dashboard: Dashboard, now: number, windowMs: number, 
   if (spent.length > 0) parts.push(`${spent.join(' · ')} this session`)
   const left = budgetOf(usage.usd, usage.budgetUsd)
   if (left && left.level !== 'healthy') parts.push(`${STATUS[left.level].icon} ${left.text}`)
+  for (const b of [usage.companion?.week, usage.companion?.month]) if (b && b.level !== 'healthy') parts.push(`${STATUS[b.level].icon} ${b.text}`)
+  const tight = limitViews(usage.limits, usage.now ?? now).find(v => v.level !== 'healthy')
+  if (tight) parts.push(`${STATUS[tight.level].icon} ${tight.name} limit ${Math.round(tight.percent)}%${tight.isRunningOut ? `, ${tight.pace}` : ''}`)
   return parts.join(' · ')
 }
 
@@ -994,6 +997,12 @@ export type Usage = {
   /** The model that answered the latest call, and each model's tokens in words. */
   model?: string
   models?: string
+  /** The seat's usage limits, as Claude Code reports them; empty off a subscription. */
+  limits?: Limit[]
+  /** When these were read, for the limits' reset times and pace. */
+  now?: number
+  /** Where Companion stands against the person's own budget: its share of the weekly limit, its month. */
+  companion?: { week?: BudgetView; month?: BudgetView }
 }
 
 /** How long something has run: 45s, 12m, 1h 12m. */
@@ -1048,6 +1057,9 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   const budget = budgetOf(usage.usd, usage.budgetUsd)
   const spentOf = budget ? `${STATUS[budget.level].icon} ${budget.text}` : undefined
   if (cost || context) lines.push('', `Session: ${[cost && `${cost} so far`, spentOf, context].filter(Boolean).join(' · ')}`)
+  const limits = limitsLine(usage.limits, usage.now ?? now)
+  if (limits) lines.push(limits)
+  for (const b of [usage.companion?.week, usage.companion?.month]) if (b) lines.push(`${STATUS[b.level].icon} ${b.text}`)
   if (usage.split) lines.push(`Tokens: ${usage.split}`)
   for (const line of usage.modelSplits ?? []) lines.push(`  ${line}`)
   if (usage.model && !usage.modelSplits?.length) lines.push(`Model: ${usage.model}`)
@@ -1173,33 +1185,8 @@ export const FLAMINGO_WALK: readonly (readonly string[])[] = [
   [...HEAD, ...WING_UP, ...STRIDE],
 ]
 
-/**
- * Bent over to drink, as flamingos do now and then while idle: the neck arcs
- * up from the breast and down in front, the head upside down at the water,
- * its black beak tip in it.
- */
-export const FLAMINGO_DRINK: readonly string[] = [
-  '............',
-  '............',
-  '............',
-  '............',
-  '............',
-  '............',
-  '.........PP.',
-  '........P..P',
-  '....PPPPPP.P',
-  '...PPLLLLPPP',
-  '...PPPLLLPPP',
-  '.....PPPP..P',
-  '......P....P',
-  '......P...PP',
-  '......P..PKP',
-  '.....PP..LK.',
-]
-
-/** The flamingo's pixels for a frame: walking while working, drinking now and then while idle, else standing. */
-export const flamingo = (isWorking: boolean, frame: number, isDrinking = false): readonly string[] =>
-  !isWorking && isDrinking ? FLAMINGO_DRINK :
+/** The flamingo's pixels for a frame: walking while working, else standing. */
+export const flamingo = (isWorking: boolean, frame: number): readonly string[] =>
   isWorking ? FLAMINGO_WALK[frame % FLAMINGO_WALK.length]! : FLAMINGO_IDLE
 
 /** How many animation frames it takes the flamingo to move one column: it steps in place between moves. */
@@ -1212,34 +1199,30 @@ export const FLAMINGO_TRAVEL = 6
 export const FLAMINGO_WIDTH = 12
 export const STRIP_WIDTH = FLAMINGO_WIDTH + FLAMINGO_TRAVEL
 
-/** The water under the flamingo's feet: one short pixel row with gaps, as the sprite faces right. */
-const POND = '...WWW.WWWW.'
+/** The water across the flamingo's strip: one thin pixel row, three on and one off, so it reads as ripples. */
+const WATER = 'WWW.'
 
-/**
- * Drops thrown up above the water, as the sprite faces right: around the beak
- * while it drinks (two frames, so they bob), and beside the feet as a walking
- * step lands (the wide-stride frames).
- */
-const DRINK_SPLASH = ['........W..W', '.......W..W.']
+/** Drops thrown up beside the feet as a walking step lands, as the sprite faces right. */
 const STEP_SPLASH = '..W......W..'
 
 /**
- * The water the flamingo stands in, as two pixel rows across its strip: drops
- * above, the water below, both under the bird wherever it is and mirrored
- * with it. Still while it stands; splashing as it drinks or a step lands.
+ * The water the flamingo walks in, as two pixel rows across its whole strip:
+ * drops above, the water below. The ripples drift while Claude works and lie
+ * still while idle; drops splash up beside the feet, wherever the bird is, as
+ * a wide step lands.
  */
 export const pondRows = (
   view: { offset: number; facing: 'right' | 'left' },
-  how: { isWorking: boolean; frame: number; isDrinking?: boolean },
+  how: { isWorking: boolean; frame: number },
   width = STRIP_WIDTH,
 ): string[] => {
-  const landing = how.isWorking && (((how.frame % 4) + 4) % 4 === 0 || ((how.frame % 4) + 4) % 4 === 3)
-  const splash = !how.isWorking && how.isDrinking ? DRINK_SPLASH[((how.frame % 2) + 2) % 2]! : landing ? STEP_SPLASH : '.'.repeat(FLAMINGO_WIDTH)
-  const place = (row: string) => {
-    const sprite = view.facing === 'right' ? row : [...row].reverse().join('')
-    return ('.'.repeat(view.offset) + sprite).padEnd(width, '.').slice(0, width)
-  }
-  return [place(splash), place(POND)]
+  const step = ((how.frame % 4) + 4) % 4
+  const isLanding = how.isWorking && (step === 0 || step === 3)
+  const shift = how.isWorking ? ((how.frame % WATER.length) + WATER.length) % WATER.length : 0
+  const water = Array.from({ length: width }, (_, x) => WATER[(x + shift) % WATER.length]).join('')
+  const drops = isLanding ? (view.facing === 'right' ? STEP_SPLASH : [...STEP_SPLASH].reverse().join('')) : ''
+  const splash = ('.'.repeat(view.offset) + drops).padEnd(width, '.').slice(0, width)
+  return [splash, water]
 }
 
 /** The sprite facing the other way: each pixel row reversed. The sprite faces right. */
@@ -1260,9 +1243,9 @@ export const pace = (frame: number, travel = FLAMINGO_TRAVEL): { offset: number;
  * columns in from the strip's left edge. Standing still while idle, it keeps
  * the spot and the way it faced when Claude stopped.
  */
-export const flamingoView = (isWorking: boolean, frame: number, travel = FLAMINGO_TRAVEL, isDrinking = false) => {
+export const flamingoView = (isWorking: boolean, frame: number, travel = FLAMINGO_TRAVEL) => {
   const { offset, facing } = pace(Math.floor(frame / FRAMES_PER_STEP), travel)
-  const pixels = flamingo(isWorking, frame, isDrinking)
+  const pixels = flamingo(isWorking, frame)
   return { pixels: facing === 'right' ? [...pixels] : mirror(pixels), offset, facing }
 }
 
@@ -1402,6 +1385,9 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
 
   lines.push('', '## Spend', '')
   if (u.usd !== undefined) lines.push(`- Cost: ${formatCost(u.usd)}`)
+  const limits = limitsLine(u.limits, u.now ?? now)
+  if (limits) lines.push(`- ${limits}`)
+  for (const b of [u.companion?.week, u.companion?.month]) if (b) lines.push(`- ${STATUS[b.level].icon} ${b.text}`)
   const byProduct = productSpendLine(dashboard.activity, all)
   if (byProduct) lines.push(`- ${byProduct}`)
   if (u.split) lines.push(`- Tokens: ${u.split}`)
@@ -1887,3 +1873,167 @@ export const productCountWords = (products: PastSession['products']): string =>
     .filter(([, n]) => n)
     .map(([product, n]) => `${n} ${PRODUCT_NAMES[product as Product]} step${n === 1 ? '' : 's'}`)
     .join(' · ')
+
+// --- Usage limits ------------------------------------------------------------------
+
+/** A window of the seat's usage limits, as Claude Code reports it: `five_hour`, `seven_day`, or an admin's `spend_limit`. */
+export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
+
+/** Each window's name, and how long it runs, for a pace. A spend limit's period isn't reported. */
+const LIMIT_WINDOWS: Record<string, { name: string; ms?: number }> = {
+  five_hour: { name: '5-hour', ms: 5 * 3_600_000 },
+  seven_day: { name: 'weekly', ms: 7 * 86_400_000 },
+  spend_limit: { name: 'spend limit' },
+}
+
+/** A stretch of time in words, to the hour past a day: 45m, 3h 12m, 2d 4h. */
+export const span = (ms: number): string => {
+  if (ms < 86_400_000) return duration(ms)
+  const hours = Math.floor(ms / 3_600_000)
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`
+}
+
+export type LimitView = {
+  kind: string
+  name: string
+  percent: number
+  level: Level
+  /** When it resets, from now: "3d 4h". */
+  resetsIn?: string
+  /** Where the pace so far leads: "used up in 1d 6h" before it resets, or "on pace for 64% by reset". */
+  pace?: string
+  /** True when the pace runs out before the window resets. */
+  isRunningOut?: boolean
+}
+
+/**
+ * The seat's usage limits as the dashboard shows them: the busiest window
+ * first. Warning from 80% or when the pace so far would use it up before it
+ * resets; critical once it's used up. A pace needs a tenth of the window gone,
+ * so the first minutes of a window don't project wildly.
+ */
+export const limitViews = (limits: readonly Limit[] | undefined, now: number): LimitView[] =>
+  (limits ?? [])
+    .map(limit => {
+      const window = LIMIT_WINDOWS[limit.kind] ?? { name: limit.kind.replace(/_/g, ' ') }
+      const percent = limit.percentUsed
+      const reset = limit.resetsAt ? Date.parse(limit.resetsAt) : NaN
+      const left = Number.isNaN(reset) ? undefined : Math.max(0, reset - now)
+      const view: LimitView = { kind: limit.kind, name: window.name, percent, level: percent >= 100 ? 'critical' : percent >= 80 ? 'warning' : 'healthy' }
+      if (left !== undefined) view.resetsIn = span(left)
+      if (window.ms && left !== undefined && percent > 0 && percent < 100) {
+        const elapsed = window.ms - left
+        if (elapsed >= window.ms / 10) {
+          const outIn = ((100 - percent) * elapsed) / percent
+          if (outIn < left) {
+            view.pace = `used up in ${span(outIn)}`
+            view.isRunningOut = true
+            if (view.level === 'healthy') view.level = 'warning'
+          } else view.pace = `on pace for ${Math.round((percent * window.ms) / elapsed)}% by reset`
+        }
+      }
+      return view
+    })
+    .sort((a, b) => b.percent - a.percent)
+
+/** One window in a few words: "weekly 42%, resets in 3d 4h, used up in 1d 6h at this pace". */
+export const limitText = (v: LimitView): string =>
+  [`${v.name} ${Math.round(v.percent)}%`, v.resetsIn ? `resets in ${v.resetsIn}` : undefined, v.pace ? `${v.isRunningOut ? 'at this pace, ' : ''}${v.pace}` : undefined]
+    .filter(Boolean)
+    .join(', ')
+
+/** All the windows on one line, for text and the report; undefined off a subscription. */
+export const limitsLine = (limits: readonly Limit[] | undefined, now: number): string | undefined => {
+  const views = limitViews(limits, now)
+  return views.length === 0 ? undefined : `Usage limits: ${views.map(v => `${STATUS[v.level].icon} ${limitText(v)}`).join(' · ')}`
+}
+
+/** The windows in a few characters, for the banner: "week 42% · 5h 12%". */
+export const limitsShort = (limits: readonly Limit[] | undefined, now: number): string | undefined => {
+  const short: Record<string, string> = { five_hour: '5h', seven_day: 'week', spend_limit: 'spend' }
+  const views = limitViews(limits, now)
+  return views.length === 0 ? undefined : views.map(v => `${short[v.kind] ?? v.name} ${Math.round(v.percent)}%`).join(' · ')
+}
+
+// --- A personal Companion budget ---------------------------------------------------
+
+/** Where Companion stands against a budget the person set: its level and the words for it. */
+export type BudgetView = { level: Level; percent: number; text: string }
+
+const budgetLevel = (percent: number): Level => (percent >= 100 ? 'critical' : percent >= 80 ? 'warning' : 'healthy')
+
+/** The period a relative Companion budget runs over. */
+export type SharePeriod = 'day' | 'week' | 'month'
+
+/** The day a moment falls in, where the dashboard runs: "2026-10-13". */
+export const dayOf = (at: number): string => {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** How many days the month of a moment has. */
+const daysInMonth = (at: number): number => {
+  const d = new Date(at)
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+}
+
+/**
+ * Companion's relative budget: how much of the weekly limit Companion
+ * sessions on this machine moved in the period (today, the last 7 days, or
+ * this month), against the share the person gave it, scaled to the period:
+ * a day is a seventh of a week, a month its days' sevenths. `days` holds
+ * Companion's movement of the weekly limit by day. Undefined without a share.
+ */
+export const shareView = (
+  days: Readonly<Record<string, number>> | undefined,
+  sharePercent: number,
+  period: SharePeriod,
+  now: number,
+): BudgetView | undefined => {
+  if (!sharePercent || sharePercent <= 0 || days === undefined) return undefined
+  const today = dayOf(now)
+  const month = monthOf(now)
+  const week = new Set(Array.from({ length: 7 }, (_, i) => dayOf(now - i * 86_400_000)))
+  const inPeriod = (day: string) => (period === 'day' ? day === today : period === 'week' ? week.has(day) : day.startsWith(month))
+  const used = Object.entries(days).reduce((sum, [day, n]) => sum + (inPeriod(day) ? n : 0), 0)
+  const allowance = sharePercent * (period === 'day' ? 1 / 7 : period === 'week' ? 1 : daysInMonth(now) / 7)
+  const percent = (used / allowance) * 100
+  const label = period === 'day' ? 'today' : period === 'week' ? 'the last 7 days' : 'this month'
+  return {
+    level: budgetLevel(percent),
+    percent,
+    text: `Companion ${label}: ${used.toFixed(1)}% of your weekly limit, ${Math.round(percent)}% of its ${allowance.toFixed(1)}% (${sharePercent}% share per ${period === 'day' ? 'week, a seventh a day' : period})`,
+  }
+}
+
+/** Keeps the last 40 days of Companion's daily movement of the weekly limit, enough for any month. */
+export const pruneDays = (days: Readonly<Record<string, number>>, now: number): Record<string, number> => {
+  const oldest = dayOf(now - 40 * 86_400_000)
+  return Object.fromEntries(Object.entries(days).filter(([day]) => day >= oldest))
+}
+
+/** The calendar month a moment falls in, where the dashboard runs: "2026-10". */
+export const monthOf = (at: number): string => {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/**
+ * What Companion cost this calendar month: earlier Companion sessions on this
+ * machine, from the last scan, and this session as it runs. Claude Code's own
+ * cost figures; on a seat, what the same use would cost on the API.
+ */
+export const monthSpend = (sessions: readonly PastSession[] | undefined, now: number, currentId: string | undefined, liveUsd: number | undefined): number => {
+  const month = monthOf(now)
+  const earlier = (sessions ?? [])
+    .filter(s => s.id !== currentId && s.startedAt && monthOf(Date.parse(s.startedAt)) === month)
+    .reduce((sum, s) => sum + (s.costUsd ?? 0), 0)
+  return earlier + (liveUsd ?? 0)
+}
+
+/** Companion's month against the monthly amount the person set. Undefined without one. */
+export const monthView = (spent: number, monthlyUsd: number): BudgetView | undefined => {
+  if (!monthlyUsd || monthlyUsd <= 0) return undefined
+  const percent = (spent / monthlyUsd) * 100
+  return { level: budgetLevel(percent), percent, text: `Companion this month: ${formatCost(spent)} of ${formatCost(monthlyUsd)}` }
+}

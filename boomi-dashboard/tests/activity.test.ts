@@ -68,7 +68,14 @@ import {
   choiceFrom,
   choiceList,
   pondRows,
-  FLAMINGO_DRINK,
+  limitViews,
+  limitsLine,
+  limitsShort,
+  span,
+  shareView,
+  pruneDays,
+  monthSpend,
+  monthView,
   resumeCommand,
   resumable,
 } from '../hooks/activity'
@@ -833,30 +840,19 @@ test('the resume command quotes a folder only when it needs it', () => {
   expect(resumable([s, { ...s, id: 'b' }], 'aaaaaaaa-1111').map(x => x.id)).toEqual(['b'])
 })
 
-test('the flamingo stands in a small pond that splashes as it drinks or a step lands', () => {
+test('the flamingo walks in a thin line of water across its strip, splashing as a step lands', () => {
   const right = { offset: 0, facing: 'right' as const }
-  // Standing: still water under its feet, no drops.
-  expect(pondRows(right, { isWorking: false, frame: 0 })).toEqual(['..................', '...WWW.WWWW.......'])
-  // Drinking: drops around the beak, bobbing between two frames.
-  expect(pondRows(right, { isWorking: false, frame: 0, isDrinking: true })[0]).toBe('........W..W......')
-  expect(pondRows(right, { isWorking: false, frame: 1, isDrinking: true })[0]).toBe('.......W..W.......')
-  // Walking: drops beside the feet as a wide step lands, none mid-step.
+  // Standing: still water across the whole strip, no drops.
+  expect(pondRows(right, { isWorking: false, frame: 0 })).toEqual(['..................', 'WWW.WWW.WWW.WWW.WW'])
+  expect(pondRows(right, { isWorking: false, frame: 3 })).toEqual(pondRows(right, { isWorking: false, frame: 0 }))
+  // Walking: the ripples drift, and drops splash beside the feet as a wide step lands, none mid-step.
+  expect(pondRows(right, { isWorking: true, frame: 1 })[1]).toBe('WW.WWW.WWW.WWW.WWW')
   expect(pondRows(right, { isWorking: true, frame: 0 })[0]).toBe('..W......W........')
   expect(pondRows(right, { isWorking: true, frame: 1 })[0]).toBe('..................')
-  // It moves and turns with the bird.
-  expect(pondRows({ offset: 6, facing: 'left' }, { isWorking: false, frame: 0 })[1]).toBe('.......WWWW.WWW...')
-  // One row of half blocks: drops above, water below.
-  expect(pixelCells(pondRows(right, { isWorking: false, frame: 0, isDrinking: true }), { W: '#9FDED6' })[0]!.map(c => c.char).join('')).toBe('   ▄▄▄ ▄█▄▄▀      ')
-})
-
-test('now and then while idle the flamingo bends over to drink, its beak in the water', () => {
-  expect(flamingo(false, 0, true)).toBe(FLAMINGO_DRINK)
-  // Never mid-walk.
-  expect(flamingo(true, 0, true)).toBe(FLAMINGO_WALK[0])
-  expect(FLAMINGO_DRINK).toHaveLength(FLAMINGO_IDLE.length)
-  expect(FLAMINGO_DRINK.every(row => row.length === 12)).toBe(true)
-  // The beak's black tip is on the bottom row, at the water.
-  expect(FLAMINGO_DRINK[FLAMINGO_DRINK.length - 1]).toContain('K')
+  // The drops follow the bird wherever it is.
+  expect(pondRows({ offset: 6, facing: 'left' }, { isWorking: true, frame: 4 })[0]).toBe('........W......W..')
+  // One thin row of half blocks under the bird: drops above, water below.
+  expect(pixelCells(pondRows(right, { isWorking: true, frame: 0 }), { W: '#9FDED6' })[0]!.map(c => c.char).join('')).toBe('▄▄█.▄▄▄.▄█▄.▄▄▄.▄▄'.replace(/\./g, ' '))
 })
 
 // --- Companion's other plugins ---
@@ -901,4 +897,55 @@ test('a past session counts its steps with other plugins, and one with only thos
   })
   expect(s?.products).toEqual({ datahub: 2, bdi: 1 })
   expect(pastParts(s!).detail).toContain('2 Data Hub steps · 1 BDI step')
+})
+
+// --- Usage limits and a personal Companion budget ---
+
+test('usage limits: the busiest window first, warning from 80% or when the pace runs out before the reset', () => {
+  const at = (ms: number) => new Date(NOW + ms).toISOString()
+  const views = limitViews(
+    [
+      { kind: 'five_hour', percentUsed: 10, resetsAt: at(4 * 3_600_000) },
+      // Three days into the week, 60% used: 3.5 more days would use it up, and it resets in 4.
+      { kind: 'seven_day', percentUsed: 60, resetsAt: at(4 * 86_400_000) },
+    ],
+    NOW,
+  )
+  expect(views.map(v => v.kind)).toEqual(['seven_day', 'five_hour'])
+  expect(views[0]).toMatchObject({ level: 'warning', isRunningOut: true, pace: 'used up in 2d 0h', resetsIn: '4d 0h' })
+  // An hour into five, 10%: on pace for half of it.
+  expect(views[1]).toMatchObject({ level: 'healthy', pace: 'on pace for 50% by reset' })
+  // An hour into five, 30%: out in 2h 20m, before it resets in 4h.
+  expect(limitViews([{ kind: 'five_hour', percentUsed: 30, resetsAt: at(4 * 3_600_000) }], NOW)[0]).toMatchObject({ level: 'warning', pace: 'used up in 2h 20m' })
+  expect(limitViews([{ kind: 'seven_day', percentUsed: 100 }], NOW)[0]?.level).toBe('critical')
+  // Too early in a window to project.
+  expect(limitViews([{ kind: 'seven_day', percentUsed: 5, resetsAt: at(6.9 * 86_400_000) }], NOW)[0]?.pace).toBeUndefined()
+  expect(limitsShort([{ kind: 'seven_day', percentUsed: 42.4 }, { kind: 'five_hour', percentUsed: 12 }], NOW)).toBe('week 42% · 5h 12%')
+  expect(limitsLine([], NOW)).toBeUndefined()
+  expect(span(90 * 60_000)).toBe('1h 30m')
+  expect(span(50 * 3_600_000)).toBe('2d 2h')
+})
+
+test("Companion's share scales to its period: a seventh a day, a week, a month's days in sevenths", () => {
+  const now = new Date(2026, 9, 13, 12).getTime()
+  const days = { '2026-10-13': 2, '2026-10-10': 3, '2026-10-01': 5, '2026-09-30': 9 }
+  expect(shareView(days, 28, 'day', now)).toMatchObject({ percent: 50, level: 'healthy' })
+  expect(Math.round(shareView(days, 28, 'week', now)!.percent * 100)).toBe(Math.round(((2 + 3) / 28) * 10_000))
+  expect(Math.round(shareView(days, 28, 'month', now)!.percent * 100)).toBe(Math.round(((2 + 3 + 5) / ((28 * 31) / 7)) * 10_000))
+  expect(shareView(days, 0, 'week', now)).toBeUndefined()
+  expect(shareView({ '2026-10-13': 4 }, 28, 'day', now)?.level).toBe('critical')
+  expect(Object.keys(pruneDays({ '2026-08-01': 1, '2026-10-13': 1 }, now))).toEqual(['2026-10-13'])
+})
+
+test("Companion's month: this month's earlier sessions on this machine, not this one twice, plus this one live", () => {
+  const now = new Date(2026, 9, 13, 12).getTime()
+  const base = { tokens: 0, cached: 0, models: [], runs: {}, components: [] }
+  const sessions = [
+    { ...base, id: 'a', startedAt: new Date(2026, 9, 2).toISOString(), costUsd: 3 },
+    { ...base, id: 'now', startedAt: new Date(2026, 9, 13).toISOString(), costUsd: 1 },
+    { ...base, id: 'old', startedAt: new Date(2026, 8, 20).toISOString(), costUsd: 7 },
+  ]
+  expect(monthSpend(sessions, now, 'now', 2)).toBe(5)
+  expect(monthView(8.5, 10)).toMatchObject({ level: 'warning', text: 'Companion this month: $8.50 of $10' })
+  expect(monthView(1, 0)).toBeUndefined()
 })

@@ -77,6 +77,14 @@ import {
   choiceList,
   recapOf,
   welcomeLine,
+  shareView,
+  monthSpend,
+  monthView,
+  monthOf,
+  dayOf,
+  pruneDays,
+  limitViews,
+  limitsShort,
   productSpendLine,
   resumable,
   resumeCommand,
@@ -84,7 +92,7 @@ import {
   parseActivityLog,
   newLogSteps,
 } from './activity'
-import type { Attention, Level, Reading, ScriptRun, Usage } from './activity'
+import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import type { Credentials } from './platform'
 
@@ -119,15 +127,25 @@ const isCompanionFolder = atom({ plugin: 'boomi-dashboard', key: 'isCompanionFol
 /** What each failed execution's log says, by execution ID, once someone asks Why?. */
 const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const, {} as Record<string, DiagnosisState>)
 
-/**
- * The flamingo bent over drinking, now and then while Claude is idle: 0 while
- * it isn't, else how many ticks it has drunk, which bobs the splash. The walk
- * frame stays put, so it stands up where it bent down.
- */
-const drinkTick = atom({ plugin: 'boomi-dashboard', key: 'drinkTick' } as const, 0)
-
 /** The flamingo's animation frame, moved on while Claude works. */
 const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
+
+/**
+ * Companion's share of the weekly limit: how far Companion sessions on this
+ * machine moved it, by day (kept across sessions in the store), and this
+ * session's baseline, the weekly limit when it first worked with Companion,
+ * with how much of its movement is counted already.
+ */
+const share = atom(
+  { plugin: 'boomi-dashboard', key: 'share' } as const,
+  null as { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null,
+)
+
+/** Where Companion's daily movement of the weekly limit is kept. */
+const SHARE_KEY = 'shareDays'
+
+/** Each usage-limit window's last warning (80 or 100), by its kind and reset time, so each is toasted once. */
+const limitAlerts = atom({ plugin: 'boomi-dashboard', key: 'limitAlerts' } as const, {} as Record<string, number>)
 
 /** The budget's last warning, as a percent (0, 80 or 100), so each is toasted once. */
 const budgetAlert = atom({ plugin: 'boomi-dashboard', key: 'budgetAlert' } as const, 0)
@@ -162,6 +180,9 @@ type Settings = {
   isSuggesting: boolean
   historyDays: number
   isReadingLog: boolean
+  companionShare: number
+  companionSharePeriod: SharePeriod
+  companionMonthlyUsd: number
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -177,6 +198,9 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   isSuggesting: options.suggestions !== false,
   historyDays: Math.max(1, Number(options.historyDays ?? 90) || 90),
   isReadingLog: options.activityLog !== false,
+  companionShare: Math.min(100, Math.max(0, Number(options.companionShare ?? 0) || 0)),
+  companionSharePeriod: options.companionSharePeriod === 'day' || options.companionSharePeriod === 'month' ? options.companionSharePeriod : 'week',
+  companionMonthlyUsd: Math.max(0, Number(options.companionMonthlyUsd ?? 0) || 0),
 })
 
 const PANE = 'boomi-dashboard'
@@ -187,13 +211,6 @@ const HISTORY_KEY = 'history'
 
 /** How often the flamingo's frame moves on while Claude works. */
 const FLAMINGO_TICK_MS = 500
-
-/** While idle, the flamingo drinks for the last DRINK_TICKS of every IDLE_CYCLE_TICKS: 4 seconds in 30. */
-const IDLE_CYCLE_TICKS = 60
-const DRINK_TICKS = 8
-
-/** Ticks since Claude last worked, for the flamingo's drinking. */
-let idleTicks = 0
 
 /** How long the banner shows each line of a new session's recap and tips. */
 const TIP_MS = 20_000
@@ -233,7 +250,8 @@ const usageOf = async ($: Engine): Promise<Usage> => {
   }
   try {
     const usage = await $.session.usage()
-    return { usd: usage.cost?.usd, contextPercent: usage.context.percent, tokens, cached, startedAt: usage.startedAt, ...models }
+    const limits = usage.rateLimits.map(r => ({ kind: r.kind, percentUsed: r.percentUsed, ...(r.resetsAt ? { resetsAt: r.resetsAt } : {}) }))
+    return { usd: usage.cost?.usd, contextPercent: usage.context.percent, tokens, cached, startedAt: usage.startedAt, limits, now: await $.clock.now(), ...models }
   } catch {
     return { tokens, cached, ...models }
   }
@@ -247,9 +265,86 @@ const snapshot = async ($: Engine) => {
 
 const refreshStatus = async ($: Engine, settings: Settings) => {
   const now = await $.clock.now()
-  const usage = { ...(await usageOf($)), budgetUsd: settings.budgetUsd }
+  const read0 = { ...(await usageOf($)), budgetUsd: settings.budgetUsd }
+  const usage = { ...read0, companion: await companionBudget($, settings, read0) }
   $.ui.status(statusLine(await read($, dashboard), now, settings.windowMs, usage, (await read($, recap)) ?? undefined))
   await warnBudget($, settings, usage.usd)
+  await warnLimits($, settings, usage)
+  await trackShare($, settings, usage)
+  await warnCompanion($, settings, usage)
+}
+
+/**
+ * Counts Companion's movement of the weekly limit: from the session's first
+ * Companion step, each rise of the limit is added to the day it happened on,
+ * so a share can run per day, week or month. A window that resets starts the
+ * count again from zero.
+ */
+const trackShare = async ($: Engine, settings: Settings, usage: Usage) => {
+  if (!settings.companionShare) return
+  const weekly = usage.limits?.find(l => l.kind === 'seven_day')
+  if (!weekly) return
+  try {
+    const now = usage.now ?? (await $.clock.now())
+    const current = await read($, share)
+    let days = current?.days ?? (((await $.store.get(SHARE_KEY)) as Record<string, number> | undefined) ?? {})
+    let baseline = current?.baseline
+    let counted = current?.counted ?? 0
+    if ((await read($, dashboard)).activity.some(a => !a.isRestored)) {
+      if (!baseline) baseline = { resetsAt: weekly.resetsAt, percent: weekly.percentUsed }
+      if (baseline.resetsAt !== weekly.resetsAt) {
+        baseline = { resetsAt: weekly.resetsAt, percent: 0 }
+        counted = 0
+      }
+      const moved = Math.max(0, weekly.percentUsed - baseline.percent)
+      const rise = Math.round((moved - counted) * 10) / 10
+      if (rise >= 0.1) {
+        const today = dayOf(now)
+        days = pruneDays({ ...days, [today]: Math.round(((days[today] ?? 0) + rise) * 10) / 10 }, now)
+        counted = Math.round((counted + rise) * 10) / 10
+        await $.store.set(SHARE_KEY, days)
+      }
+    }
+    const next = { days, counted, ...(baseline ? { baseline } : {}) }
+    if (JSON.stringify(next) !== JSON.stringify(current)) await update($, share, () => next)
+  } catch {}
+}
+
+/** Where Companion stands against the person's own budget, for the views. */
+const companionBudget = async ($: Engine, settings: Settings, usage: Usage): Promise<Usage['companion']> => {
+  const week = shareView((await read($, share))?.days, settings.companionShare, settings.companionSharePeriod, usage.now ?? (await $.clock.now()))
+  const month = settings.companionMonthlyUsd
+    ? monthView(monthSpend((await read($, history)).sessions, usage.now ?? (await $.clock.now()), await $.session.id().catch(() => undefined), usage.usd), settings.companionMonthlyUsd)
+    : undefined
+  return week || month ? { ...(week ? { week } : {}), ...(month ? { month } : {}) } : undefined
+}
+
+/** Toasts once as Companion passes 80% of its budget, and once when it's spent, per week and per month. */
+const warnCompanion = async ($: Engine, settings: Settings, usage: Usage) => {
+  const budget = await companionBudget($, settings, usage)
+  const now = usage.now ?? (await $.clock.now())
+  for (const [key, b] of [
+    [`companion-share|${settings.companionSharePeriod}|${settings.companionSharePeriod === 'day' ? dayOf(now) : settings.companionSharePeriod === 'month' ? monthOf(now) : dayOf(now - (((new Date(now).getDay() + 6) % 7) * 86_400_000))}`, budget?.week],
+    [`companion-month|${monthOf(now)}`, budget?.month],
+  ] as const) {
+    if (!b) continue
+    const mark = b.percent >= 100 ? 100 : b.percent >= 80 ? 80 : 0
+    if (mark === 0 || mark <= ((await read($, limitAlerts))[key] ?? 0)) continue
+    await update($, limitAlerts, all => ({ ...all, [key]: mark }))
+    toast($, settings, `${STATUS[b.level].icon} ${b.text}`)
+  }
+}
+
+/** Toasts once as each usage-limit window passes 80%, and once when it's used up, per window until it resets. */
+const warnLimits = async ($: Engine, settings: Settings, usage: Usage) => {
+  for (const v of limitViews(usage.limits, usage.now ?? (await $.clock.now()))) {
+    const mark = v.percent >= 100 ? 100 : v.percent >= 80 ? 80 : 0
+    if (mark === 0) continue
+    const key = `${v.kind}|${usage.limits?.find(l => l.kind === v.kind)?.resetsAt ?? ''}`
+    if (mark <= ((await read($, limitAlerts))[key] ?? 0)) continue
+    await update($, limitAlerts, all => ({ ...all, [key]: mark }))
+    toast($, settings, `${STATUS[v.level].icon} ${mark >= 100 ? `Your ${v.name} Claude limit is used up` : `${Math.round(v.percent)}% of your ${v.name} Claude limit used`}${v.resetsIn ? `, resets in ${v.resetsIn}` : ''}`)
+  }
 }
 
 /** Toasts once when the session passes 80% of its budget, and once when it's spent. */
@@ -910,7 +1005,7 @@ const reportNow = async ($: Engine, settings: Settings) => {
   const footer = await footerOf($)
   return report(
     await read($, dashboard),
-    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await usageOf($) },
+    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await withBudget($, settings) },
     now,
     settings.windowMs,
   )
@@ -1008,9 +1103,15 @@ const guardLines = async ($: Engine) => {
   )
 }
 
+/** The session's usage with the person's budgets, for the text and the report. */
+const withBudget = async ($: Engine, settings: Settings): Promise<Usage> => {
+  const usage = { ...(await usageOf($)), budgetUsd: settings.budgetUsd }
+  return { ...usage, companion: await companionBudget($, settings, usage) }
+}
+
 const summaryNow = async ($: Engine, settings: Settings) =>
   [
-    summary(await read($, dashboard), { ...(await usageOf($)), budgetUsd: settings.budgetUsd }, await $.clock.now(), settings.windowMs),
+    summary(await read($, dashboard), await withBudget($, settings), await $.clock.now(), settings.windowMs),
     guardrailText(await guardLines($)),
   ]
     .filter(Boolean)
@@ -1118,15 +1219,16 @@ const PALETTES: Record<PaneTheme, Palette> = {
 let footerCache: { session: string; repo?: string } | undefined
 
 /**
- * The footer: the session (its short id: the mod API gives a plugin the
- * session's id, not its name) and the GitHub page of the working copy's
+ * The footer: the session's whole ID (the mod API gives a plugin the
+ * session's ID, not its name; claude --resume takes it) and the GitHub page of the working copy's
  * origin remote, read at run time. No link when origin isn't on GitHub.
  */
 const footerOf = async ($: Engine): Promise<{ session: string; repo?: string }> => {
   if (footerCache) return footerCache
   const id = await $.session.id().catch(() => '')
   const repo = await $.session.repo().catch(() => null)
-  footerCache = { session: id ? id.slice(0, 8) : 'unknown', repo: githubUrl(repo?.remote) }
+  // The whole ID: it's what claude --resume takes.
+  footerCache = { session: id || 'unknown', repo: githubUrl(repo?.remote) }
   return footerCache
 }
 
@@ -1194,18 +1296,7 @@ export const register: Register = (on, options) => {
     // The flamingo walks while Claude works: a frame every half second, a column every second.
     if (settings.hasFlamingo) {
       $.clock.every(FLAMINGO_TICK_MS, async () => {
-        if (await read($, isWorking)) {
-          idleTicks = 0
-          if ((await read($, drinkTick)) > 0) await update($, drinkTick, () => 0)
-          await update($, frame, n => (n + 1) % 1000)
-          return
-        }
-        // Idle: now and then it bends to drink, and the splash bobs while it does.
-        idleTicks++
-        const drinking = idleTicks % IDLE_CYCLE_TICKS >= IDLE_CYCLE_TICKS - DRINK_TICKS
-        const was = await read($, drinkTick)
-        if (drinking) await update($, drinkTick, n => n + 1)
-        else if (was > 0) await update($, drinkTick, () => 0)
+        if (await read($, isWorking)) await update($, frame, n => (n + 1) % 1000)
       })
     }
     if (settings.pollSeconds > 0) {
@@ -1228,6 +1319,16 @@ export const register: Register = (on, options) => {
     })
     await readActivityLog($, settings)
     $.clock.every(LOG_CHECK_MS, () => readActivityLog($, settings))
+    // A monthly Companion amount counts earlier sessions' costs: read them once, soon after the start.
+    if (settings.companionMonthlyUsd > 0) {
+      $.clock.after(5_000, async () => {
+        const known = await read($, history)
+        const today = monthOf(await $.clock.now())
+        if (known.phase !== 'loading' && (known.scannedAt === undefined || monthOf(known.scannedAt) !== today || (await $.clock.now()) - known.scannedAt > 3_600_000)) {
+          await scanHistory($, settings).catch(() => undefined)
+        }
+      })
+    }
     return started
   })
 
@@ -1333,9 +1434,12 @@ export const register: Register = (on, options) => {
     const count = components(current.activity).length
     const usage = await usageOf($)
     const cost = formatCost(usage.usd)
-    const spent = isNew
-      ? cost && `${cost} this session`
-      : [usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined, cost].filter(Boolean).join(' · ')
+    const spent = [
+      isNew ? cost && `${cost} this session` : [usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined, cost].filter(Boolean).join(' · '),
+      limitsShort(usage.limits, now),
+    ]
+      .filter(Boolean)
+      .join(' │ ')
     const icon = (level: Level) => <Text color={STATUS[level].color}>{STATUS[level].icon}</Text>
     const first = latest ?? welcome
 
@@ -1394,8 +1498,6 @@ export const register: Register = (on, options) => {
     const usage = await usageOf($)
     const working = await read($, isWorking)
     const flamingoFrame = await read($, frame)
-    const sip = await read($, drinkTick)
-    const drinking = sip > 0
     const needs = attention(current, now, settings.windowMs)
     const closedItems = closedCount(current, now, settings.windowMs)
     const whys = await read($, diagnoses)
@@ -1412,6 +1514,8 @@ export const register: Register = (on, options) => {
     const last = feed[0] && all.get(feed[0].id)
 
     const budget = budgetOf(usage.usd, settings.budgetUsd)
+    const limitsNow = limitViews(usage.limits, now)
+    const mine = await companionBudget($, settings, usage)
     // Every Text carries the pane's colors, so it reads the same on any terminal.
     const t = (text: string, style: { color?: string; bold?: boolean; bg?: string } = {}) => (
       <Text color={style.color ?? p.text} backgroundColor={style.bg ?? p.bg} bold={style.bold}>
@@ -1490,11 +1594,21 @@ export const register: Register = (on, options) => {
                 formatCost(usage.usd) ?? '—',
                 last?.usd ? `last step ${formatCost(last.usd)}` : undefined,
                 budget ? `${STATUS[budget.level].icon} ${budget.percent >= 100 ? 'budget spent' : `${Math.round(budget.percent)}% of ${formatCost(settings.budgetUsd)}`}` : undefined,
+                mine?.month ? `${STATUS[mine.month.level].icon} ${Math.round(mine.month.percent)}% of month` : undefined,
               )}
               {gauge(
                 'CONTEXT',
                 usage.contextPercent === undefined ? '—' : `${meter(usage.contextPercent, 8)} ${Math.round(usage.contextPercent)}%`,
               )}
+              {limitsNow.length > 0 &&
+                gauge(
+                  'LIMITS',
+                  `${meter(Math.min(100, limitsNow[0]!.percent), 8)} ${Math.round(limitsNow[0]!.percent)}%`,
+                  `${limitsNow[0]!.name}${limitsNow[0]!.resetsIn ? `, resets ${limitsNow[0]!.resetsIn}` : ''}`,
+                  limitsNow[0]!.pace ? `${STATUS[limitsNow[0]!.level].icon} ${limitsNow[0]!.pace}` : undefined,
+                  ...limitsNow.slice(1).map(v => `${v.name} ${Math.round(v.percent)}%`),
+                  mine?.week ? `${STATUS[mine.week.level].icon} Companion ${Math.round(mine.week.percent)}% of ${settings.companionSharePeriod === 'day' ? 'today' : settings.companionSharePeriod === 'week' ? '7 days' : 'month'}` : undefined,
+                )}
             </Box>
             {sparkline(trail) && (
               <Box>
@@ -1506,7 +1620,7 @@ export const register: Register = (on, options) => {
           {settings.hasFlamingo && (
             <Box flexDirection="column" flexShrink={0} marginLeft={1}>
               {(() => {
-                const view = flamingoView(working, flamingoFrame, FLAMINGO_TRAVEL, drinking)
+                const view = flamingoView(working, flamingoFrame)
                 const pad = (n: number) => (n > 0 ? <Text backgroundColor={p.bg}>{' '.repeat(n)}</Text> : undefined)
                 const cells = (row: ReturnType<typeof pixelCells>[number]) =>
                   row.map(cell => (
@@ -1522,8 +1636,8 @@ export const register: Register = (on, options) => {
                       {pad(FLAMINGO_TRAVEL - view.offset)}
                     </Text>
                   )),
-                  // The water at its feet, splashing as it drinks or steps.
-                  ...pixelCells(pondRows(view, { isWorking: working, frame: drinking ? sip : flamingoFrame, isDrinking: drinking }), { W: p.water }).map(row => (
+                  // The water it walks in, across the strip, splashing as a step lands.
+                  ...pixelCells(pondRows(view, { isWorking: working, frame: flamingoFrame }), { W: p.water }).map(row => (
                     <Text backgroundColor={p.bg}>
                       {cells(row)}
                     </Text>
