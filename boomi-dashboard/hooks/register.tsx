@@ -52,7 +52,7 @@ import {
   modelName,
   modelSplits,
   pixelCells,
-  waveRows,
+  pondRows,
   readOutput,
   recentRuns,
   reopenAll,
@@ -77,6 +77,7 @@ import {
   choiceList,
   recapOf,
   welcomeLine,
+  productSpendLine,
   resumable,
   resumeCommand,
   resumeLabel,
@@ -117,6 +118,13 @@ const isCompanionFolder = atom({ plugin: 'boomi-dashboard', key: 'isCompanionFol
 
 /** What each failed execution's log says, by execution ID, once someone asks Why?. */
 const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const, {} as Record<string, DiagnosisState>)
+
+/**
+ * The flamingo bent over drinking, now and then while Claude is idle: 0 while
+ * it isn't, else how many ticks it has drunk, which bobs the splash. The walk
+ * frame stays put, so it stands up where it bent down.
+ */
+const drinkTick = atom({ plugin: 'boomi-dashboard', key: 'drinkTick' } as const, 0)
 
 /** The flamingo's animation frame, moved on while Claude works. */
 const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
@@ -179,6 +187,13 @@ const HISTORY_KEY = 'history'
 
 /** How often the flamingo's frame moves on while Claude works. */
 const FLAMINGO_TICK_MS = 500
+
+/** While idle, the flamingo drinks for the last DRINK_TICKS of every IDLE_CYCLE_TICKS: 4 seconds in 30. */
+const IDLE_CYCLE_TICKS = 60
+const DRINK_TICKS = 8
+
+/** Ticks since Claude last worked, for the flamingo's drinking. */
+let idleTicks = 0
 
 /** How long the banner shows each line of a new session's recap and tips. */
 const TIP_MS = 20_000
@@ -322,6 +337,7 @@ const subjectOf = async ($: Engine, settings: Settings, run: ScriptRun, current:
     const watched = current.watched.find(w => w.componentId === id)
     return { subject: known?.subject ?? watched?.name ?? id, componentId: id, type: known?.type, file: known?.file }
   }
+  if (run.product) return { subject: run.target ?? '' }
   return { subject: run.deploymentId ? `deployment ${run.deploymentId}` : run.kind === 'other' ? (run.script ?? 'a Companion script') : 'a component' }
 }
 
@@ -341,9 +357,10 @@ const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun
   for (const run of runs) {
     const found = await subjectOf($, settings, run, current)
     const args = run.kind === 'test' && run.args ? { args: run.args } : {}
-    started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found, ...args })
+    const product = run.product ? { product: run.product, verb: run.verb ?? '' } : {}
+    started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found, ...args, ...product })
   }
-  if (!current.activity.some(a => a.kind !== 'other')) openPane($)
+  if (!current.activity.some(a => a.kind !== 'other' || a.product)) openPane($)
   void rememberScripts($, runs)
   await record($, list => [...list, ...started])
   void refreshStatus($, settings)
@@ -402,7 +419,7 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
 /** A toast for what someone would want to hear about without looking. */
 const announce = ($: Engine, settings: Settings, a: Activity) => {
   if (a.kind === 'other' || a.kind === 'pull') {
-    if (a.outcome === 'failed' || a.outcome === 'blocked') toast($, settings, `${STATUS[levelOf(a)].icon} ${describe(a)}`)
+    if (a.outcome === 'failed' || a.outcome === 'blocked' || levelOf(a) === 'warning') toast($, settings, `${STATUS[levelOf(a)].icon} ${describe(a)}`)
     return
   }
   if (a.outcome !== 'ok' || a.kind === 'deploy' || a.kind === 'test') {
@@ -1177,7 +1194,18 @@ export const register: Register = (on, options) => {
     // The flamingo walks while Claude works: a frame every half second, a column every second.
     if (settings.hasFlamingo) {
       $.clock.every(FLAMINGO_TICK_MS, async () => {
-        if (await read($, isWorking)) await update($, frame, n => (n + 1) % 1000)
+        if (await read($, isWorking)) {
+          idleTicks = 0
+          if ((await read($, drinkTick)) > 0) await update($, drinkTick, () => 0)
+          await update($, frame, n => (n + 1) % 1000)
+          return
+        }
+        // Idle: now and then it bends to drink, and the splash bobs while it does.
+        idleTicks++
+        const drinking = idleTicks % IDLE_CYCLE_TICKS >= IDLE_CYCLE_TICKS - DRINK_TICKS
+        const was = await read($, drinkTick)
+        if (drinking) await update($, drinkTick, n => n + 1)
+        else if (was > 0) await update($, drinkTick, () => 0)
       })
     }
     if (settings.pollSeconds > 0) {
@@ -1366,6 +1394,8 @@ export const register: Register = (on, options) => {
     const usage = await usageOf($)
     const working = await read($, isWorking)
     const flamingoFrame = await read($, frame)
+    const sip = await read($, drinkTick)
+    const drinking = sip > 0
     const needs = attention(current, now, settings.windowMs)
     const closedItems = closedCount(current, now, settings.windowMs)
     const whys = await read($, diagnoses)
@@ -1476,7 +1506,7 @@ export const register: Register = (on, options) => {
           {settings.hasFlamingo && (
             <Box flexDirection="column" flexShrink={0} marginLeft={1}>
               {(() => {
-                const view = flamingoView(working, flamingoFrame)
+                const view = flamingoView(working, flamingoFrame, FLAMINGO_TRAVEL, drinking)
                 const pad = (n: number) => (n > 0 ? <Text backgroundColor={p.bg}>{' '.repeat(n)}</Text> : undefined)
                 const cells = (row: ReturnType<typeof pixelCells>[number]) =>
                   row.map(cell => (
@@ -1492,8 +1522,8 @@ export const register: Register = (on, options) => {
                       {pad(FLAMINGO_TRAVEL - view.offset)}
                     </Text>
                   )),
-                  // The water it stands in, the width of the whole strip.
-                  ...pixelCells(waveRows(working, flamingoFrame), { W: p.water }).map(row => (
+                  // The water at its feet, splashing as it drinks or steps.
+                  ...pixelCells(pondRows(view, { isWorking: working, frame: drinking ? sip : flamingoFrame, isDrinking: drinking }), { W: p.water }).map(row => (
                     <Text backgroundColor={p.bg}>
                       {cells(row)}
                     </Text>
@@ -1581,6 +1611,7 @@ export const register: Register = (on, options) => {
           const aside = [ago(a.endedAt ?? a.startedAt, now), a.source === 'log' ? 'log' : undefined, spent ? `${formatTokens(spent)} tok` : undefined]
           return line(levelOf(a), describe(a), aside.filter(Boolean).join(' · '))
         })}
+        {feed.length > 0 && productSpendLine(current.activity, all) && note(productSpendLine(current.activity, all)!)}
         {steps.length > STEPS_PAGE && (
           <Box>
             {t(`  Showing ${feed.length} of ${steps.length}  `, { color: p.muted })}

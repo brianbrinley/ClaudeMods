@@ -321,6 +321,14 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(walking).not.toBe(standing)
     await clock.advance(500)
     expect(await bird()).not.toBe(walking)
+    // Idle again: it stands, then now and then bends to drink, then stands up.
+    await $.turn.complete({ reason: 'answer', turnId: 't1', answer: '' } as never)
+    await clock.advance(500)
+    const idle = await bird()
+    await clock.advance(26_000)
+    expect(await bird()).not.toBe(idle)
+    await clock.advance(4_000)
+    expect(await bird()).toBe(idle)
   })
 
   test(`on ${surface}, the pane names the model that answered`, async ($, on) => {
@@ -1077,4 +1085,88 @@ test('/bc-dashboard resume asks which of several, or takes a number', async ($, 
 test('/bc-dashboard resume with no earlier sessions says so', async ($, on) => {
   pastWorld(on, JSON.stringify({ version: 1, scanned: 0, sessions: [] }))
   expect((await $.command.run(dashboard('resume'))).text).toBe('No earlier Companion sessions on this machine from the last 90 days to reopen.')
+})
+
+// --- Companion's other plugins ---
+
+/** The shell beneath the plugins: each command's output and whether it exited with an error, as the plugins' scripts print them. */
+const productShell = (on: On, outputs: Record<string, { out: string; isError?: boolean }>) => {
+  on('tool.call', { tool: 'Bash' }, async (_$, e) => {
+    const found = outputs[String(e.command)] ?? { out: '' }
+    return found.isError
+      ? { isError: true as const, result: found.out, text: found.out }
+      : { result: { stdout: found.out, stderr: '', interrupted: false } }
+  })
+}
+
+const DH = '/Users/me/.claude/plugins/cache/boomi-companion/bc-datahub/0.2.12/skills/boomi-datahub/scripts'
+const UNIVERSE = '7c1e9a40-2b3d-4f5e-8a9b-0c1d2e3f4a5b'
+
+test("other Companion plugins' steps show in the feed in their own words; read-only ones don't", async ($, on) => {
+  world(on)
+  const deploy = `bash ${DH}/datahub-deployment.sh deploy ${UNIVERSE} repo-1 --version 3`
+  const list = `bash ${DH}/datahub-model.sh list --status all`
+  const run = 'bash scripts/bdi-flow.sh run 65f0c2a1b3d4e5f6a7b8c9d0'
+  const install = `BOOMI_COMMON_SH=/x/boomi-common.sh bash scripts/boomi-marketplace-install.sh --bundle-id abc123 --folder-id 42`
+  productShell(on, {
+    [deploy]: { out: '{"id":"dep-1","status":"PENDING"}' },
+    [list]: { out: '[]' },
+    [run]: { out: '{"run_id":"r-1"}' },
+    [install]: { out: "SUCCESS: Installed 'Salesforce to NetSuite Orders'" },
+  })
+  for (const command of [list, deploy, run, install]) await $.tool.call({ tool: 'Bash', command })
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('✓ Data Hub: deployed universe 7c1e9a40…')
+  expect(text).toContain('✓ BDI: ran flow 65f0c2a1…')
+  expect(text).toContain('✓ Marketplace: installed recipe Salesforce to NetSuite Orders')
+  expect(text).not.toContain('list')
+  expect(text).toContain('✓ Nothing needs attention.')
+  // The banner leads with the newest of them.
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await band.find({ text: /Marketplace: installed recipe/ })).toBeDefined()
+})
+
+test("another plugin's failure needs attention with its error line, until the same action succeeds", async ($, on) => {
+  const toasts = world(on)
+  const deploy = `bash ${DH}/datahub-deployment.sh deploy ${UNIVERSE} repo-1 --version 3`
+  let outcome = { out: 'ERROR: HTTP 400\n<error><message>Model version 3 is not published</message></error>', isError: true }
+  on('tool.call', { tool: 'Bash' }, async () =>
+    outcome.isError ? { isError: true as const, result: outcome.out, text: outcome.out } : { result: { stdout: outcome.out, stderr: '', interrupted: false } },
+  )
+  await $.tool.call({ tool: 'Bash', command: deploy })
+  const failed = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(failed).toContain('Needs attention (1):')
+  expect(failed).toContain("✗ Data Hub: couldn't deploy universe 7c1e9a40…")
+  expect(failed).toContain('ERROR: HTTP 400')
+  expect(toasts.some(t => t.includes("couldn't deploy universe"))).toBe(true)
+
+  outcome = { out: '{"status":"SUCCESS"}', isError: false }
+  await $.tool.call({ tool: 'Bash', command: deploy })
+  const after = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(after).toContain('✓ Nothing needs attention.')
+  expect(after).toContain('✓ Data Hub: deployed universe 7c1e9a40…')
+})
+
+test("a connector descriptor accepted with warnings is a warning to read, not a pass", async ($, on) => {
+  world(on)
+  const validate = 'bash scripts/connectordev-version.sh validate src/main/resources/connector-descriptor.xml'
+  productShell(on, { [validate]: { out: '{"result":"WARNING"}\nWARNING: descriptor accepted with warnings — read the response above' } })
+  await $.tool.call({ tool: 'Bash', command: validate })
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('◐ Connectors: validated connector descriptor connector-descriptor.xml')
+  expect(text).toContain('WARNING: descriptor accepted with warnings')
+})
+
+test('a session with more than one product splits its spend by product', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  const push = `bash scripts/boomi-component-push.sh ${FILE}`
+  const run = 'bash scripts/bdi-flow.sh run flow-1'
+  productShell(on, { [push]: { out: "SUCCESS: Pushed component 'Orders Sync' — now version 4" }, [run]: { out: '{}' } })
+  await $.tool.call({ tool: 'Bash', command: push })
+  await $.tool.call({ tool: 'Bash', command: run })
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toMatch(/By product: Integration \$1\.25 · BDI /)
+  const report = (await $.command.run(dashboard('report'))).text ?? ''
+  expect(report).toContain("## Companion's other plugins")
+  expect(report).toContain('- ✓ BDI: ran flow flow-1')
 })

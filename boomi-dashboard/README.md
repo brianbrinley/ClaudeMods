@@ -13,6 +13,7 @@
 - **Go from failure to fix in two clicks.** **Why?** reads a failed test's process log. **Ask Claude to fix** drafts the request with the log's lines in it, and **Run again** checks the fix without a turn of Claude's.
 - **Keep spend in sight.** Tokens, cost and how full the context is, per step and per component, with an optional budget that warns at 80%.
 - **Pick up where you left off.** A new session opens with what the last one did and left to fix, and **Past Companion sessions** shows what earlier work cost.
+- **Every Companion plugin, not only integration.** Data Hub deploys, BDI flow runs, Agentstudio agents, custom connector releases and Marketplace recipes show up as steps too, with their failures under **Needs attention** and each product's share of the spend.
 - **Catch what happens outside the chat.** Companion's activity log adds script runs from a terminal, and watched components flag changes someone else makes in Boomi.
 - **Hand it off.** `/bc-dashboard report` writes the session up as Markdown for a pull request, a ticket or the next person.
 
@@ -94,6 +95,25 @@ Each item under **Needs attention** has buttons:
 Without a pane: `/bc-dashboard close <n>`, `why` and `rerun`. With nothing that fits, `why` and `rerun` say so; with one failure, they act on it; with several, they ask which in Claude Code's question dialog (the four newest, and **Other** takes a number). A number from `/bc-dashboard text` skips the question.
 
 When Claude finishes a turn with a process saved but not deployed, or deployed but not tested, the prompt box suggests the next step ("Deploy Orders Sync and test it"). Tab takes it.
+
+## Companion's other plugins
+
+Boomi Companion is [six plugins](https://github.com/OfficialBoomi/boomi-companion). Besides bc-integration's components, the dashboard follows the other five through their scripts, the same way:
+
+| Plugin | Steps it shows |
+|---|---|
+| bc-marketplace | Recipes installed (`Marketplace: installed recipe Salesforce to NetSuite Orders`) and their supporting materials downloaded |
+| bc-datahub | Models created, updated, published and given quality steps; sources and their initial loads; universes deployed; quarantined records approved or rejected; golden records updated, end-dated or restored |
+| bc-bdi | Flows run, cancelled, activated, created or restored; CDC turned on or off; connections, environments, variables and dataframes changed |
+| bc-agentstudio | Agents, tools and MCP servers created or updated; agents packaged and deployed; conversations with a deployed agent |
+| bc-connectordev | Connector projects created and checked; descriptors linted and validated; versions uploaded; groups and version changes |
+
+- A step that only reads (`list`, `get`, `query`, `status`, `logs` and the like) isn't shown, as bc-integration's searches aren't.
+- A failed step (an `ERROR:` line, or the script exiting with an error) goes under **Needs attention** with its error line, until the same action succeeds. A step that finished with a `WARNING:` line, such as a connector descriptor accepted with warnings, shows as ◐ and needs attention too.
+- When a session works with more than one product, the pane, `/bc-dashboard text` and the report split the spend: `By product: Integration $1.20 · Data Hub $0.40`. The report lists the other plugins' steps in a section of their own.
+- **Past Companion sessions** count sessions that used any of the plugins, and say what each did with them (`2 Data Hub steps · 1 BDI step`).
+
+The wording comes from the plugins' scripts as of October 2026 (bc-marketplace 0.2.10, bc-datahub 0.2.12, bc-bdi 0.2.5, bc-agentstudio 0.1.42, bc-connectordev 0.0.50). The tests use those scripts' own `SUCCESS:`, `ERROR:` and `WARNING:` lines. Each plugin's live output still needs checking in a real session; see [CHECKLIST](../CHECKLIST.md).
 
 ## Tokens and spend
 
@@ -177,7 +197,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | Setting | Default | |
 |---|---|---|
 | `paneTheme` | `day` | The pane's colors until you pick a theme. |
-| `flamingo` | `true` | The 8-bit flamingo, standing in seafoam water: it paces and the water ripples while Claude works; it stands on one leg while idle. |
+| `flamingo` | `true` | The 8-bit flamingo, standing in a little seafoam water: it paces while Claude works, splashing as its steps land; while idle it stands on one leg, and every 30 seconds or so bends over to drink for a few seconds. |
 | `recentHours` | `24` | How far back earlier sessions' steps and Companion's activity log count. |
 | `envFile` | `.env` | Companion's `.env`, relative to the working directory. |
 | `componentsDir` | `active-development` | Where Companion keeps component XML. |
@@ -192,7 +212,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 ## Limits
 
 - **The web app doesn't show banners, panes, status lines or toasts yet.** Use `/bc-dashboard` or ask Claude.
-- Companion's work is seen through its scripts, run from Bash, and their `SUCCESS:`/`ERROR:` lines. A component sent another way (`curl`, another MCP server) doesn't show up, and a change to the scripts' output could need a change here.
+- Companion's work is seen through its plugins' scripts, run from Bash, and their `SUCCESS:`/`ERROR:`/`WARNING:` lines and exit codes. A component sent another way (`curl`, another MCP server) doesn't show up, and a change to the scripts' output could need a change here.
 - Steps are saved per working folder; after a restart, the last 24 hours come back marked as earlier. Tokens and spend start over each session, counted from when the mod loads.
 - Cost is the whole session's, not just Companion's share.
 - Past sessions are this machine's only (not the web's), and Claude Code deletes transcripts after 30 days unless `cleanupPeriodDays` says otherwise.
@@ -229,6 +249,7 @@ The dashboard follows Claude's tool calls, so tracking the session costs no Plat
 
 | Companion script | What the dashboard records |
 |---|---|
+| `datahub-*.sh`, `bdi-*.sh`, `agentstudio-*.sh`, `connectordev-*.sh`, `boomi-marketplace-*.sh` | A step of that product when the subcommand changes something; failed on `ERROR:` or an error exit, ◐ on `WARNING:` |
 | `boomi-component-create.sh <file>` | Created, with the new ID |
 | `boomi-component-push.sh <file>` | Saved, with the new version |
 | `boomi-component-pull.sh` | Pulled |

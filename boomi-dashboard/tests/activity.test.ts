@@ -67,10 +67,12 @@ import {
   choiceLabel,
   choiceFrom,
   choiceList,
-  waveRows,
+  pondRows,
+  FLAMINGO_DRINK,
   resumeCommand,
   resumable,
 } from '../hooks/activity'
+import { productWords } from '../hooks/products'
 import type { Activity, Dashboard } from '../types'
 import type { ScannedSession } from '../hooks/activity'
 
@@ -831,11 +833,72 @@ test('the resume command quotes a folder only when it needs it', () => {
   expect(resumable([s, { ...s, id: 'b' }], 'aaaaaaaa-1111').map(x => x.id)).toEqual(['b'])
 })
 
-test('the flamingo stands in water the width of its strip, rippling only while Claude works', () => {
-  expect(waveRows(false, 0)).toEqual(['.WW..WW..WW..WW..W', 'W..WW..WW..WW..WW.'])
-  expect(waveRows(false, 7)).toEqual(waveRows(false, 0))
-  expect(waveRows(true, 1)).toEqual(['WW..WW..WW..WW..WW', '..WW..WW..WW..WW..'])
-  expect(waveRows(true, 4)).toEqual(waveRows(true, 0))
-  // Drawn as one row of half blocks: crests on top, troughs below.
-  expect(pixelCells(waveRows(false, 0), { W: '#9FDED6' })[0]!.map(c => c.char).join('')).toBe('▄▀▀▄▄▀▀▄▄▀▀▄▄▀▀▄▄▀')
+test('the flamingo stands in a small pond that splashes as it drinks or a step lands', () => {
+  const right = { offset: 0, facing: 'right' as const }
+  // Standing: still water under its feet, no drops.
+  expect(pondRows(right, { isWorking: false, frame: 0 })).toEqual(['..................', '...WWW.WWWW.......'])
+  // Drinking: drops around the beak, bobbing between two frames.
+  expect(pondRows(right, { isWorking: false, frame: 0, isDrinking: true })[0]).toBe('........W..W......')
+  expect(pondRows(right, { isWorking: false, frame: 1, isDrinking: true })[0]).toBe('.......W..W.......')
+  // Walking: drops beside the feet as a wide step lands, none mid-step.
+  expect(pondRows(right, { isWorking: true, frame: 0 })[0]).toBe('..W......W........')
+  expect(pondRows(right, { isWorking: true, frame: 1 })[0]).toBe('..................')
+  // It moves and turns with the bird.
+  expect(pondRows({ offset: 6, facing: 'left' }, { isWorking: false, frame: 0 })[1]).toBe('.......WWWW.WWW...')
+  // One row of half blocks: drops above, water below.
+  expect(pixelCells(pondRows(right, { isWorking: false, frame: 0, isDrinking: true }), { W: '#9FDED6' })[0]!.map(c => c.char).join('')).toBe('   ▄▄▄ ▄█▄▄▀      ')
+})
+
+test('now and then while idle the flamingo bends over to drink, its beak in the water', () => {
+  expect(flamingo(false, 0, true)).toBe(FLAMINGO_DRINK)
+  // Never mid-walk.
+  expect(flamingo(true, 0, true)).toBe(FLAMINGO_WALK[0])
+  expect(FLAMINGO_DRINK).toHaveLength(FLAMINGO_IDLE.length)
+  expect(FLAMINGO_DRINK.every(row => row.length === 12)).toBe(true)
+  // The beak's black tip is on the bottom row, at the water.
+  expect(FLAMINGO_DRINK[FLAMINGO_DRINK.length - 1]).toContain('K')
+})
+
+// --- Companion's other plugins ---
+
+test("each plugin's scripts read as runs: the verb, what it acted on, and nothing for read-only verbs", () => {
+  const one = (command: string) => scriptRuns(command)[0]
+  expect(one('bash s/datahub-model.sh publish 5b0a1c2d-3e4f-5a6b-7c8d-9e0f1a2b3c4d --notes "v2"')).toMatchObject({ kind: 'other', product: 'datahub', script: 'datahub-model', verb: 'publish', target: '5b0a1c2d…' })
+  expect(one('bash s/datahub-quarantine.sh approve repo-1 uni-1 txn-77')).toMatchObject({ verb: 'approve', target: 'txn-77' })
+  expect(one('bash s/datahub-golden-record.sh enddate --universe u-1 rec-9')).toMatchObject({ verb: 'enddate', target: 'rec-9' })
+  expect(one('bash s/bdi-cdc.sh enable flow-1 --no-wait')).toMatchObject({ product: 'bdi', verb: 'enable', target: 'flow-1' })
+  expect(one('bash s/agentstudio-session.sh invoke --deployment dep-1 --message "hello there"')).toMatchObject({ product: 'agentstudio', verb: 'invoke', target: 'dep-1' })
+  expect(one('bash s/agentstudio-deployment.sh package-create agent-1 --deploy')).toMatchObject({ verb: 'package-create', target: 'agent-1' })
+  expect(one('bash s/connectordev-version.sh upload build/conn.zip --group my-group --changelog "fix"')).toMatchObject({ product: 'connectordev', verb: 'upload', target: 'my-group' })
+  expect(one('bash s/connectordev-descriptor-lint.sh src/connector-descriptor.xml')).toMatchObject({ verb: '', target: 'connector-descriptor.xml' })
+  expect(one('BOOMI_COMMON_SH=x bash s/boomi-marketplace-install.sh --bundle-id b-1 --folder-id 9')).toMatchObject({ product: 'marketplace', target: 'b-1' })
+  // Read-only verbs, help and the env checks aren't steps.
+  for (const command of [
+    'bash s/datahub-model.sh list',
+    'bash s/bdi-flow.sh status flow-1 run-1',
+    'bash s/bdi-flow.sh logs flow-1 run-1',
+    'bash s/agentstudio-agent.sh get a-1',
+    'bash s/datahub-env-check.sh',
+    'bash s/bdi-flow.sh run --help',
+  ]) expect(scriptRuns(command)).toEqual([])
+  // bc-integration's own scripts are as they were.
+  expect(one('bash s/boomi-deploy.sh active-development/processes/Orders.xml')).toMatchObject({ kind: 'deploy' })
+  expect(one('bash s/boomi-deploy.sh x.xml')?.product).toBeUndefined()
+})
+
+test("another plugin's step in words: done, doing and failed", () => {
+  const base = { product: 'bdi' as const, script: 'bdi-flow', verb: 'run', subject: 'flow-1' }
+  expect(productWords(base, 'did')).toBe('BDI: ran flow flow-1')
+  expect(productWords(base, 'doing')).toBe('BDI: run flow flow-1…')
+  expect(productWords(base, 'failed')).toBe("BDI: couldn't run flow flow-1")
+  expect(productWords({ ...base, subject: '' }, 'did')).toBe('BDI: ran a flow')
+  expect(productWords({ product: 'bdi', script: 'bdi-variable', verb: 'env-set', subject: '' }, 'did')).toBe('BDI: set environment variables')
+})
+
+test('a past session counts its steps with other plugins, and one with only those still counts', () => {
+  const [s] = pastSessions({
+    sessions: [{ id: 's1', startedAt: '2026-10-10T09:00:00Z', commands: ['bash s/datahub-model.sh publish m-1', 'bash s/datahub-deployment.sh deploy u-1 r-1 --version 2', 'bash s/bdi-flow.sh run f-1'] }],
+  })
+  expect(s?.products).toEqual({ datahub: 2, bdi: 1 })
+  expect(pastParts(s!).detail).toContain('2 Data Hub steps · 1 BDI step')
 })

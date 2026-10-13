@@ -152,7 +152,7 @@ for my $file (sort @files) {
     for my $block (@$content) {
       next unless ref $block eq 'HASH' && ($block->{type} // '') eq 'tool_use' && ($block->{name} // '') eq 'Bash';
       my $command = ref $block->{input} eq 'HASH' ? $block->{input}{command} : undef;
-      next unless defined $command && $command =~ /boomi-[a-z-]+\.sh/;
+      next unless defined $command && $command =~ /(?:boomi|datahub|bdi|agentstudio|connectordev)-[a-z-]+\.sh/;
       push @{ $s->{commands} }, substr($command, 0, 600) if @{ $s->{commands} } < $max_commands;
       $s->{companionCommands}++;
     }

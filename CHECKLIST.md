@@ -77,3 +77,22 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** the status line under the prompt reads `New session · last one <time> ago, …` and the session's cost, not a step from the last session. After Claude's first Companion step, it shows that step. **Fail:** it shows the last session's step, such as `✓ Test of a component passed`.
 - [ ] **F9. Reopen a past session.** Under **Past Companion sessions**, press **Scan**, then **Copy** beside an earlier session. Paste into a new terminal and press Enter.
   **Pass:** `Copied. Paste it into a new terminal…` under the session, and the new terminal opens Claude Code in that session's folder with its conversation. Then `/bc-dashboard resume` asks which session and prints the command. **Fail:** nothing copied (say which terminal app), the command fails, or a different session opens.
+
+## G. Companion's other plugins
+
+*boomi-dashboard 0.13.0. Each step needs that plugin installed and set up in the workspace. Skip a plugin you don't use, and say which.*
+
+- [ ] **G1. Data Hub.** Have Claude publish a model and deploy its universe.
+  **Pass:** **Claude's latest steps** shows `✓ Data Hub: published model …` and `✓ Data Hub: deployed universe …`. **Fail:** nothing, or the wrong words; send the step and the script's last output line.
+- [ ] **G2. BDI.** Have Claude run a flow.
+  **Pass:** `✓ BDI: ran flow …`. If it fails, `✗ BDI: couldn't run flow …` under **Needs attention** with the `ERROR:` line. **Fail:** nothing, or a pass for a failed run.
+- [ ] **G3. Agentstudio.** Have Claude deploy an agent and talk to it.
+  **Pass:** `✓ Agentstudio: deployed agent …` and `✓ Agentstudio: talked to deployment …`. **Fail:** nothing.
+- [ ] **G4. Connectors.** Have Claude validate a connector descriptor and upload a version.
+  **Pass:** `Connectors: validated connector descriptor …` (◐ if it was accepted with warnings) and `✓ Connectors: uploaded a version to connector group …`. **Fail:** nothing, or ✓ when the script warned.
+- [ ] **G5. Marketplace.** Have Claude install a recipe.
+  **Pass:** `✓ Marketplace: installed recipe <its name>`. **Fail:** a generic line, or nothing.
+- [ ] **G6. Read-only stays quiet.** Have Claude list Data Hub models or BDI flows.
+  **Pass:** no step for it. **Fail:** a `list` step shows up.
+- [ ] **G7. Spend by product.** In a session that used two products, run `/bc-dashboard text`.
+  **Pass:** a `By product:` line with each product's cost. **Fail:** no such line.

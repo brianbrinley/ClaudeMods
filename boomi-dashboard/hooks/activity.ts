@@ -3,7 +3,8 @@
 // attention, the recent feed and the live environment. Plain functions:
 // nothing here touches the engine, so the tests call them directly.
 
-import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, PastSession, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
+import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, PastSession, Product, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
+import { PRODUCT_NAMES, isProductScript, productRun, productWords } from './products'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
@@ -83,6 +84,10 @@ export type ScriptRun = {
   scriptsDir?: string
   /** A test's arguments, so it can be run again. */
   args?: string[]
+  /** Another Companion plugin's step: its product, subcommand and what it acted on. */
+  product?: Product
+  verb?: string
+  target?: string
 }
 
 const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefined => {
@@ -143,13 +148,26 @@ export const scriptRuns = (command: string): ScriptRun[] => {
   let dir = ''
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!
-    if (/\s/.test(token) && token.includes('boomi-')) {
+    if (/\s/.test(token) && /(boomi|datahub|bdi|agentstudio|connectordev)-[a-z-]+\.sh/.test(token)) {
       runs.push(...scriptRuns(dir ? `cd ${dir} && ${token}` : token))
       continue
     }
     const following = tokens[i + 1]
     if ((token === 'cd' || token === 'pushd') && isRun(tokens, i) && following && !SEPARATOR.test(following)) {
       dir = joinPath(dir, following)
+      continue
+    }
+    const name = token.split('/').pop() ?? ''
+    if (isProductScript(name)) {
+      if (!isRun(tokens, i)) continue
+      const args: string[] = []
+      for (const arg of tokens.slice(i + 1)) {
+        if (SEPARATOR.test(arg)) break
+        args.push(arg)
+      }
+      // Another plugin's script: a step only when it changes something.
+      const found = productRun(name, args)
+      if (found) runs.push({ kind: 'other', ...found })
       continue
     }
     const found = kindOf(token)
@@ -245,8 +263,12 @@ export const readOutput = (kind: ActivityKind, output: string, isError: boolean)
     detail: shorten(error ?? success ?? already ?? unchanged ?? (isError ? 'failed' : 'finished')),
   }
 
-  const name = output.match(/[Cc]omponent '([^']+)'|Deployed '([^']+)'/)
-  if (name) reading.name = name[1] ?? name[2]
+  // A script that warns but doesn't fail: the warning is what to read.
+  const warning = !success && reading.outcome === 'ok' ? firstLine(output, /^\s*WARNING:/) : undefined
+  if (warning) reading.detail = shorten(warning)
+
+  const name = output.match(/[Cc]omponent '([^']+)'|Deployed '([^']+)'|Installed '([^']+)'/)
+  if (name) reading.name = name[1] ?? name[2] ?? name[3]
   const id = output.match(/(?:with ID|componentId):?\s*([0-9a-f]{8}-[0-9a-f-]{27,})/i)
   if (id) reading.componentId = id[1]
   const version = output.match(/now version (\d+)/)
@@ -447,7 +469,10 @@ export const worst = (levels: readonly Level[]): Level =>
 const LEVEL_OF: Record<Outcome, Level> = { ok: 'healthy', running: 'warning', failed: 'critical', blocked: 'serious' }
 
 export const levelOf = (a: Activity): Level =>
-  a.outcome === 'ok' && (isWarnStatus(a.executionStatus) || isSubmittedOnly(a)) ? 'warning' : LEVEL_OF[a.outcome]
+  a.outcome === 'ok' && (isWarnStatus(a.executionStatus) || isSubmittedOnly(a) || isProductWarning(a)) ? 'warning' : LEVEL_OF[a.outcome]
+
+/** Another plugin's step that finished with a WARNING line, such as a descriptor accepted with warnings. */
+const isProductWarning = (a: Activity) => a.product !== undefined && /^WARNING:/.test(a.detail)
 
 /** A test that was submitted and not waited for (--no-wait): no result yet. */
 const isSubmittedOnly = (a: Activity) => a.kind === 'test' && a.outcome === 'ok' && !a.executionStatus
@@ -482,6 +507,13 @@ const SCRIPT_WORDS: Record<string, string> = {
 
 /** One activity as a sentence: "Saved Orders Sync to Boomi (v4)". */
 export const describe = (a: Activity): string => {
+  if (a.product && a.script && a.verb !== undefined) {
+    const run = { product: a.product, script: a.script, verb: a.verb, subject: a.subject }
+    if (a.outcome === 'running') return productWords(run, 'doing')
+    if (a.outcome === 'failed') return productWords(run, 'failed')
+    if (a.outcome === 'blocked') return `Blocked: ${productWords(run, 'doing').replace(/…$/, '')}`
+    return productWords(run, 'did')
+  }
   if (a.outcome === 'running') {
     const doing: Record<ActivityKind, string> = {
       edit: 'Editing',
@@ -692,6 +724,10 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
       })
     }
   }
+  for (const a of productIssues(dashboard.activity)) {
+    if (closedSteps.has(a.id)) continue
+    items.push({ key: `step:${a.id}`, level: levelOf(a), title: describe(a), hint: a.detail, at: when(a) })
+  }
   const seenRuns = new Set(dashboard.seenRuns ?? [])
   const testRuns = new Set(dashboard.activity.filter(a => a.kind === 'test' && a.executionId).map(a => a.executionId!))
   const rows = components(dashboard.activity)
@@ -887,7 +923,7 @@ export const formatCost = (usd: number | undefined): string | undefined =>
 
 /** The newest finished activity worth a headline: edits and reads don't make news. */
 export const headline = (activity: readonly Activity[]): Activity | undefined =>
-  [...activity].reverse().find(a => a.kind !== 'other' && a.kind !== 'edit') ?? activity[activity.length - 1]
+  [...activity].reverse().find(a => (a.kind !== 'other' || a.product) && a.kind !== 'edit') ?? activity[activity.length - 1]
 
 /**
  * The status line: the latest thing Companion did, then what needs attention,
@@ -988,6 +1024,9 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
     const spent = formatSpend(spendOf(row.ids, all))
     lines.push(`  ${row.name}${type ? ` (${type})` : ''}: ${stages(row, runs).map(s => `${STATUS[s.level].icon} ${s.text}`).join('  ')}${spent ? `  [${spent}]` : ''}`)
   }
+
+  const byProduct = productSpendLine(dashboard.activity, all)
+  if (byProduct) lines.push(`  ${byProduct}`)
 
   const feed = dashboard.activity.slice(-8).reverse()
   if (feed.length > 0) {
@@ -1134,8 +1173,33 @@ export const FLAMINGO_WALK: readonly (readonly string[])[] = [
   [...HEAD, ...WING_UP, ...STRIDE],
 ]
 
-/** The flamingo's pixels for a frame: walking while working, else standing. */
-export const flamingo = (isWorking: boolean, frame: number): readonly string[] =>
+/**
+ * Bent over to drink, as flamingos do now and then while idle: the neck arcs
+ * up from the breast and down in front, the head upside down at the water,
+ * its black beak tip in it.
+ */
+export const FLAMINGO_DRINK: readonly string[] = [
+  '............',
+  '............',
+  '............',
+  '............',
+  '............',
+  '............',
+  '.........PP.',
+  '........P..P',
+  '....PPPPPP.P',
+  '...PPLLLLPPP',
+  '...PPPLLLPPP',
+  '.....PPPP..P',
+  '......P....P',
+  '......P...PP',
+  '......P..PKP',
+  '.....PP..LK.',
+]
+
+/** The flamingo's pixels for a frame: walking while working, drinking now and then while idle, else standing. */
+export const flamingo = (isWorking: boolean, frame: number, isDrinking = false): readonly string[] =>
+  !isWorking && isDrinking ? FLAMINGO_DRINK :
   isWorking ? FLAMINGO_WALK[frame % FLAMINGO_WALK.length]! : FLAMINGO_IDLE
 
 /** How many animation frames it takes the flamingo to move one column: it steps in place between moves. */
@@ -1148,17 +1212,34 @@ export const FLAMINGO_TRAVEL = 6
 export const FLAMINGO_WIDTH = 12
 export const STRIP_WIDTH = FLAMINGO_WIDTH + FLAMINGO_TRAVEL
 
-/** One period of the water under the flamingo, as two pixel rows: crests above, troughs below. */
-const WAVE = ['.WW.', 'W..W']
+/** The water under the flamingo's feet: one short pixel row with gaps, as the sprite faces right. */
+const POND = '...WWW.WWWW.'
 
 /**
- * The water the flamingo stands in, as the site draws it under its bird: two
- * pixel rows of `W` across the strip, rippling one pixel a frame while Claude
- * works and still while idle.
+ * Drops thrown up above the water, as the sprite faces right: around the beak
+ * while it drinks (two frames, so they bob), and beside the feet as a walking
+ * step lands (the wide-stride frames).
  */
-export const waveRows = (isWorking: boolean, frame: number, width = STRIP_WIDTH): string[] => {
-  const shift = isWorking ? ((frame % WAVE[0]!.length) + WAVE[0]!.length) % WAVE[0]!.length : 0
-  return WAVE.map(period => Array.from({ length: width }, (_, x) => period[(x + shift) % period.length]).join(''))
+const DRINK_SPLASH = ['........W..W', '.......W..W.']
+const STEP_SPLASH = '..W......W..'
+
+/**
+ * The water the flamingo stands in, as two pixel rows across its strip: drops
+ * above, the water below, both under the bird wherever it is and mirrored
+ * with it. Still while it stands; splashing as it drinks or a step lands.
+ */
+export const pondRows = (
+  view: { offset: number; facing: 'right' | 'left' },
+  how: { isWorking: boolean; frame: number; isDrinking?: boolean },
+  width = STRIP_WIDTH,
+): string[] => {
+  const landing = how.isWorking && (((how.frame % 4) + 4) % 4 === 0 || ((how.frame % 4) + 4) % 4 === 3)
+  const splash = !how.isWorking && how.isDrinking ? DRINK_SPLASH[((how.frame % 2) + 2) % 2]! : landing ? STEP_SPLASH : '.'.repeat(FLAMINGO_WIDTH)
+  const place = (row: string) => {
+    const sprite = view.facing === 'right' ? row : [...row].reverse().join('')
+    return ('.'.repeat(view.offset) + sprite).padEnd(width, '.').slice(0, width)
+  }
+  return [place(splash), place(POND)]
 }
 
 /** The sprite facing the other way: each pixel row reversed. The sprite faces right. */
@@ -1179,9 +1260,9 @@ export const pace = (frame: number, travel = FLAMINGO_TRAVEL): { offset: number;
  * columns in from the strip's left edge. Standing still while idle, it keeps
  * the spot and the way it faced when Claude stopped.
  */
-export const flamingoView = (isWorking: boolean, frame: number, travel = FLAMINGO_TRAVEL) => {
+export const flamingoView = (isWorking: boolean, frame: number, travel = FLAMINGO_TRAVEL, isDrinking = false) => {
   const { offset, facing } = pace(Math.floor(frame / FRAMES_PER_STEP), travel)
-  const pixels = flamingo(isWorking, frame)
+  const pixels = flamingo(isWorking, frame, isDrinking)
   return { pixels: facing === 'right' ? [...pixels] : mirror(pixels), offset, facing }
 }
 
@@ -1308,6 +1389,12 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
   if (shipped.length === 0) lines.push('None this session.')
   for (const a of shipped) lines.push(`- ${STATUS[levelOf(a)].icon} ${describe(a)}${a.executionId ? ` (execution ${a.executionId})` : ''}`)
 
+  const others = dashboard.activity.filter(a => a.product && a.outcome !== 'running')
+  if (others.length > 0) {
+    lines.push('', "## Companion's other plugins", '')
+    for (const a of others) lines.push(`- ${STATUS[levelOf(a)].icon} ${describe(a)}`)
+  }
+
   lines.push('', '## Needs attention', '')
   if (needs.length === 0) lines.push('Nothing open.')
   for (const n of needs) lines.push(`- ${STATUS[n.level].icon} ${n.title}`)
@@ -1315,6 +1402,8 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
 
   lines.push('', '## Spend', '')
   if (u.usd !== undefined) lines.push(`- Cost: ${formatCost(u.usd)}`)
+  const byProduct = productSpendLine(dashboard.activity, all)
+  if (byProduct) lines.push(`- ${byProduct}`)
   if (u.split) lines.push(`- Tokens: ${u.split}`)
   for (const line of u.modelSplits ?? []) lines.push(`  - ${line}`)
   return lines.join('\n')
@@ -1346,17 +1435,19 @@ export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession
   const found: PastSession[] = []
   for (const s of scan.sessions ?? []) {
     const runs: Partial<Record<ActivityKind, number>> = {}
+    const products: Partial<Record<Product, number>> = {}
     const files = new Set<string>()
     const ids = new Set<string>()
     for (const command of s.commands ?? []) {
       for (const run of scriptRuns(command)) {
+        if (run.product) products[run.product] = (products[run.product] ?? 0) + 1
         if (run.kind === 'other') continue
         runs[run.kind] = (runs[run.kind] ?? 0) + 1
         if (run.file) files.add(fileName(run.file))
         else if (run.processId ?? run.componentId) ids.add((run.processId ?? run.componentId)!)
       }
     }
-    if (Object.keys(runs).length === 0) continue
+    if (Object.keys(runs).length === 0 && Object.keys(products).length === 0) continue
     const models = Object.entries(s.models ?? {})
     const sum = (pick: (m: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }) => number) =>
       models.reduce((n, [, m]) => n + pick(m), 0)
@@ -1370,6 +1461,7 @@ export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession
       cached: sum(m => m.cacheRead ?? 0),
       models: models.map(([id]) => modelName(id) ?? id),
       runs,
+      ...(Object.keys(products).length > 0 ? { products } : {}),
       // A file names a component; an ID only when the session named no file.
       components: files.size > 0 ? [...files] : [...ids].map(id => (id.length > 12 ? `${id.slice(0, 8)}…` : id)),
       label: s.title || s.firstPrompt || undefined,
@@ -1443,7 +1535,7 @@ export const pastParts = (s: PastSession, view: PastView = {}): { head: string; 
     .filter(Boolean)
     .join(' · ')
   const names = s.components.length > 3 ? `${s.components.slice(0, 3).join(', ')} +${s.components.length - 3}` : s.components.join(', ')
-  const detail = [runWords(s.runs), names || undefined, `${formatTokens(s.tokens)} tokens`, view.withProject ? folderOf(s.project) : undefined]
+  const detail = [runWords(s.runs) || undefined, productCountWords(s.products) || undefined, names || undefined, `${formatTokens(s.tokens)} tokens`, view.withProject ? folderOf(s.project) : undefined]
     .filter(Boolean)
     .join(' · ')
   return { head, detail }
@@ -1752,3 +1844,46 @@ export const resumeLabel = (s: PastSession, n: number, view: PastView = {}): str
   const label = `${n}. ${pastParts(s, view).head}`
   return label.length > 48 ? `${label.slice(0, 47)}…` : label
 }
+
+// --- Companion's other plugins -------------------------------------------------------
+
+/**
+ * Other plugins' steps that failed or warned and haven't been done since:
+ * the latest of each action (the same script, verb and subject) is what counts,
+ * so a later success clears an earlier failure, as it does for components.
+ */
+export const productIssues = (activity: readonly Activity[]): Activity[] => {
+  const latest = new Map<string, Activity>()
+  for (const a of activity) {
+    if (!a.product || a.outcome === 'running') continue
+    latest.set(`${a.product}|${a.script}|${a.verb}|${a.subject}`, a)
+  }
+  return [...latest.values()].filter(a => a.outcome === 'failed' || a.outcome === 'blocked' || isProductWarning(a))
+}
+
+/** Each product's share of the session: bc-integration's steps, then each other plugin's, by what they took. */
+export const productSpends = (
+  activity: readonly Activity[],
+  all: Map<number, Spend>,
+): ({ name: string } & Spend)[] => {
+  const groups = new Map<string, number[]>()
+  for (const a of activity) {
+    const name = a.product ? PRODUCT_NAMES[a.product] : 'Integration'
+    groups.set(name, [...(groups.get(name) ?? []), a.id])
+  }
+  return [...groups].map(([name, ids]) => ({ name, ...spendOf(ids, all) }))
+}
+
+/** The products' shares in one line, when the session used more than one: "By product: Integration $1.20 · Data Hub $0.40". */
+export const productSpendLine = (activity: readonly Activity[], all: Map<number, Spend>): string | undefined => {
+  const shares = productSpends(activity, all)
+  if (shares.length < 2) return undefined
+  return `By product: ${shares.map(s => `${s.name} ${formatSpend(s) ?? 'no spend yet'}`).join(' · ')}`
+}
+
+/** A past session's steps with other plugins, in words: "2 Data Hub steps · 1 BDI step". */
+export const productCountWords = (products: PastSession['products']): string =>
+  Object.entries(products ?? {})
+    .filter(([, n]) => n)
+    .map(([product, n]) => `${n} ${PRODUCT_NAMES[product as Product]} step${n === 1 ? '' : 's'}`)
+    .join(' · ')

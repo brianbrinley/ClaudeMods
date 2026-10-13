@@ -93,6 +93,14 @@ is($titled->{title}, 'Orders sync build', "keeps the session's own title");
 my $later = `perl $script --root $root --since 99999999999999`;
 is(scalar @{ $json->decode($later)->{sessions} }, 0, '--since skips older transcripts');
 
+# A session that used only another Companion plugin counts too.
+my $datahub = 'dddddddd-0000-0000-0000-000000000001';
+write_lines("$root/-work-mdm/$datahub.jsonl",
+  reply(session => $datahub, at => '2026-10-02T10:00:00Z', id => 'msg_d', request => 'req_d',
+    content => [$bash->('bash scripts/datahub-deployment.sh deploy u-1 r-1 --version 2')]));
+my @all = @{ $json->decode(`perl $script --root $root`)->{sessions} };
+ok((grep { $_->{id} eq $datahub } @all), "counts a session that ran only a Data Hub script");
+
 my $none = $json->decode(`perl $script --root $root/missing`);
 is($none->{error}, 'no transcripts folder', 'a missing folder is an empty answer, not a failure');
 
