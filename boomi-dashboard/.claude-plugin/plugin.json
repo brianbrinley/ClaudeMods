@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -115,6 +115,18 @@
       "title": "Past sessions window (days)",
       "description": "How far back Past Companion sessions reads Claude Code's transcripts on this machine",
       "default": 90
+    },
+    "updateCheck": {
+      "type": "boolean",
+      "title": "Check for updates",
+      "description": "Once per interval, at the start of a session, fetch the dashboard's GitHub checkout and say when a newer version is there (run /bc-dashboard upgrade to install it). It never installs, and says nothing when offline",
+      "default": true
+    },
+    "updateCheckHours": {
+      "type": "number",
+      "title": "Update check interval (hours)",
+      "description": "How long between update checks; 0 turns them off",
+      "default": 24
     }
   }
 }

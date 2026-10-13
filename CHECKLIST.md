@@ -147,3 +147,18 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** the prompt box holds the request with the transcript's path; Claude reads the transcript in parts and suggests concrete changes. **Fail:** no path, or Claude can't open the file.
 - [ ] **I3. Compactions and prompts.** Review a session you know compacted.
   **Pass:** `It compacted N times`, and a prompt count close to how many messages you sent. **Fail:** no compaction found; the transcript's marker may have changed.
+
+## J. Upgrade command
+
+*boomi-dashboard 0.22.0, installed as the README says (a checkout in `CLAUDE_CODE_PLUGIN_DIRS`). Start with the checkout one release behind, for example `git -C ~/ClaudeMods switch --detach HEAD~1`, then restart.*
+
+- [ ] **J1. Dry run.** Run `/bc-dashboard upgrade --check`.
+  **Pass:** the version change, the commit list, the changed files and the changelog entries; `git -C ~/ClaudeMods status` shows nothing changed. **Fail:** an error, or the checkout moved.
+- [ ] **J2. Upgrade.** Run `/bc-dashboard upgrade` and choose **Install**.
+  **Pass:** after about a minute, `✓ Installed X (was Y). Validate and test passed …` and the restart line; after a restart, the pane footer or `/bc-dashboard text` reads the new version. **Fail:** a stop or error; send the text.
+- [ ] **J3. Refuses a dirty checkout.** Edit any file in `~/ClaudeMods`, then run `/bc-dashboard upgrade`.
+  **Pass:** `✗ The checkout has uncommitted changes`, before any question, and your edit is still there. **Fail:** it asks, or touches the file. Undo the edit afterwards.
+- [ ] **J4. Rollback.** After J2, run `/bc-dashboard upgrade --rollback`, then restart.
+  **Pass:** `✓ Rolled back to Y`, and the old version loads. Running `/bc-dashboard upgrade` again returns to the new one. **Fail:** an error, or the version doesn't change.
+- [ ] **J5. Nudge.** With the checkout behind again, set `updateCheckHours` to `1` and start a new session; wait 20 seconds.
+  **Pass:** one toast, `bc-dashboard X is available …`, and none in a second session within the hour. With the network off, nothing at all. **Fail:** no toast, one every session, or an error.

@@ -104,6 +104,8 @@ import {
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
+import { RESTART, checkText, compareVersions, isCheckDue, parseUpgrade, planText } from './upgrade'
+import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import type { Credentials } from './platform'
 
@@ -202,6 +204,8 @@ type Settings = {
   companionMonthlyUsd: number
   paneRows: number
   paneColumns: number
+  isCheckingUpdates: boolean
+  updateCheckHours: number
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -222,6 +226,8 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   companionMonthlyUsd: Math.max(0, Number(options.companionMonthlyUsd ?? 0) || 0),
   paneRows: Math.max(0, Math.round(Number(options.paneRows ?? 0) || 0)),
   paneColumns: Math.max(0, Math.round(Number(options.paneColumns ?? 0) || 0)),
+  isCheckingUpdates: options.updateCheck !== false,
+  updateCheckHours: Math.max(0, Number(options.updateCheckHours ?? 24) || 0),
 })
 
 const PANE = 'boomi-dashboard'
@@ -229,6 +235,7 @@ const WATCH_KEY = 'watched'
 const SCRIPTS_KEY = 'scriptsDir'
 const THEME_KEY = 'theme'
 const HISTORY_KEY = 'history'
+const UPGRADE_KEY = 'upgradeCheckedAt'
 
 /** How often the flamingo's frame moves on while Claude works. */
 const FLAMINGO_TICK_MS = 500
@@ -1408,6 +1415,7 @@ const USAGE = [
   '/bc-dashboard seen            mark watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
+  '/bc-dashboard upgrade         update the dashboard from its GitHub checkout: --check only looks, --yes skips the question, --rollback goes back',
 ].join('\n')
 
 /**
@@ -1491,11 +1499,85 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return resize($, settings, target)
     case 'theme':
       return theme($, settings, target)
+    case 'upgrade':
+      return upgradeCommand($, target)
     case 'banner':
       await update($, isBandHidden, () => false)
       return 'The dashboard banner is back above the prompt.'
     default:
       return USAGE
+  }
+}
+
+// --- Upgrading the dashboard ----------------------------------------------------
+
+/**
+ * Runs scripts/upgrade.sh on the checkout the dashboard loads from, and reads
+ * its report. Git never prompts; anything credential-shaped is masked.
+ */
+const runUpgrade = async ($: Engine, args: string[], timeoutMs: number): Promise<UpgradeReport> => {
+  const ran = await $.process.run(['bash', `${$.plugin.root}/scripts/upgrade.sh`, args[0]!, $.plugin.root, ...args.slice(1)], {
+    timeoutMs,
+    env: { GIT_TERMINAL_PROMPT: '0' },
+  })
+  return parseUpgrade(`${ran.stdout}\n${ran.stderr}`)
+}
+
+/**
+ * /bc-dashboard upgrade [--check] [--yes] [--rollback]: the check, then (after
+ * a yes, or --yes) the script's install, which refuses rather than lose or
+ * move anything of the person's and tests the new code before it goes live.
+ */
+const upgradeCommand = async ($: Engine, target: string): Promise<string> => {
+  const flags = target.split(/\s+/).filter(Boolean)
+  const unknown = flags.filter(f => !['--check', '--yes', '--rollback'].includes(f))
+  if (unknown.length > 0) return `Unknown option ${unknown.join(' ')}. Usage: /bc-dashboard upgrade [--check] [--yes], or /bc-dashboard upgrade --rollback`
+  if (flags.includes('--rollback')) {
+    const back = await runUpgrade($, ['rollback'], 120_000)
+    if (back.error) return `✗ ${back.error}`
+    return [`✓ Rolled back to ${back.installedNow}: ${back.rolledBack}`, RESTART].join('\n')
+  }
+  const check = await runUpgrade($, ['check'], 120_000)
+  await $.store.set(UPGRADE_KEY, await $.clock.now()).catch(() => undefined)
+  const text = checkText(check)
+  if (check.error || check.behind === 0 || flags.includes('--check')) return text
+  const stop = planText(check)
+  if (stop) return `${text}\n\n${stop}`
+  if (!flags.includes('--yes')) {
+    const answer = await $.ui
+      .ask(`Install ${check.latest} over ${check.installed}? ${check.commits.length} commits, ${check.files.length} files, for ${check.mods.join(', ')}. Its validate and test run on the new code first.`, {
+        header: 'Upgrade',
+        options: ['Install', 'Cancel'],
+      })
+      .catch(() => undefined)
+    if (answer !== 'Install') return `${text}\n\nNot installed. Run /bc-dashboard upgrade again to install, or with --yes to skip the question.`
+  }
+  const done = await runUpgrade($, ['install', check.target!], 600_000)
+  if (done.isUpToDate) return `✓ Already up to date: ${check.latest}.`
+  if (done.testsFailed) {
+    return [text, '', `✗ The new version's ${done.testsFailed} failed, so it wasn't installed. You're still on ${check.installed}.`, ...done.lines.slice(-40)].join('\n')
+  }
+  if (done.error) return `${text}\n\n✗ ${done.error}`
+  return [
+    text,
+    '',
+    `✓ Installed ${done.installedNow} (was ${check.installed}). Validate and test passed on the new code for ${check.mods.join(', ')}.`,
+    `/bc-dashboard upgrade --rollback goes back to ${check.installed}.`,
+    RESTART,
+  ].join('\n')
+}
+
+/** The once-a-day nudge: fetch and compare, never install, and say nothing when it can't tell. */
+const nudgeUpgrade = async ($: Engine, settings: Settings) => {
+  if (!settings.isCheckingUpdates) return
+  const now = await $.clock.now()
+  const last = (await $.store.get(UPGRADE_KEY).catch(() => undefined)) as number | undefined
+  if (!isCheckDue(typeof last === 'number' ? last : undefined, now, settings.updateCheckHours)) return
+  const check = await runUpgrade($, ['check'], 60_000).catch(() => undefined)
+  if (!check || check.error || !check.latest || !check.installed) return
+  await $.store.set(UPGRADE_KEY, now).catch(() => undefined)
+  if (compareVersions(check.latest, check.installed) > 0) {
+    await $.ui.toast(`bc-dashboard ${check.latest} is available (you have ${check.installed}): run /bc-dashboard upgrade`).catch(() => undefined)
   }
 }
 
@@ -1579,7 +1661,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
+      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | upgrade [--check] [--yes] [--rollback]',
     })
     await $.tool.register({
       name: 'summary',
@@ -1656,6 +1738,8 @@ export const register: Register = (on, options) => {
     })
     await readActivityLog($, settings)
     $.clock.every(LOG_CHECK_MS, () => readActivityLog($, settings))
+    // Whether a newer dashboard is on GitHub, at most once a day; it never installs.
+    $.clock.after(15_000, () => nudgeUpgrade($, settings).catch(() => undefined))
     // A monthly Companion amount counts earlier sessions' costs: read them once, soon after the start.
     if (settings.companionMonthlyUsd > 0) {
       $.clock.after(5_000, async () => {
