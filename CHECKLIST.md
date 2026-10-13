@@ -45,6 +45,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** a green run. **Fail:** no run, or a red one.
 - [x] **D2.** *(Passed: both sections are live.)* On [the site](https://brianbrinley.github.io/ClaudeMods/), the Companion Dashboard page has a **Commands and tools** section, and the Boomi Runtime page has **Secure the API token**.
   **Pass:** both. **Fail:** the old pages.
+- [ ] **D3.** After the flamingo PR is merged, open [the Companion Dashboard page](https://brianbrinley.github.io/ClaudeMods/boomi-dashboard/) on a laptop-sized window, in Day and in Night.
+  **Pass:** the 8-bit flamingo stands to the right of the opening paragraph and its list, and every few seconds flaps and steps in place; in a narrow window it's gone. **Fail:** no flamingo, one overlapping the text, or a gap where it should be.
 
 ## E. Runtime regression
 

@@ -5,6 +5,8 @@
 
 # Boomi Companion Dashboard Mod
 
+<div data-flamingo></div>
+
 **See your whole Boomi build at a glance, right beside the conversation.** While Claude builds with [Boomi Companion](https://github.com/OfficialBoomi/bc-integration), the dashboard follows every edit, save, deploy and test. It tells you what broke and what to do next, and keeps a running total of what the session costs. You don't leave Claude Code, and you don't scroll back through the transcript.
 
 - **Know where every component stands.** Edited, saved with its version, deployed, tested: each component's stage updates as Claude works.

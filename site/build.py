@@ -132,6 +132,56 @@ def status_html(status):
     return f'<div class="status-row">{"".join(items)}</div>'
 
 
+# The dashboard pane's 8-bit flamingo, read from the mod itself so the site's bird is always the pane's.
+FLAMINGO_SOURCE = "boomi-dashboard/hooks/activity.ts"
+# Pixel letters as CSS classes: P the bird, L its pastel wing, K its eye.
+FLAMINGO_CLASSES = {"P": "fl-p", "L": "fl-l", "K": "fl-k"}
+# One cycle: standing on one leg, then a few flapping steps in place, as the pane does while Claude works.
+FLAMINGO_CYCLE_S = 9.0
+FLAMINGO_WALK_S = 0.35
+
+
+def flamingo_frames():
+    """The idle frame and the walk frames, as pixel rows, from the dashboard's source."""
+    src = open(os.path.join(ROOT, FLAMINGO_SOURCE), encoding="utf-8").read()
+    parts = {}
+    for name in ("HEAD", "WING_DOWN", "WING_UP", "ONE_LEG", "STRIDE", "STEP"):
+        m = re.search(r"^const " + name + r" = \[(.*?)\]", src, re.S | re.M)
+        parts[name] = re.findall(r"'([.PLK]+)'", m.group(1))
+    idle = parts["HEAD"] + parts["WING_DOWN"] + parts["ONE_LEG"]
+    walk = [parts["HEAD"] + parts[w] + parts[l] for w, l in
+            (("WING_DOWN", "STRIDE"), ("WING_UP", "STEP"), ("WING_DOWN", "STEP"), ("WING_UP", "STRIDE"))]
+    return idle, walk
+
+
+def flamingo_html():
+    """An inline SVG of the flamingo: it stands on one leg, then now and then flaps and steps in place."""
+    idle, walk = flamingo_frames()
+    frames = [idle] + walk + [idle]
+    width, height = max(len(r) for r in idle), len(idle)
+    groups = []
+    for i, rows in enumerate(frames):
+        rects = "".join(f'<rect class="{FLAMINGO_CLASSES[c]}" x="{x}" y="{y}" width="1" height="1"/>'
+                        for y, row in enumerate(rows) for x, c in enumerate(row) if c in FLAMINGO_CLASSES)
+        groups.append(f'<g class="fl-frame fl-f{i}">{rects}</g>')
+    # Frame 0 (standing) shows except during the walk; each walk frame shows for its slot.
+    walk_start = 100 * (1 - (len(walk) + 1) * FLAMINGO_WALK_S / FLAMINGO_CYCLE_S)
+    slot = 100 * FLAMINGO_WALK_S / FLAMINGO_CYCLE_S
+    keyframes = [f"@keyframes fl-f0 {{ 0%, {walk_start:.2f}% {{ opacity: 1 }} {walk_start + 0.01:.2f}%, 100% {{ opacity: 0 }} }}"]
+    for i in range(1, len(frames)):
+        a = walk_start + (i - 1) * slot
+        b = a + slot
+        keyframes.append(f"@keyframes fl-f{i} {{ 0%, {a:.2f}% {{ opacity: 0 }} {a + 0.01:.2f}%, {b:.2f}% {{ opacity: 1 }} "
+                         f"{b + 0.01:.2f}%, 100% {{ opacity: 0 }} }}")
+    style = ("<style>" + " ".join(keyframes) + " "
+             + " ".join(f".fl-f{i} {{ animation: fl-f{i} {FLAMINGO_CYCLE_S}s steps(1) infinite; }}" for i in range(len(frames)))
+             + " @media (prefers-reduced-motion: reduce) { .fl-frame { animation: none; opacity: 0; } .fl-f0 { opacity: 1; } }"
+             + "</style>")
+    return (f'<div class="flamingo" aria-hidden="true"><svg viewBox="0 -1 {width} {height + 3}" '
+            f'shape-rendering="crispEdges">{style}{"".join(groups)}'
+            f'<path class="fl-water" d="M0 {height + 1} q1.5 -1 3 0 t3 0 t3 0 t3 0" fill="none" stroke-width="0.4"/></svg></div>')
+
+
 def first_text(pattern, text, default):
     m = re.search(pattern, text, re.M)
     return re.sub(r"[*_`\[\]]|\(.*?\)", "", m.group(1)).strip() if m else default
@@ -189,6 +239,8 @@ def main():
         body = re.sub(r'<div data-swatches="(\w+)"></div>',
                       lambda m: swatches_html(m.group(1), tokens["themes"][m.group(1)]), body)
         body = body.replace("<div data-status></div>", status_html(tokens["status"]))
+        if "<div data-flamingo></div>" in body:
+            body = body.replace("<div data-flamingo></div>", flamingo_html())
         if downloads.get(out_dir):
             buttons = []
             for path in downloads[out_dir]:

@@ -33,6 +33,16 @@ body { line-height: 1.6; font-size: 16px; }
 .content > p:not(:has(img)), .content > ul, .content > ol, .content > blockquote { max-width: 60ch; }
 .content > picture:first-child img, .content > p:first-child picture img { border-radius: 16px; }
 
+/* The dashboard page's 8-bit flamingo, beside the opening prose where the 60ch measure leaves room. */
+.flamingo { float: right; width: 200px; margin: 8px 24px 16px 32px; }
+.flamingo svg { display: block; width: 100%; height: auto; }
+.flamingo .fl-p { fill: var(--valence-primary); }
+.flamingo .fl-l { fill: #F7A8C4; }
+.flamingo .fl-k { fill: #0B0B0B; }
+.flamingo .fl-water { stroke: var(--valence-secondary-fill); }
+.content h2 { clear: both; }
+@media (max-width: 860px) { .flamingo { display: none; } }
+
 h1, h2, h3, h4 { line-height: 1.25; color: var(--valence-text); }
 h1 { font-size: 40px; font-weight: 700; margin: 32px 0 12px; }
 h2 { font-size: 28px; font-weight: 600; margin: 48px 0 12px; padding-top: 16px; border-top: 1px solid var(--valence-line); }
