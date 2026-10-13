@@ -85,6 +85,7 @@ import {
   pruneDays,
   limitViews,
   limitsShort,
+  earlierLabel,
   productSpendLine,
   resumable,
   resumeCommand,
@@ -375,12 +376,17 @@ const activityKey = async ($: Engine) => `activity:${await $.session.cwd()}`
 const saveActivity = async ($: Engine, settings: Settings) => {
   try {
     const current = await read($, dashboard)
-    const list = current.activity.filter(a => a.outcome !== 'running')
+    // Older steps not shown are kept too: the window is what shows, not what's saved.
+    const shown = current.activity.filter(a => a.outcome !== 'running')
+    const ids = new Set(shown.map(a => a.id))
+    const list = [...(current.earlier ?? []).filter(a => !ids.has(a.id)), ...shown]
+      .map(({ isRestored, isEarlier, ...a }) => a)
+      .sort((a, b) => a.startedAt - b.startedAt)
     const { closedSteps, seenRuns } = current
     const now = await $.clock.now()
     // The recap is this session's once it has worked with Companion; until then the last one's stands.
     const last = recapOf(current, now, settings.windowMs, (await usageOf($)).usd) ?? (await read($, recap)) ?? undefined
-    await $.store.set(await activityKey($), { savedAt: now, activity: list.slice(-100), closedSteps, seenRuns, recap: last })
+    await $.store.set(await activityKey($), { savedAt: now, activity: list.slice(-KEPT_STEPS), closedSteps, seenRuns, recap: last })
   } catch {}
 }
 
@@ -396,19 +402,27 @@ const restoreActivity = async ($: Engine, settings: Settings) => {
       | undefined
     if (saved?.recap) await update($, recap, () => saved.recap!)
     const now = await $.clock.now()
-    const kept = (saved?.activity ?? [])
-      .filter(a => now - (a.endedAt ?? a.startedAt) <= settings.windowMs)
-      .map(a => ({ ...a, isRestored: true }))
-    if (kept.length === 0) return
+    const all = saved?.activity ?? []
+    idFloor = all.reduce((max, a) => Math.max(max, a.id), 0)
+    const isRecent = (a: Activity) => now - (a.endedAt ?? a.startedAt) <= settings.windowMs
+    const kept = all.filter(isRecent).map(a => ({ ...a, isRestored: true }))
+    const earlier = all.filter(a => !isRecent(a)).map(a => ({ ...a, isRestored: true, isEarlier: true }))
+    if (all.length === 0) return
     await update($, dashboard, c =>
       c.activity.length > 0
         ? c
-        : { ...c, activity: kept, restored: kept.length, closedSteps: saved?.closedSteps, seenRuns: saved?.seenRuns },
+        : { ...c, activity: kept, restored: kept.length, earlier, closedSteps: saved?.closedSteps, seenRuns: saved?.seenRuns },
     )
   } catch {}
 }
 
-const nextId = (list: readonly Activity[]) => list.reduce((max, a) => Math.max(max, a.id), 0) + 1
+/** The highest step ID this folder has kept, shown or not, so new steps never reuse one. */
+let idFloor = 0
+
+const nextId = (list: readonly Activity[]) => list.reduce((max, a) => Math.max(max, a.id), idFloor) + 1
+
+/** How many steps a folder keeps across sessions, whatever their age. */
+const KEPT_STEPS = 200
 
 /** A component file's name, ID and type, when the file can be read. */
 const readComponent = async ($: Engine, path: string) => {
@@ -1062,6 +1076,19 @@ const reopen = async ($: Engine, settings: Settings): Promise<string> => {
   return 'Closed items are back under Needs attention, where they still apply.'
 }
 
+/** Shows this folder's steps from before the window too, marked as earlier: Show earlier, or /bc-dashboard earlier. */
+const showEarlier = async ($: Engine): Promise<string> => {
+  const earlier = (await read($, dashboard)).earlier ?? []
+  if (earlier.length === 0) return 'No older steps in this folder: everything it kept is showing.'
+  await update($, dashboard, c => ({
+    ...c,
+    activity: [...(c.earlier ?? []), ...c.activity].sort((a, b) => a.startedAt - b.startedAt),
+    restored: (c.restored ?? 0) + (c.earlier?.length ?? 0),
+    earlier: [],
+  }))
+  return `Showing ${earlier.length} older step${earlier.length === 1 ? '' : 's'} from this folder. Their failures are history: they don't go under Needs attention.`
+}
+
 /** Picks the pane's theme, now and for later sessions. */
 const pickTheme = async ($: Engine, theme: PaneTheme) => {
   await update($, pickedTheme, () => theme)
@@ -1092,6 +1119,7 @@ const USAGE = [
   '/bc-dashboard unwatch <id>    stop watching it',
   '/bc-dashboard close <n|all>   close a Needs attention item by its number, or all of them',
   '/bc-dashboard reopen          bring closed items back',
+  '/bc-dashboard earlier         show this folder\'s steps from before the last 24 hours too',
   '/bc-dashboard why [n]         read the log of a failed test or run (no number: pick one)',
   '/bc-dashboard rerun [n]       run a failed test again, the same way Claude ran it (no number: pick one)',
   '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
@@ -1175,6 +1203,8 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return resumeCommandFor($, settings, target)
     case 'reopen':
       return reopen($, settings)
+    case 'earlier':
+      return showEarlier($)
     case 'theme':
       return theme($, settings, target)
     case 'banner':
@@ -1265,7 +1295,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | why [n] | rerun [n] | history | resume [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
+      argumentHint: 'text | poll | earlier | why [n] | rerun [n] | history | resume [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
     })
     await $.tool.register({
       name: 'summary',
@@ -1701,7 +1731,12 @@ export const register: Register = (on, options) => {
 
         {heading('Components this session')}
         {rows.length === 0 && t('Components show up here as Claude edits, saves, deploys and tests them.', { color: p.muted })}
-        {current.restored ? note(`Includes ${restoredNote(current.restored, settings.windowMs)}.`) : undefined}
+        {(current.restored || current.earlier?.length) ? (
+          <Box>
+            {current.restored ? note(`Includes ${restoredNote(current.restored, settings.windowMs, current.earlier?.length === 0)}.  `) : undefined}
+            {current.earlier?.length ? <Button key="earlier" label={earlierLabel(current.earlier.length)} onPress={() => void showEarlier($)} /> : undefined}
+          </Box>
+        ) : undefined}
         {rows.slice(0, 8).map(row => {
           const spent = formatSpend(spendOf(row.ids, all))
           return (

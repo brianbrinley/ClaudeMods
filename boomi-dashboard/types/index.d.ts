@@ -52,6 +52,11 @@ export type Activity = {
   model?: string
   /** Brought back from an earlier session in the same folder. */
   isRestored?: boolean
+  /**
+   * Older than the window, shown only when asked (Show earlier): history, so
+   * its failures don't need attention now.
+   */
+  isEarlier?: boolean
   /** A test's arguments to its script, so Run again can repeat it. */
   args?: string[]
   /**
@@ -141,6 +146,8 @@ export type Dashboard = {
   watched: Watched[]
   /** How many steps came back from an earlier session in this folder. */
   restored?: number
+  /** This folder's steps from before the window: kept, and shown when asked. */
+  earlier?: Activity[]
   /** Failed runs marked as seen (expected), by execution ID: they leave Needs attention. */
   seenRuns?: string[]
   /** Failed steps closed from Needs attention, by activity ID. */

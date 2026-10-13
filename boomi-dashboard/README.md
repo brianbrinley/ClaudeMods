@@ -195,6 +195,7 @@ Boomi Companion sessions on this machine, last 90 days:
 | `/bc-dashboard why [n]` | | The `SEVERE` lines of a failed test's log; without a number, asks which. |
 | `/bc-dashboard rerun [n]` | | Runs a failed test again; without a number, asks which. |
 | `/bc-dashboard close <n\|all>` / `reopen` | | Closes items, or brings them back. |
+| `/bc-dashboard earlier` | | Shows this folder's steps from before the last 24 hours too. |
 | `/bc-dashboard seen` | | Moves watched changes out of **Needs attention**. |
 | `/bc-dashboard watch <id\|file>` / `unwatch <id>` | `watch` | Watches a component, or stops. |
 | `/bc-dashboard report [save]` | `report` | The session report. |
@@ -235,7 +236,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 
 - **The web app doesn't show banners, panes, status lines or toasts yet.** Use `/bc-dashboard` or ask Claude.
 - Companion's work is seen through its plugins' scripts, run from Bash, and their `SUCCESS:`/`ERROR:`/`WARNING:` lines and exit codes. A component sent another way (`curl`, another MCP server) doesn't show up, and a change to the scripts' output could need a change here.
-- Steps are saved per working folder; after a restart, the last 24 hours come back marked as earlier. Tokens and spend start over each session, counted from when the mod loads.
+- Steps are saved per working folder, the last 200 whatever their age. After a restart, the last 24 hours (`recentHours`) come back; **Show N earlier** under **Components this session**, or `/bc-dashboard earlier`, shows the rest, as history: their failures don't go under **Needs attention**. Tokens and spend start over each session, counted from when the mod loads.
 - Cost is the whole session's, not just Companion's share.
 - Past sessions are this machine's only (not the web's), and Claude Code deletes transcripts after 30 days unless `cleanupPeriodDays` says otherwise.
 - **Why?** and **Run again** need Companion's scripts, found where the last one ran or in Claude Code's plugin cache, and work where the CLI runs.

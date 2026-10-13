@@ -716,7 +716,7 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
   const closedSteps = new Set(dashboard.closedSteps ?? [])
   for (const row of components(dashboard.activity)) {
     for (const a of [row.saved, row.deployed, row.tested]) {
-      if (!a || (a.outcome !== 'failed' && a.outcome !== 'blocked') || closedSteps.has(a.id)) continue
+      if (!a || a.isEarlier || (a.outcome !== 'failed' && a.outcome !== 'blocked') || closedSteps.has(a.id)) continue
       const hint =
         a.outcome === 'blocked'
           ? a.detail
@@ -735,7 +735,7 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
     }
   }
   for (const a of productIssues(dashboard.activity)) {
-    if (closedSteps.has(a.id)) continue
+    if (closedSteps.has(a.id) || a.isEarlier) continue
     items.push({ key: `step:${a.id}`, level: levelOf(a), title: describe(a), hint: a.detail, at: when(a) })
   }
   const seenRuns = new Set(dashboard.seenRuns ?? [])
@@ -1037,7 +1037,8 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   const rows = components(dashboard.activity)
   const runs = sessionRuns(dashboard, now, windowMs)
   lines.push('', rows.length > 0 ? 'Components this session:' : 'Components this session: none yet. They show up as Claude edits, saves, deploys and tests them.')
-  if (dashboard.restored) lines.push(`  (${restoredNote(dashboard.restored, windowMs)})`)
+  if (dashboard.restored) lines.push(`  (${restoredNote(dashboard.restored, windowMs, dashboard.earlier?.length === 0)})`)
+  if (dashboard.earlier?.length) lines.push(`  (${dashboard.earlier.length} older step${dashboard.earlier.length === 1 ? '' : 's'}: /bc-dashboard earlier shows them)`)
   for (const row of rows) {
     const type = friendlyType(row.type)
     const spent = formatSpend(spendOf(row.ids, all))
@@ -1077,8 +1078,11 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
 }
 
 /** Says that some steps came back from an earlier session in this folder. */
-export const restoredNote = (count: number, windowMs: number): string =>
-  `${count} step${count === 1 ? '' : 's'} from an earlier session in this folder, last ${Math.round(windowMs / 3_600_000)}h`
+export const restoredNote = (count: number, windowMs: number, isAll = false): string =>
+  `${count} step${count === 1 ? '' : 's'} from earlier sessions in this folder${isAll ? '' : `, last ${Math.round(windowMs / 3_600_000)}h`}`
+
+/** How many of this folder's older steps can still be shown, in words: "Show 12 earlier". */
+export const earlierLabel = (count: number): string => `Show ${count} earlier`
 
 /** The runs in one line, for a collapsed section: "10 in 24h, 1 failed". */
 export const runsSummary = (runs: readonly Run[], hours: number): { level: Level; text: string } => {

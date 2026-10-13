@@ -431,25 +431,42 @@ test('a build in a loop and on several lines shows every component', async ($, o
   expect(status.text).toContain('✓ Nothing needs attention.')
 })
 
-test("after a restart, this folder's steps from the last 24h come back", async ($, on) => {
-  world(on)
-  mock.store(on, {
+test("after a restart, this folder's steps from the last 24h come back; older ones are kept and shown when asked", async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  const store: Record<string, unknown> = {
     'activity:/work': {
       savedAt: NOW - 3_600_000,
       activity: [
         { id: 1, kind: 'deploy', outcome: 'ok', subject: LISTENER, detail: 'deployed', startedAt: NOW - 3_600_000, endedAt: NOW - 3_600_000, componentId: LISTENER_ID },
         { id: 2, kind: 'push', outcome: 'ok', subject: 'Old', detail: 'x', startedAt: NOW - 3 * 86_400_000, endedAt: NOW - 3 * 86_400_000, file: 'active-development/x/Old.xml' },
+        { id: 3, kind: 'test', outcome: 'failed', subject: 'Old', detail: 'ERROR', startedAt: NOW - 3 * 86_400_000, endedAt: NOW - 3 * 86_400_000, file: 'active-development/x/Old.xml', executionStatus: 'ERROR' },
       ],
     },
-  })
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
-  on('command.register', async () => ({ value: undefined }) as never)
-  on('tool.register', async () => ({ value: undefined }) as never)
-  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  }
+  await startSession($, on, store)
   const status = await $.command.run(dashboard('text'))
   expect(status.text).toContain(`${LISTENER}: ✓ deployed`)
   expect(status.text).not.toContain('Old')
-  expect(status.text).toContain('1 step from an earlier session in this folder, last 24h')
+  expect(status.text).toContain('1 step from earlier sessions in this folder, last 24h')
+  expect(status.text).toContain('2 older steps: /bc-dashboard earlier shows them')
+
+  // A new step doesn't drop the older ones from what the folder keeps, or reuse their IDs.
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  await clock.advance(1)
+  const kept = (store['activity:/work'] as { activity: { id: number; subject: string }[] }).activity
+  expect(kept.map(a => a.subject)).toEqual(['Old', 'Old', LISTENER, 'Orders Sync'])
+  expect(new Set(kept.map(a => a.id)).size).toBe(4)
+
+  // In the pane: Show 2 earlier, and then they're there, their failure as history.
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect((await pane.find({ type: 'Button', key: 'earlier' }))?.props.label).toBe('Show 2 earlier')
+  await pane.press({ key: 'earlier' })
+  const after = await $.command.run(dashboard('text'))
+  expect(after.text).toContain('Old: ✓ saved')
+  expect(after.text).toContain('3 steps from earlier sessions in this folder)')
+  expect(after.text).toContain('✓ Nothing needs attention.')
+  expect((await $.command.run(dashboard('earlier'))).text).toContain('No older steps')
 })
 
 test('/bc-dashboard opens the pane with the keyboard and leaves the transcript a single line', async ($, on) => {
