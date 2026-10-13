@@ -1144,6 +1144,23 @@ export const FRAMES_PER_STEP = 2
 /** How many columns the flamingo paces across while Claude works. */
 export const FLAMINGO_TRAVEL = 6
 
+/** The flamingo's width in pixels, and the strip it paces along: its width plus how far it walks. */
+export const FLAMINGO_WIDTH = 12
+export const STRIP_WIDTH = FLAMINGO_WIDTH + FLAMINGO_TRAVEL
+
+/** One period of the water under the flamingo, as two pixel rows: crests above, troughs below. */
+const WAVE = ['.WW.', 'W..W']
+
+/**
+ * The water the flamingo stands in, as the site draws it under its bird: two
+ * pixel rows of `W` across the strip, rippling one pixel a frame while Claude
+ * works and still while idle.
+ */
+export const waveRows = (isWorking: boolean, frame: number, width = STRIP_WIDTH): string[] => {
+  const shift = isWorking ? ((frame % WAVE[0]!.length) + WAVE[0]!.length) % WAVE[0]!.length : 0
+  return WAVE.map(period => Array.from({ length: width }, (_, x) => period[(x + shift) % period.length]).join(''))
+}
+
 /** The sprite facing the other way: each pixel row reversed. The sprite faces right. */
 export const mirror = (pixels: readonly string[]): string[] => pixels.map(row => [...row].reverse().join(''))
 

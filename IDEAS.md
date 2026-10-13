@@ -55,6 +55,7 @@ quadrantChart
 | Rank | Idea | Business value | Effort | Status |
 |---|---|---|---|---|
 | Next | [Boomi standards: bring it back](#boomi-standards-bring-it-back) | High | Small | Built, set aside; to restore soon |
+| Next | [The dashboard across all of Boomi Companion](#the-dashboard-across-all-of-boomi-companion) | High | Small first, medium in all | Analyzed; step 1 ready to build |
 | 1 | [Execution debugger](#execution-debugger) | High | Small to medium | Log reading built into the dashboard; per-step documents next |
 | 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Secure-storage token tried and removed; API-user guide kept |
 | 3 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
@@ -136,6 +137,41 @@ quadrantChart
 
 - **Idea:** `/boomi ext show <environment>` and `/boomi ext set` use the same masking as `/boomi env`, so Claude can configure an environment without seeing its passwords.
 - **Open question:** How much Companion already covers.
+
+### The dashboard across all of Boomi Companion
+
+**Show every Companion plugin's work in the dashboard, not only bc-integration's.**
+
+- **Problem:** Boomi Companion is six plugins ([boomi-companion](https://github.com/OfficialBoomi/boomi-companion)), and the dashboard only follows one. It recognizes scripts named `boomi-*.sh`, so every run of Data Hub's `datahub-*.sh`, BDI's `bdi-*.sh`, Agentstudio's `agentstudio-*.sh` and connector development's `connectordev-*.sh` is invisible, failures included. A Marketplace install shows only as a generic "Ran marketplace-install".
+- **Idea:** Teach the dashboard each plugin's scripts, and give each product what fits its work: a step feed and **Needs attention** for all of them, and a section of its own where the product has state worth watching.
+- **Why a mod:** The same reason the dashboard exists: it follows Claude's tool calls, so it costs no tokens and sees every run as it happens.
+
+**What each plugin does, and what the dashboard can see.** Read from each plugin's own scripts on October 13, 2026:
+
+| Plugin | Version | What it does | Scripts and output | Credentials | Activity log |
+|---|---|---|---|---|---|
+| bc-integration | 1.0.83 | Builds integration processes | `boomi-*.sh`: `SUCCESS:` / `ERROR:` lines | `BOOMI_*` | Yes (opt-in) |
+| bc-marketplace | 0.2.10 | Searches and installs Marketplace recipes as reference samples | `boomi-marketplace-install.sh`, `-supporting-materials.sh`: `SUCCESS: Installed '<bundle>'` | `BOOMI_*`, through bc-integration's `boomi-common.sh` | Yes: `marketplace-install` with the bundle and the copied component IDs |
+| bc-datahub | 0.2.12 | Designs and operates Data Hub master data: models, sources, quality steps, deployments, quarantine, golden records | `datahub-{model,source,deployment,quarantine,golden-record,repository,connection}.sh <verb>`: the API's response on success, `ERROR: HTTP <code>` on failure | `BOOMI_*`, plus `DATAHUB_REPO_*` for the repository API | No |
+| bc-bdi | 0.2.5 | Operates BDI (formerly Rivery) ELT flows: runs, CDC, connections, environments | `bdi-{flow,connection,cdc,env,variable,dataframe,logicode}.sh <verb>`: JSON on success, `ERROR:` and `WARNING:` lines on failure | Its own: `BDI_API_URL`, `BDI_API_TOKEN`, `BDI_ACCOUNT_ID`, `BDI_ENVIRONMENT_ID` | No |
+| bc-agentstudio | 0.1.42 | Builds and runs Agentstudio AI agents: agents, tools, sources, packages, deployments, sessions | `agentstudio-{agent,tool,source,deployment,session}.sh <verb>`: JSON | `BOOMI_*` and Agentstudio's URLs | Yes (opt-in): `agent-create`, `tool-update`, `deployment-deploy`, `session-*` |
+| bc-connectordev | 0.0.50 | Builds, tests and publishes custom connectors with the Connector SDK | `connectordev-{init,version,group,descriptor-lint,doctor,version-change}.sh`: JSON, `WARNING:` / `ERROR:` lines | `BOOMI_*` | No |
+
+**What to build, in order:**
+
+1. **Every plugin's steps (small; do this first).** Recognize all six plugins' scripts and verbs, and word their steps for a person: "Deployed Data Hub model Customer", "Ran BDI flow Orders Sync", "Deployed agent Support Triage", "Uploaded connector version 1.4". A failed run (a non-zero exit, `ERROR:`) goes under **Needs attention** with its error line. Read-only verbs (`list`, `get`, `query`, `search`) stay out of the feed, as bc-integration's searches do now. Each step carries its product, and the pane, the status line and `/bc-dashboard report` group by product when there's more than one. Spend per product comes free, since each step already carries what Claude spent getting to it.
+2. **Marketplace recipes as components (small).** An install already logs the components it copied. They join **Components this session** as "installed from recipe <bundle>", so the steps Claude takes next with them (pull, edit, push) read as one story.
+3. **BDI flow runs (medium).** `bdi-flow.sh run` starts a run; the dashboard follows its status (the plugin's own `status` verb, or BDI's API with BDI's credentials) and puts a failed run under **Needs attention** with its `error_description`. **Why?** reads the run's logs with `bdi-flow.sh logs`, as it reads a Boomi process log now. This is the BDI half of the set-aside **Process runs in Boomi**, and the same pattern.
+4. **Data Hub stewardship (medium).** A model deploy shows its status until it settles. A **Data Hub** section shows quarantined entities per universe that Claude touched, from `datahub-quarantine.sh query`, so new quarantines are news. Golden-record end-dates and restores are listed in the report, since they change master data.
+5. **Agentstudio agents (small to medium).** Each agent's stages, as components have now: created, updated, packaged, deployed. `session-*` runs count as test conversations, with how many and how they ended.
+6. **Connector releases (small).** A connector's stages: descriptor linted (with its warnings), version validated, uploaded, version changed. A lint or validate warning goes under **Needs attention**.
+7. **Know which plugins are installed (small, alongside 1).** Read Claude Code's plugin cache for `bc-*` plugins, so the pane shows only the sections that apply, and the new-session tips mention what's there.
+
+**Open questions:**
+- Data Hub, BDI and connectordev print the API's own JSON on success, and their responses aren't documented in the plugins. Each needs real output captured into tests before its wording is trusted, as bc-integration's v1.0.83 lines were.
+- BDI has its own credentials and API host. Reading run status directly needs network access to that host; following the plugin's own `status` calls needs none.
+- Only bc-integration, bc-marketplace and bc-agentstudio write the activity log, so the other three are seen only through Claude's tool calls.
+- How many people use more than one of these plugins in one session; if few, a per-product view may matter more than a combined one.
 
 ### Dashboard follow-ups
 

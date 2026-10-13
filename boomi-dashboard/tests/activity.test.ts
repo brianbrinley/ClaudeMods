@@ -67,6 +67,7 @@ import {
   choiceLabel,
   choiceFrom,
   choiceList,
+  waveRows,
   resumeCommand,
   resumable,
 } from '../hooks/activity'
@@ -828,4 +829,13 @@ test('the resume command quotes a folder only when it needs it', () => {
   expect(resumeCommand({ ...s, project: "/Users/me/pat's sync" })).toBe("cd '/Users/me/pat'\\''s sync' && claude --resume aaaaaaaa-1111")
   expect(resumeCommand(s)).toBe('claude --resume aaaaaaaa-1111')
   expect(resumable([s, { ...s, id: 'b' }], 'aaaaaaaa-1111').map(x => x.id)).toEqual(['b'])
+})
+
+test('the flamingo stands in water the width of its strip, rippling only while Claude works', () => {
+  expect(waveRows(false, 0)).toEqual(['.WW..WW..WW..WW..W', 'W..WW..WW..WW..WW.'])
+  expect(waveRows(false, 7)).toEqual(waveRows(false, 0))
+  expect(waveRows(true, 1)).toEqual(['WW..WW..WW..WW..WW', '..WW..WW..WW..WW..'])
+  expect(waveRows(true, 4)).toEqual(waveRows(true, 0))
+  // Drawn as one row of half blocks: crests on top, troughs below.
+  expect(pixelCells(waveRows(false, 0), { W: '#9FDED6' })[0]!.map(c => c.char).join('')).toBe('▄▀▀▄▄▀▀▄▄▀▀▄▄▀▀▄▄▀')
 })
