@@ -119,13 +119,6 @@ const isCompanionFolder = atom({ plugin: 'boomi-dashboard', key: 'isCompanionFol
 /** What each failed execution's log says, by execution ID, once someone asks Why?. */
 const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const, {} as Record<string, DiagnosisState>)
 
-/**
- * The flamingo bent over drinking, now and then while Claude is idle: 0 while
- * it isn't, else how many ticks it has drunk, which bobs the splash. The walk
- * frame stays put, so it stands up where it bent down.
- */
-const drinkTick = atom({ plugin: 'boomi-dashboard', key: 'drinkTick' } as const, 0)
-
 /** The flamingo's animation frame, moved on while Claude works. */
 const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
 
@@ -187,13 +180,6 @@ const HISTORY_KEY = 'history'
 
 /** How often the flamingo's frame moves on while Claude works. */
 const FLAMINGO_TICK_MS = 500
-
-/** While idle, the flamingo drinks for the last DRINK_TICKS of every IDLE_CYCLE_TICKS: 4 seconds in 30. */
-const IDLE_CYCLE_TICKS = 60
-const DRINK_TICKS = 8
-
-/** Ticks since Claude last worked, for the flamingo's drinking. */
-let idleTicks = 0
 
 /** How long the banner shows each line of a new session's recap and tips. */
 const TIP_MS = 20_000
@@ -1194,18 +1180,7 @@ export const register: Register = (on, options) => {
     // The flamingo walks while Claude works: a frame every half second, a column every second.
     if (settings.hasFlamingo) {
       $.clock.every(FLAMINGO_TICK_MS, async () => {
-        if (await read($, isWorking)) {
-          idleTicks = 0
-          if ((await read($, drinkTick)) > 0) await update($, drinkTick, () => 0)
-          await update($, frame, n => (n + 1) % 1000)
-          return
-        }
-        // Idle: now and then it bends to drink, and the splash bobs while it does.
-        idleTicks++
-        const drinking = idleTicks % IDLE_CYCLE_TICKS >= IDLE_CYCLE_TICKS - DRINK_TICKS
-        const was = await read($, drinkTick)
-        if (drinking) await update($, drinkTick, n => n + 1)
-        else if (was > 0) await update($, drinkTick, () => 0)
+        if (await read($, isWorking)) await update($, frame, n => (n + 1) % 1000)
       })
     }
     if (settings.pollSeconds > 0) {
@@ -1394,8 +1369,6 @@ export const register: Register = (on, options) => {
     const usage = await usageOf($)
     const working = await read($, isWorking)
     const flamingoFrame = await read($, frame)
-    const sip = await read($, drinkTick)
-    const drinking = sip > 0
     const needs = attention(current, now, settings.windowMs)
     const closedItems = closedCount(current, now, settings.windowMs)
     const whys = await read($, diagnoses)
@@ -1506,7 +1479,7 @@ export const register: Register = (on, options) => {
           {settings.hasFlamingo && (
             <Box flexDirection="column" flexShrink={0} marginLeft={1}>
               {(() => {
-                const view = flamingoView(working, flamingoFrame, FLAMINGO_TRAVEL, drinking)
+                const view = flamingoView(working, flamingoFrame)
                 const pad = (n: number) => (n > 0 ? <Text backgroundColor={p.bg}>{' '.repeat(n)}</Text> : undefined)
                 const cells = (row: ReturnType<typeof pixelCells>[number]) =>
                   row.map(cell => (
@@ -1522,8 +1495,8 @@ export const register: Register = (on, options) => {
                       {pad(FLAMINGO_TRAVEL - view.offset)}
                     </Text>
                   )),
-                  // The water at its feet, splashing as it drinks or steps.
-                  ...pixelCells(pondRows(view, { isWorking: working, frame: drinking ? sip : flamingoFrame, isDrinking: drinking }), { W: p.water }).map(row => (
+                  // The water it walks in, across the strip, splashing as a step lands.
+                  ...pixelCells(pondRows(view, { isWorking: working, frame: flamingoFrame }), { W: p.water }).map(row => (
                     <Text backgroundColor={p.bg}>
                       {cells(row)}
                     </Text>

@@ -1173,33 +1173,8 @@ export const FLAMINGO_WALK: readonly (readonly string[])[] = [
   [...HEAD, ...WING_UP, ...STRIDE],
 ]
 
-/**
- * Bent over to drink, as flamingos do now and then while idle: the neck arcs
- * up from the breast and down in front, the head upside down at the water,
- * its black beak tip in it.
- */
-export const FLAMINGO_DRINK: readonly string[] = [
-  '............',
-  '............',
-  '............',
-  '............',
-  '............',
-  '............',
-  '.........PP.',
-  '........P..P',
-  '....PPPPPP.P',
-  '...PPLLLLPPP',
-  '...PPPLLLPPP',
-  '.....PPPP..P',
-  '......P....P',
-  '......P...PP',
-  '......P..PKP',
-  '.....PP..LK.',
-]
-
-/** The flamingo's pixels for a frame: walking while working, drinking now and then while idle, else standing. */
-export const flamingo = (isWorking: boolean, frame: number, isDrinking = false): readonly string[] =>
-  !isWorking && isDrinking ? FLAMINGO_DRINK :
+/** The flamingo's pixels for a frame: walking while working, else standing. */
+export const flamingo = (isWorking: boolean, frame: number): readonly string[] =>
   isWorking ? FLAMINGO_WALK[frame % FLAMINGO_WALK.length]! : FLAMINGO_IDLE
 
 /** How many animation frames it takes the flamingo to move one column: it steps in place between moves. */
@@ -1212,34 +1187,30 @@ export const FLAMINGO_TRAVEL = 6
 export const FLAMINGO_WIDTH = 12
 export const STRIP_WIDTH = FLAMINGO_WIDTH + FLAMINGO_TRAVEL
 
-/** The water under the flamingo's feet: one short pixel row with gaps, as the sprite faces right. */
-const POND = '...WWW.WWWW.'
+/** The water across the flamingo's strip: one thin pixel row, three on and one off, so it reads as ripples. */
+const WATER = 'WWW.'
 
-/**
- * Drops thrown up above the water, as the sprite faces right: around the beak
- * while it drinks (two frames, so they bob), and beside the feet as a walking
- * step lands (the wide-stride frames).
- */
-const DRINK_SPLASH = ['........W..W', '.......W..W.']
+/** Drops thrown up beside the feet as a walking step lands, as the sprite faces right. */
 const STEP_SPLASH = '..W......W..'
 
 /**
- * The water the flamingo stands in, as two pixel rows across its strip: drops
- * above, the water below, both under the bird wherever it is and mirrored
- * with it. Still while it stands; splashing as it drinks or a step lands.
+ * The water the flamingo walks in, as two pixel rows across its whole strip:
+ * drops above, the water below. The ripples drift while Claude works and lie
+ * still while idle; drops splash up beside the feet, wherever the bird is, as
+ * a wide step lands.
  */
 export const pondRows = (
   view: { offset: number; facing: 'right' | 'left' },
-  how: { isWorking: boolean; frame: number; isDrinking?: boolean },
+  how: { isWorking: boolean; frame: number },
   width = STRIP_WIDTH,
 ): string[] => {
-  const landing = how.isWorking && (((how.frame % 4) + 4) % 4 === 0 || ((how.frame % 4) + 4) % 4 === 3)
-  const splash = !how.isWorking && how.isDrinking ? DRINK_SPLASH[((how.frame % 2) + 2) % 2]! : landing ? STEP_SPLASH : '.'.repeat(FLAMINGO_WIDTH)
-  const place = (row: string) => {
-    const sprite = view.facing === 'right' ? row : [...row].reverse().join('')
-    return ('.'.repeat(view.offset) + sprite).padEnd(width, '.').slice(0, width)
-  }
-  return [place(splash), place(POND)]
+  const step = ((how.frame % 4) + 4) % 4
+  const isLanding = how.isWorking && (step === 0 || step === 3)
+  const shift = how.isWorking ? ((how.frame % WATER.length) + WATER.length) % WATER.length : 0
+  const water = Array.from({ length: width }, (_, x) => WATER[(x + shift) % WATER.length]).join('')
+  const drops = isLanding ? (view.facing === 'right' ? STEP_SPLASH : [...STEP_SPLASH].reverse().join('')) : ''
+  const splash = ('.'.repeat(view.offset) + drops).padEnd(width, '.').slice(0, width)
+  return [splash, water]
 }
 
 /** The sprite facing the other way: each pixel row reversed. The sprite faces right. */
@@ -1260,9 +1231,9 @@ export const pace = (frame: number, travel = FLAMINGO_TRAVEL): { offset: number;
  * columns in from the strip's left edge. Standing still while idle, it keeps
  * the spot and the way it faced when Claude stopped.
  */
-export const flamingoView = (isWorking: boolean, frame: number, travel = FLAMINGO_TRAVEL, isDrinking = false) => {
+export const flamingoView = (isWorking: boolean, frame: number, travel = FLAMINGO_TRAVEL) => {
   const { offset, facing } = pace(Math.floor(frame / FRAMES_PER_STEP), travel)
-  const pixels = flamingo(isWorking, frame, isDrinking)
+  const pixels = flamingo(isWorking, frame)
   return { pixels: facing === 'right' ? [...pixels] : mirror(pixels), offset, facing }
 }
 

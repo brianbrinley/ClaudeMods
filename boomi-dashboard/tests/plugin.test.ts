@@ -321,13 +321,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(walking).not.toBe(standing)
     await clock.advance(500)
     expect(await bird()).not.toBe(walking)
-    // Idle again: it stands, then now and then bends to drink, then stands up.
+    // Idle again: it stands still, and so does the water.
     await $.turn.complete({ reason: 'answer', turnId: 't1', answer: '' } as never)
     await clock.advance(500)
     const idle = await bird()
-    await clock.advance(26_000)
-    expect(await bird()).not.toBe(idle)
-    await clock.advance(4_000)
+    await clock.advance(30_000)
     expect(await bird()).toBe(idle)
   })
 
