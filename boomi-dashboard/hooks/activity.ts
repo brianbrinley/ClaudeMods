@@ -1257,37 +1257,66 @@ export const STRIP_WIDTH = 18
 /** Where it stands in the strip: in the middle. */
 const STAND_AT = 3
 
-/** What the flamingo is doing: which way it faces, which leg it stands on, whether it looks back, and how far a visitor has peeked in. */
-export type FlamingoScene = { facing: 'right' | 'left'; leg: 'one' | 'other'; isLookingBack: boolean; visitor: number }
+/** What the flamingo is doing: which way it faces, which leg it stands on, whether it looks back or blinks, and how far a visitor has peeked in. */
+export type FlamingoScene = { facing: 'right' | 'left'; leg: 'one' | 'other'; isLookingBack: boolean; isBlinking: boolean; visitor: number }
 
-/** Ticks of half a second. Over 3 minutes it turns once each way, shifts its weight twice, and looks back four times. */
-const SCENE_TICKS = 360
-const LOOKS = [30, 130, 220, 320]
-const LOOK_TICKS = 6
-/** Once every 6 minutes another flamingo's head peeks in from the edge, has a look, and goes: columns shown, tick by tick. */
-const VISIT_EVERY = 720
-const VISIT_AT = 400
+/**
+ * A number from 0 to 2^32 that looks random but is always the same for the
+ * same inputs: so the flamingo's habits vary, and a tick always draws the same.
+ */
+const noise = (n: number, salt: number): number => {
+  let x = Math.imul(n ^ Math.imul(salt, 0x9e3779b1), 0x85ebca6b)
+  x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35)
+  return (x ^ (x >>> 16)) >>> 0
+}
+
+/** Ticks of half a second, grouped into stretches of 15 seconds: in about half of them it does one small thing. */
+const SLOT_TICKS = 30
+/** It may shift its weight each minute, and may turn around every two: each a coin flip. */
+const LEG_SLOTS = 4
+const TURN_SLOTS = 8
+/** A neighbour may drop by in each 10-minute stretch, at a random moment: columns shown, tick by tick. */
+const VISIT_TICKS = 1200
 const VISIT = [2, 4, 6, 6, 6, 6, 6, 4, 2]
 
 /**
- * The flamingo at a tick: standing in one place, as flamingos do, looking
- * back now and then, shifting to the other leg, turning around, and once in
- * a while greeted by a neighbour who looks in and leaves.
+ * The flamingo at a tick: standing in one place, as flamingos do. In about
+ * half of its 15-second stretches it glances back over its shoulder for a
+ * second or two, and in the others it may blink; now and then it shifts to
+ * the other leg or turns around; and once in a while a neighbour looks in
+ * and leaves. Something every 10 to 15 seconds: enough to see it's alive,
+ * never so much it distracts.
  */
 export const sceneAt = (tick: number): FlamingoScene => {
-  const t = ((tick % SCENE_TICKS) + SCENE_TICKS) % SCENE_TICKS
-  const v = ((tick % VISIT_EVERY) + VISIT_EVERY) % VISIT_EVERY
+  const t = Math.max(0, Math.floor(tick))
+  const slot = Math.floor(t / SLOT_TICKS)
+  const at = t % SLOT_TICKS
+  // A glance back in half the stretches, starting at a random moment, 1.5 to 3 seconds long.
+  const glance = noise(slot, 1)
+  const isGlancing = glance % 2 === 0
+  const glanceAt = 3 + (glance % 18)
+  const isLookingBack = isGlancing && at >= glanceAt && at < glanceAt + 3 + ((glance >>> 8) % 4)
+  // In most of the others, a blink: half a second.
+  const blink = noise(slot, 2)
+  const isBlinking = !isGlancing && blink % 4 !== 0 && at === 2 + (blink % 26)
+  const visitEpoch = Math.floor(t / VISIT_TICKS)
+  const visit = noise(visitEpoch, 5)
+  const v = t % VISIT_TICKS - (visit % (VISIT_TICKS - VISIT.length))
   return {
-    facing: t < SCENE_TICKS / 2 ? 'right' : 'left',
-    leg: (t >= 90 && t < 180) || t >= 270 ? 'other' : 'one',
-    isLookingBack: LOOKS.some(at => t >= at && t < at + LOOK_TICKS),
-    visitor: v >= VISIT_AT && v < VISIT_AT + VISIT.length ? VISIT[v - VISIT_AT]! : 0,
+    facing: noise(Math.floor(slot / TURN_SLOTS), 3) % 2 === 0 ? 'right' : 'left',
+    leg: noise(Math.floor(slot / LEG_SLOTS), 4) % 2 === 0 ? 'one' : 'other',
+    isLookingBack,
+    isBlinking,
+    visitor: visit % 2 === 0 && v >= 0 && v < VISIT.length ? VISIT[v]! : 0,
   }
 }
 
 /** The flamingo's own pixels for a scene, 12 wide: head, wing and legs as the scene has them, reflected to face left. */
 export const flamingo = (scene: FlamingoScene): string[] => {
-  const pixels = [...(scene.isLookingBack ? LOOKING_BACK : HEAD), ...WING_DOWN, ...(scene.leg === 'one' ? ONE_LEG : OTHER_LEG)]
+  const head = scene.isLookingBack ? LOOKING_BACK : HEAD
+  // A blink: the eye closes for a moment, its one dark pixel gone pink.
+  const eyes = scene.isBlinking ? [head[0]!, head[1]!.replace('K', 'P'), ...head.slice(2)] : head
+  const pixels = [...eyes, ...WING_DOWN, ...(scene.leg === 'one' ? ONE_LEG : OTHER_LEG)]
   return scene.facing === 'right' ? pixels : reflect(pixels, 11)
 }
 

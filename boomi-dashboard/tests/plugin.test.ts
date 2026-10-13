@@ -319,14 +319,13 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // It stands in seafoam water, Valence Day's.
     const water = await pane.findAll({ type: 'Text', text: /^[▀▄]$/ })
     expect(water.some(w => w.props.color === '#9FDED6')).toBe(true)
-    // A few seconds on, nothing has changed: it stands still.
-    await clock.advance(5_000)
-    expect(await bird()).toBe(standing)
-    // Fifteen seconds in, it looks back over its shoulder, then forward again.
-    await clock.advance(10_500)
-    expect(await bird()).not.toBe(standing)
-    await clock.advance(3_000)
-    expect(await bird()).toBe(standing)
+    // Within half a minute it does something: a glance back, a blink.
+    const seen = new Set([standing])
+    for (let i = 0; i < 60; i++) {
+      await clock.advance(500)
+      seen.add(await bird())
+    }
+    expect(seen.size).toBeGreaterThan(1)
   })
 
   test(`on ${surface}, the pane names the model that answered`, async ($, on) => {
