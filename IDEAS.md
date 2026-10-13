@@ -55,7 +55,7 @@ quadrantChart
 | Rank | Idea | Business value | Effort | Status |
 |---|---|---|---|---|
 | Next | [Boomi standards: bring it back](#boomi-standards-bring-it-back) | High | Small | Built, set aside; to restore soon |
-| Next | [The dashboard across all of Boomi Companion](#the-dashboard-across-all-of-boomi-companion) | High | Small first, medium in all | Steps 1-4 built (0.13.0-0.19.0); step 5 next |
+| Next | [The dashboard across all of Boomi Companion](#the-dashboard-across-all-of-boomi-companion) | High | Small first, medium in all | Steps 1-5 built (0.13.0-0.20.0); step 6 next |
 | 1 | [Execution debugger](#execution-debugger) | High | Small to medium | Log reading built into the dashboard; per-step documents next |
 | 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Secure-storage token tried and removed; API-user guide kept |
 | 3 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
@@ -163,13 +163,14 @@ quadrantChart
 2. **Marketplace recipes as components (small; built in 0.16.0).** An install already logs the components it copied. They join **Components this session** as "installed from recipe <bundle>", so the steps Claude takes next with them (pull, edit, push) read as one story.
 3. **BDI flow runs (medium; built in 0.17.0, following Claude's own status checks; **Why?** on a failed run is still to do).** `bdi-flow.sh run` starts a run; the dashboard follows its status (the plugin's own `status` verb, or BDI's API with BDI's credentials) and puts a failed run under **Needs attention** with its `error_description`. **Why?** reads the run's logs with `bdi-flow.sh logs`, as it reads a Boomi process log now. This is the BDI half of the set-aside **Process runs in Boomi**, and the same pattern.
 4. **Data Hub stewardship (medium; built in 0.19.0, following Claude's own deploy status checks and quarantine queries).** A model deploy shows its status until it settles. A **Data Hub** section shows quarantined entities per universe that Claude touched, from `datahub-quarantine.sh query`, so new quarantines are news. Golden-record end-dates and restores are listed in the report, since they change master data.
-5. **Agentstudio agents (small to medium).** Each agent's stages, as components have now: created, updated, packaged, deployed. `session-*` runs count as test conversations, with how many and how they ended.
+5. **Agentstudio agents (small to medium; built in 0.20.0, from Claude's own create, package, deploy and session runs).** Each agent's stages, as components have now: created, updated, packaged, deployed. `session-*` runs count as test conversations, with how many and how they ended.
 6. **Connector releases (small).** A connector's stages: descriptor linted (with its warnings), version validated, uploaded, version changed. A lint or validate warning goes under **Needs attention**.
 7. **Know which plugins are installed (small, alongside 1).** Read Claude Code's plugin cache for `bc-*` plugins, so the pane shows only the sections that apply, and the new-session tips mention what's there.
 
 **Open questions:**
 - Data Hub, BDI and connectordev print the API's own JSON on success, and their responses aren't documented in the plugins. Each needs real output captured into tests before its wording is trusted, as bc-integration's v1.0.83 lines were.
 - BDI has its own credentials and API host. Reading run status directly needs network access to that host; following the plugin's own `status` calls needs none.
+- Agentstudio's responses name their fields (`id`, `package_id`, `deployment_id`, `session_id`) but their full shape isn't documented, so 0.20.0 reads them leniently: a package's version and the agent's name on package and deploy responses need real output (checklist G13). A turn a guardrail blocked comes back as an ordinary reply carrying the agent's `blocked_message`, so the dashboard counts it as answered.
 - Only bc-integration, bc-marketplace and bc-agentstudio write the activity log, so the other three are seen only through Claude's tool calls.
 - How many people use more than one of these plugins in one session; if few, a per-product view may matter more than a combined one.
 

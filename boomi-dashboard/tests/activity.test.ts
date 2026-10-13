@@ -77,7 +77,7 @@ import {
   resumeCommand,
   resumable,
 } from '../hooks/activity'
-import { bdiRunId, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, productWords, quarantineChecks, quarantineReading } from '../hooks/products'
+import { agentstudioReading, bdiRunId, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, productWords, quarantineChecks, quarantineReading } from '../hooks/products'
 import { reviewPrompt, reviewSession, reviewText } from '../hooks/review'
 import type { Activity, Dashboard } from '../types'
 import type { ScannedSession } from '../hooks/activity'
@@ -1032,4 +1032,20 @@ test("Data Hub's responses: a deploy's ID and status, the checks in a command, q
   expect(causeWords(entries!)).toBe('2 ENRICH_ERROR')
   expect(quarantineReading('<QuarantineQueryResponse resultCount="0"/>')).toEqual([])
   expect(quarantineReading('ERROR: HTTP 401')).toBeUndefined()
+})
+
+test('agentstudioReading reads IDs, names and errors from JSON, and the session from a stream', () => {
+  expect(agentstudioReading('{"id":"a-1","name":"Support Triage","agent_status":"DRAFT"}')).toEqual({ id: 'a-1', name: 'Support Triage' })
+  expect(agentstudioReading('{"package_id":"p-1","version":3,"deployment_id":"d-1"}')).toEqual({ packageId: 'p-1', version: '3', deploymentId: 'd-1' })
+  expect(agentstudioReading('{"success":true,"agent_id":"a-1","session_id":"01KS","data":{"answer":"ok"}}')).toEqual({ sessionId: '01KS' })
+  expect(agentstudioReading('{"success":false,"error":"Invalid sort field: name"}')).toEqual({ error: 'Invalid sort field: name' })
+  expect(agentstudioReading('event: message\ndata: {"session_id":"01KS","content":"hi"}\n\n')).toEqual({ sessionId: '01KS' })
+  expect(agentstudioReading('event: message\ndata: {"session_id":"01KS"}\n\nevent: error\ndata: {"message":"Tool call failed"}\n')).toEqual({ sessionId: '01KS', error: 'Tool call failed' })
+  expect(agentstudioReading('not json')).toEqual({})
+})
+
+test('productWords says "an" before a vowel and before MCP', () => {
+  expect(productWords({ product: 'agentstudio', script: 'agentstudio-agent', verb: 'create' }, 'doing')).toBe('Agentstudio: create an agent…')
+  expect(productWords({ product: 'agentstudio', script: 'agentstudio-source', verb: 'create' }, 'did')).toBe('Agentstudio: added an MCP server')
+  expect(productWords({ product: 'agentstudio', script: 'agentstudio-tool', verb: 'create' }, 'did')).toBe('Agentstudio: created a tool')
 })

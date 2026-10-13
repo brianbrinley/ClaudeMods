@@ -46,6 +46,13 @@ export type Activity = {
    */
   runId?: string
   runStatus?: string
+  /**
+   * An Agentstudio step: the deployment a deploy (or package-create --deploy)
+   * made or a test conversation talked to, and the conversation's session ID.
+   * The agent's own ID is `ref`.
+   */
+  deploymentId?: string
+  sessionId?: string
   /** A pushed component's new version. */
   version?: string
   /** A test's execution status (COMPLETE, ERROR, ...) and ID. */
