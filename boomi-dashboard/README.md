@@ -46,6 +46,8 @@ Never read, print or copy my .env or any Boomi credentials. The mod reads them i
 
 `/bc-dashboard` opens the pane; Esc closes it. Where no pane can be shown, including Claude Code on the web, it prints the same thing as text.
 
+**Its size:** drag the pane's edge, and Claude Code keeps the size you choose. To set it from the start, use `/bc-dashboard size <rows> [columns]` (kept for later sessions; `size` alone goes back to the default), or the `paneRows` and `paneColumns` settings. Rows are its height above the prompt, and columns its width when docked beside a fullscreen transcript.
+
 <img alt="The dashboard pane in the Day theme: title band, gauges for tokens, spend and context beside an 8-bit flamingo, then Needs attention with a failed test's log lines, Components this session, Claude's latest steps and Past Companion sessions" src="assets/pane-day.png" width="420"> <img alt="The same pane in the Night theme" src="assets/pane-night.png" width="420">
 
 - **Gauges:** tokens, spend and how full the context is, with the last step's share.
@@ -104,7 +106,7 @@ Boomi Companion is [six plugins](https://github.com/OfficialBoomi/boomi-companio
 |---|---|
 | bc-marketplace | Recipes installed (`Marketplace: installed recipe Salesforce to NetSuite Orders · 4 components`) and their supporting materials downloaded. The components a recipe copied join **Components this session**, starting `✓ from recipe …`; pull one and its name and later stages fill in the same row |
 | bc-datahub | Models created, updated, published and given quality steps; sources and their initial loads; universes deployed; quarantined records approved or rejected; golden records updated, end-dated or restored |
-| bc-bdi | Flows run, cancelled, activated, created or restored; CDC turned on or off; connections, environments, variables and dataframes changed |
+| bc-bdi | Flows run, cancelled, activated, created or restored; CDC turned on or off; connections, environments, variables and dataframes changed. A run shows `◐ run started` until Claude checks it with `bdi-flow.sh status`, then how it ended: ✓ succeeded, cancelled, or ✗ failed with BDI's reason under **Needs attention** |
 | bc-agentstudio | Agents, tools and MCP servers created or updated; agents packaged and deployed; conversations with a deployed agent |
 | bc-connectordev | Connector projects created and checked; descriptors linted and validated; versions uploaded; groups and version changes |
 
@@ -139,7 +141,9 @@ On an API key there are no limits to read, so none of this shows.
 
 ### Your own Companion budget
 
-Two optional settings under `/config` give Companion work a budget of its own. Both warn in the gauges and the status line from 80%, toast at 80% and 100%, and stop nothing.
+Two optional settings under `/config` give Companion work a budget of its own. Both warn in the status line from 80%, toast at 80% and 100%, and stop nothing.
+
+**BUDGET** in the pane shows every budget you set, `budgetUsd` included: the fullest one's meter, then a line each, such as `✓ month: $32.10 of $50`, `◐ share, today: 84% of 30%` or `✓ session: $1.25 of $5.00`. Without a budget set, it doesn't show.
 
 - **Relative, `companionShare`:** a percent of your weekly limit that Companion may use, over `companionSharePeriod`: `week` (the last 7 days), `day` (today, a seventh of the share) or `month` (this month, the month's days in sevenths). With 30% per day, Companion gets 4.3% of your weekly limit each day: `Companion today: 2.1% of your weekly limit, 49% of its 4.3%`. From a session's first Companion step, the dashboard counts how far the weekly limit rises, by day, and adds up Companion sessions on this machine.
 - **Explicit, `companionMonthlyUsd`:** an amount for this calendar month's Companion sessions, counted in Claude Code's own cost figures: the earlier sessions from **Past Companion sessions** (scanned for you, about once an hour), plus this one live.
@@ -196,6 +200,7 @@ Boomi Companion sessions on this machine, last 90 days:
 | `/bc-dashboard rerun [n]` | | Runs a failed test again; without a number, asks which. |
 | `/bc-dashboard close <n\|all>` / `reopen` | | Closes items, or brings them back. |
 | `/bc-dashboard earlier` | | Shows this folder's steps from before the last 24 hours too. |
+| `/bc-dashboard size <rows> [columns]` | | The pane's size, kept for later sessions; `size` alone goes back to the default. |
 | `/bc-dashboard seen` | | Moves watched changes out of **Needs attention**. |
 | `/bc-dashboard watch <id\|file>` / `unwatch <id>` | `watch` | Watches a component, or stops. |
 | `/bc-dashboard report [save]` | `report` | The session report. |
@@ -217,6 +222,8 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | Setting | Default | |
 |---|---|---|
 | `paneTheme` | `day` | The pane's colors until you pick a theme. |
+| `paneRows` | `0` | The pane's height above the prompt, in rows; `0` leaves it to Claude Code. A size you drag it to wins. |
+| `paneColumns` | `0` | The pane's width when docked, in columns; `0` leaves it to Claude Code. |
 | `flamingo` | `true` | The 8-bit flamingo, standing on one leg in a thin line of seafoam water. Now and then it looks back over its shoulder, shifts to the other leg or turns around, and once in a while a neighbour peeks in to say hello. |
 | `recentHours` | `24` | How far back earlier sessions' steps and Companion's activity log count. |
 | `envFile` | `.env` | Companion's `.env`, relative to the working directory. |

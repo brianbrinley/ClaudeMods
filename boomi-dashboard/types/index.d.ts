@@ -37,6 +37,11 @@ export type Activity = {
   verb?: string
   /** A component a Marketplace recipe installed: the recipe's name. Its install is the step; this is the component. */
   recipe?: string
+  /** What another plugin's step acted on, in full (its subject may be shortened): a BDI flow's ID, say. */
+  ref?: string
+  /** A BDI flow run: its ID, and its status as Claude's last status check found it. */
+  runId?: string
+  runStatus?: string
   /** A pushed component's new version. */
   version?: string
   /** A test's execution status (COMPLETE, ERROR, ...) and ID. */
@@ -218,6 +223,6 @@ export type RuntimeSeen = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; historyShown: number; stepsShown: number }
+    'boomi-dashboard': { dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; paneSize: { rows: number; columns: number } | null; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; historyShown: number; stepsShown: number }
   }
 }

@@ -1132,7 +1132,7 @@ test("other Companion plugins' steps show in the feed in their own words; read-o
   for (const command of [list, deploy, run, install]) await $.tool.call({ tool: 'Bash', command })
   const text = (await $.command.run(dashboard('text'))).text ?? ''
   expect(text).toContain('✓ Data Hub: deployed universe 7c1e9a40…')
-  expect(text).toContain('✓ BDI: ran flow 65f0c2a1…')
+  expect(text).toContain('◐ BDI: flow 65f0c2a1… run started')
   expect(text).toContain('✓ Marketplace: installed recipe Salesforce to NetSuite Orders')
   expect(text).not.toContain('list')
   expect(text).toContain('✓ Nothing needs attention.')
@@ -1280,4 +1280,81 @@ test("a Marketplace recipe's components join the session's components, and a pul
   await $.tool.call({ tool: 'Bash', command: pull })
   const after = (await $.command.run(dashboard('text'))).text ?? ''
   expect(after).toContain('Order Sync (process): ✓ from recipe Salesforce to NetSuite Orders  ✓ pulled from Boomi')
+})
+
+test("a BDI run started shows how it ended once Claude checks its status: a failure needs attention with BDI's reason", async ($, on) => {
+  const toasts = world(on)
+  const run = 'bash scripts/bdi-flow.sh run orders-flow'
+  const check = 'bash scripts/bdi-flow.sh status orders-flow r-77'
+  let status = { run_id: 'r-77', status: 'running' } as Record<string, string>
+  on('tool.call', { tool: 'Bash' }, async (_$, e) => ({
+    result: { stdout: String(e.command) === run ? '{"run_id":"r-77","river_id":"orders-flow"}' : JSON.stringify(status), stderr: '', interrupted: false },
+  }))
+  await $.tool.call({ tool: 'Bash', command: run })
+  expect((await $.command.run(dashboard('text'))).text).toContain('◐ BDI: flow orders-flow run started')
+
+  await $.tool.call({ tool: 'Bash', command: check })
+  expect((await $.command.run(dashboard('text'))).text).toContain('✓ Nothing needs attention.')
+
+  status = { run_id: 'r-77', status: 'failed', error_description: 'Target table orders_stg does not exist' }
+  await $.tool.call({ tool: 'Bash', command: check })
+  const failed = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(failed).toContain('Needs attention (1):')
+  expect(failed).toContain('✗ BDI: flow orders-flow run failed')
+  expect(failed).toContain('ERROR: Target table orders_stg does not exist (run r-77)')
+  expect(toasts.some(t => t.includes('run failed'))).toBe(true)
+
+  // The same run, checked again after a rerun succeeds: the failure clears.
+  status = { run_id: 'r-77', status: 'succeeded' }
+  await $.tool.call({ tool: 'Bash', command: check })
+  expect((await $.command.run(dashboard('text'))).text).toContain('✓ Nothing needs attention.')
+})
+
+test('a BDI run cancelled reads as cancelled, not failed', async ($, on) => {
+  world(on)
+  const outputs: Record<string, string> = {
+    'bash scripts/bdi-flow.sh run f-1': '{"run_id":"r-1"}',
+    'bash scripts/bdi-flow.sh status f-1 r-1': '{"run_id":"r-1","status":"failed","error_description":"Run canceled"}',
+    'bash scripts/bdi-flow.sh run f-2': '{"run_id":"r-2"}',
+    'bash scripts/bdi-flow.sh status f-2 r-2': '{"run_id":"r-2","status":"succeeded"}',
+  }
+  on('tool.call', { tool: 'Bash' }, async (_$, e) => ({ result: { stdout: outputs[String(e.command)] ?? '', stderr: '', interrupted: false } }))
+  for (const command of Object.keys(outputs)) await $.tool.call({ tool: 'Bash', command })
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('✓ BDI: flow f-1 run cancelled')
+  expect(text).toContain('✓ BDI: flow f-2 ran and succeeded')
+  expect(text).toContain('✓ Nothing needs attention.')
+})
+
+test('every budget the person set shows in a BUDGET gauge, the fullest first', { options: { budgetUsd: 5, companionMonthlyUsd: 2 } }, async ($, on) => {
+  world(on)
+  mock.store(on)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: 'BUDGET' })).toBeDefined()
+  // $1.25 of a $2 month is 63%; $1.25 of a $5 session is 25%.
+  expect(await pane.find({ text: /▰+▱+ 63%/ })).toBeDefined()
+  expect(await pane.find({ text: '✓ month: $1.25 of $2.00' })).toBeDefined()
+  expect(await pane.find({ text: '✓ session: $1.25 of $5.00' })).toBeDefined()
+})
+
+test('without a budget set, there is no BUDGET gauge', async ($, on) => {
+  world(on)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: 'BUDGET' })).toBeUndefined()
+})
+
+test('/bc-dashboard size asks for a pane size, keeps it, and goes back to the default', async ($, on) => {
+  world(on, {}, { isPlaced: true })
+  const store: Record<string, unknown> = {}
+  await startSession($, on, store)
+  const answer = await $.command.run(dashboard('size 30 90'))
+  expect(answer.text).toContain('asks for 30 rows and 90 columns')
+  expect(opens.at(-1)).toMatchObject({ rows: 30, columns: 90 })
+  expect(store.paneSize).toEqual({ rows: 30, columns: 90 })
+  await $.command.run(dashboard())
+  expect(opens.at(-1)).toMatchObject({ rows: 30, columns: 90 })
+  expect((await $.command.run(dashboard('size 3'))).text).toContain('Usage: /bc-dashboard size')
+  expect((await $.command.run(dashboard('size'))).text).toContain('back to its usual size')
+  await $.command.run(dashboard())
+  expect(opens.at(-1)?.rows).toBeUndefined()
 })

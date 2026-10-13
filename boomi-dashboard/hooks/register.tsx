@@ -77,6 +77,7 @@ import {
   choiceList,
   recapOf,
   welcomeLine,
+  budgetLines,
   shareView,
   monthSpend,
   monthView,
@@ -95,7 +96,7 @@ import {
 } from './activity'
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
-import { recipeComponents } from './products'
+import { bdiRunId, bdiRunReading, bdiStatusChecks, recipeComponents } from './products'
 import type { Credentials } from './platform'
 
 type Engine = EngineInterface
@@ -188,6 +189,8 @@ type Settings = {
   companionShare: number
   companionSharePeriod: SharePeriod
   companionMonthlyUsd: number
+  paneRows: number
+  paneColumns: number
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -206,6 +209,8 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   companionShare: Math.min(100, Math.max(0, Number(options.companionShare ?? 0) || 0)),
   companionSharePeriod: options.companionSharePeriod === 'day' || options.companionSharePeriod === 'month' ? options.companionSharePeriod : 'week',
   companionMonthlyUsd: Math.max(0, Number(options.companionMonthlyUsd ?? 0) || 0),
+  paneRows: Math.max(0, Math.round(Number(options.paneRows ?? 0) || 0)),
+  paneColumns: Math.max(0, Math.round(Number(options.paneColumns ?? 0) || 0)),
 })
 
 const PANE = 'boomi-dashboard'
@@ -234,9 +239,46 @@ const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit'])
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
+/** The pane's size, picked with /bc-dashboard size and kept; until then the settings'. 0 leaves it to Claude Code. */
+const paneSize = atom({ plugin: 'boomi-dashboard', key: 'paneSize' } as const, null as { rows: number; columns: number } | null)
+const SIZE_KEY = 'paneSize'
+
+/**
+ * The size the pane asks for as it opens: rows when it sits above the prompt,
+ * columns when it's docked beside a fullscreen transcript. A request: a size
+ * the person dragged it to wins.
+ */
+const sizeOf = async ($: Engine, settings: Settings) => {
+  const picked = await read($, paneSize)
+  const rows = picked?.rows ?? settings.paneRows
+  const columns = picked?.columns ?? settings.paneColumns
+  return { ...(rows > 0 ? { rows } : {}), ...(columns > 0 ? { columns } : {}) }
+}
+
 // The pane is a convenience: a surface that cannot seat one must not stop the work.
-const openPane = ($: Engine) => {
-  $.ui.open({ id: PANE, title: 'Boomi Companion Dashboard' }).catch(() => undefined)
+const openPane = async ($: Engine, settings: Settings) => {
+  const size = await sizeOf($, settings).catch(() => ({}))
+  $.ui.open({ id: PANE, title: 'Boomi Companion Dashboard', ...size }).catch(() => undefined)
+}
+
+/** /bc-dashboard size <rows> [columns]: the pane's size, now and for later sessions; with no numbers, back to the default. */
+const resize = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const [rows = '', columns = ''] = target.split(/\s+/).filter(Boolean)
+  if (!rows) {
+    await update($, paneSize, () => null)
+    await $.store.delete(SIZE_KEY).catch(() => undefined)
+    return 'The dashboard pane is back to its usual size. Drag its edge to resize it by hand.'
+  }
+  const r = Number(rows)
+  const c = columns ? Number(columns) : 0
+  if (!Number.isInteger(r) || r < 8 || r > 200 || (columns && (!Number.isInteger(c) || c < 40 || c > 400))) {
+    return 'Usage: /bc-dashboard size <rows 8-200> [columns 40-400]. With nothing after size, back to the default.'
+  }
+  const size = { rows: r, columns: c }
+  await update($, paneSize, () => size)
+  await $.store.set(SIZE_KEY, size).catch(() => undefined)
+  await $.ui.open({ id: PANE, title: 'Boomi Companion Dashboard', focus: true, closeOnEscape: true, ...(await sizeOf($, settings)) }).catch(() => undefined)
+  return `The dashboard pane asks for ${r} rows${c ? ` and ${c} columns` : ''}, now and in later sessions. A size you drag it to wins.`
 }
 
 const toast = ($: Engine, settings: Settings, text: string) => {
@@ -470,10 +512,10 @@ const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun
   for (const run of runs) {
     const found = await subjectOf($, settings, run, current)
     const args = run.kind === 'test' && run.args ? { args: run.args } : {}
-    const product = run.product ? { product: run.product, verb: run.verb ?? '' } : {}
+    const product = run.product ? { product: run.product, verb: run.verb ?? '', ...(run.ref ? { ref: run.ref } : {}) } : {}
     started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found, ...args, ...product })
   }
-  if (!current.activity.some(a => a.kind !== 'other' || a.product)) openPane($)
+  if (!current.activity.some(a => a.kind !== 'other' || a.product)) void openPane($, settings)
   void rememberScripts($, runs)
   await record($, list => [...list, ...started])
   void refreshStatus($, settings)
@@ -532,6 +574,13 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
     }
   }
   for (const a of done) {
+    if (a.product === 'bdi' && a.verb === 'run' && a.outcome === 'ok') {
+      const runId = bdiRunId(output)
+      if (runId) {
+        a.runId = runId
+        a.detail = `run ${runId}`
+      }
+    }
     const copied = a.outcome === 'ok' ? fromRecipes(a) : []
     if (copied.length > 0) a.detail = `${a.detail} · ${copied.length} component${copied.length === 1 ? '' : 's'}`
     for (const c of copied) {
@@ -584,9 +633,43 @@ const noteEdit = async ($: Engine, settings: Settings, path: string) => {
     }
     return [...list, edit]
   })
-  if (isFirst) openPane($)
+  if (isFirst) void openPane($, settings)
   void refreshStatus($, settings)
   void saveActivity($, settings)
+}
+
+/**
+ * Claude checking a BDI run with bdi-flow.sh status: what the check found
+ * updates that run's step, so a run that started shows how it ended without
+ * the dashboard calling BDI itself. A failure needs attention with BDI's
+ * reason; a cancelled run is cancelled, not failed.
+ */
+const followBdiRuns = async ($: Engine, settings: Settings, checks: readonly { flow: string; run: string }[], ran: Ran) => {
+  if (ran.deny !== undefined) return
+  const reading = bdiRunReading(outputOf(ran))
+  if (!reading || checks.length !== 1) return
+  const { flow, run } = checks[0]!
+  let changed: Activity | undefined
+  await update($, dashboard, c => {
+    const list = [...c.activity]
+    const at = list.map(a => a.product === 'bdi' && a.verb === 'run' && (a.runId === run || (!a.runId && a.ref === flow))).lastIndexOf(true)
+    if (at < 0 || list[at]!.runStatus === reading.status) return c
+    const step = list[at]!
+    changed = {
+      ...step,
+      runId: step.runId ?? run,
+      runStatus: reading.status,
+      outcome: reading.status === 'failed' ? 'failed' : 'ok',
+      detail: reading.status === 'failed' ? `ERROR: ${reading.reason ?? 'the run failed'} (run ${run})` : `run ${run}: ${reading.status}`,
+    }
+    list[at] = changed
+    return { ...c, activity: list }
+  })
+  if (changed && (changed.runStatus === 'failed' || changed.runStatus === 'succeeded')) announce($, settings, { ...changed, kind: 'test' })
+  if (changed) {
+    void refreshStatus($, settings)
+    void saveActivity($, settings)
+  }
 }
 
 // --- The Platform API --------------------------------------------------------
@@ -1120,6 +1203,7 @@ const USAGE = [
   '/bc-dashboard close <n|all>   close a Needs attention item by its number, or all of them',
   '/bc-dashboard reopen          bring closed items back',
   '/bc-dashboard earlier         show this folder\'s steps from before the last 24 hours too',
+  '/bc-dashboard size <r> [c]    the pane\'s height in rows (and width in columns when docked); no numbers: the default',
   '/bc-dashboard why [n]         read the log of a failed test or run (no number: pick one)',
   '/bc-dashboard rerun [n]       run a failed test again, the same way Claude ran it (no number: pick one)',
   '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
@@ -1173,7 +1257,7 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       // leaves the transcript, the scrollback and the prompt as they were. Only
       // where no pane can be shown does the summary go into the transcript.
       const opened = await $.ui
-        .open({ id: PANE, title: 'Boomi Companion Dashboard', focus: true, closeOnEscape: true })
+        .open({ id: PANE, title: 'Boomi Companion Dashboard', focus: true, closeOnEscape: true, ...(await sizeOf($, settings)) })
         .catch(() => undefined)
       if (opened?.isPlaced) return 'Dashboard open. Esc closes it; /bc-dashboard text prints it here instead.'
       return summaryNow($, settings)
@@ -1205,6 +1289,8 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return reopen($, settings)
     case 'earlier':
       return showEarlier($)
+    case 'size':
+      return resize($, settings, target)
     case 'theme':
       return theme($, settings, target)
     case 'banner':
@@ -1295,7 +1381,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | earlier | why [n] | rerun [n] | history | resume [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
+      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
     })
     await $.tool.register({
       name: 'summary',
@@ -1326,6 +1412,8 @@ export const register: Register = (on, options) => {
     // The watch list outlives the session; restore it the first time.
     const saved = await $.store.get(THEME_KEY)
     if (isTheme(saved)) await update($, pickedTheme, () => saved)
+    const size = (await $.store.get(SIZE_KEY)) as { rows?: number; columns?: number } | undefined
+    if (size && typeof size.rows === 'number') await update($, paneSize, () => ({ rows: size.rows!, columns: size.columns ?? 0 }))
 
     await restoreActivity($, settings)
 
@@ -1387,7 +1475,13 @@ export const register: Register = (on, options) => {
   // The dashboard only watches: its own trouble never stops the command.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const runs = scriptRuns(String(e.command ?? ''))
-    if (runs.length === 0) return next(e)
+    const checks = bdiStatusChecks(String(e.command ?? ''))
+    if (runs.length === 0 && checks.length === 0) return next(e)
+    if (runs.length === 0) {
+      const ran = await next(e)
+      await followBdiRuns($, settings, checks, ran).catch(() => undefined)
+      return ran
+    }
     const started = await noteStart($, settings, runs).catch(() => [] as Activity[])
     const ran = await next(e)
     await noteEnd($, settings, started, ran).catch(() => undefined)
@@ -1526,7 +1620,7 @@ export const register: Register = (on, options) => {
         </Box>
         <Box flexShrink={0}>
           <Text> </Text>
-          <Button key="open" label="Open" onPress={() => openPane($)} />
+          <Button key="open" label="Open" onPress={() => void openPane($, settings)} />
           <Text> </Text>
           <Button key="hide" label="Hide" onPress={() => update($, isBandHidden, () => true)} />
         </Box>
@@ -1564,9 +1658,9 @@ export const register: Register = (on, options) => {
       .map(a => all.get(a.id)?.tokens ?? 0)
     const last = feed[0] && all.get(feed[0].id)
 
-    const budget = budgetOf(usage.usd, settings.budgetUsd)
     const limitsNow = limitViews(usage.limits, now)
     const mine = await companionBudget($, settings, usage)
+    const budgets = budgetLines({ ...usage, ...(mine ? { companion: mine } : {}) }, settings)
     // Every Text carries the pane's colors, so it reads the same on any terminal.
     const t = (text: string, style: { color?: string; bold?: boolean; bg?: string } = {}) => (
       <Text color={style.color ?? p.text} backgroundColor={style.bg ?? p.bg} bold={style.bold}>
@@ -1644,8 +1738,6 @@ export const register: Register = (on, options) => {
                 'SPEND',
                 formatCost(usage.usd) ?? '—',
                 last?.usd ? `last step ${formatCost(last.usd)}` : undefined,
-                budget ? `${STATUS[budget.level].icon} ${budget.percent >= 100 ? 'budget spent' : `${Math.round(budget.percent)}% of ${formatCost(settings.budgetUsd)}`}` : undefined,
-                mine?.month ? `${STATUS[mine.month.level].icon} ${Math.round(mine.month.percent)}% of month` : undefined,
               )}
               {gauge(
                 'CONTEXT',
@@ -1658,7 +1750,12 @@ export const register: Register = (on, options) => {
                   `${limitsNow[0]!.name}${limitsNow[0]!.resetsIn ? `, resets ${limitsNow[0]!.resetsIn}` : ''}`,
                   limitsNow[0]!.pace ? `${STATUS[limitsNow[0]!.level].icon} ${limitsNow[0]!.pace}` : undefined,
                   ...limitsNow.slice(1).map(v => `${v.name} ${Math.round(v.percent)}%`),
-                  mine?.week ? `${STATUS[mine.week.level].icon} Companion ${Math.round(mine.week.percent)}% of ${settings.companionSharePeriod === 'day' ? 'today' : settings.companionSharePeriod === 'week' ? '7 days' : 'month'}` : undefined,
+                )}
+              {budgets.length > 0 &&
+                gauge(
+                  'BUDGET',
+                  `${meter(Math.min(100, budgets[0]!.percent), 8)} ${Math.round(budgets[0]!.percent)}%`,
+                  ...budgets.map(b => `${STATUS[b.level].icon} ${b.label}: ${b.detail}`),
                 )}
             </Box>
             {sparkline(trail) && (

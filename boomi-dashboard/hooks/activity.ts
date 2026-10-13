@@ -84,10 +84,11 @@ export type ScriptRun = {
   scriptsDir?: string
   /** A test's arguments, so it can be run again. */
   args?: string[]
-  /** Another Companion plugin's step: its product, subcommand and what it acted on. */
+  /** Another Companion plugin's step: its product, subcommand and what it acted on, shortened and in full. */
   product?: Product
   verb?: string
   target?: string
+  ref?: string
 }
 
 const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefined => {
@@ -476,8 +477,13 @@ const LEVEL_OF: Record<Outcome, Level> = { ok: 'healthy', running: 'warning', fa
 export const levelOf = (a: Activity): Level =>
   a.outcome === 'ok' && (isWarnStatus(a.executionStatus) || isSubmittedOnly(a) || isProductWarning(a)) ? 'warning' : LEVEL_OF[a.outcome]
 
-/** Another plugin's step that finished with a WARNING line, such as a descriptor accepted with warnings. */
-const isProductWarning = (a: Activity) => a.product !== undefined && /^WARNING:/.test(a.detail)
+/**
+ * Another plugin's step that finished with a WARNING line, such as a
+ * descriptor accepted with warnings; or a BDI run that started and hasn't
+ * been seen to finish.
+ */
+const isProductWarning = (a: Activity) =>
+  a.product !== undefined && (/^WARNING:/.test(a.detail) || (a.product === 'bdi' && a.verb === 'run' && !!a.runId && a.outcome === 'ok' && (!a.runStatus || a.runStatus === 'running' || a.runStatus === 'pending')))
 
 /** A test that was submitted and not waited for (--no-wait): no result yet. */
 const isSubmittedOnly = (a: Activity) => a.kind === 'test' && a.outcome === 'ok' && !a.executionStatus
@@ -512,6 +518,14 @@ const SCRIPT_WORDS: Record<string, string> = {
 
 /** One activity as a sentence: "Saved Orders Sync to Boomi (v4)". */
 export const describe = (a: Activity): string => {
+  if (a.product === 'bdi' && a.verb === 'run' && a.runId && a.outcome !== 'running') {
+    const flow = `BDI: flow ${a.subject}`
+    if (a.runStatus === 'succeeded') return `${flow} ran and succeeded`
+    if (a.runStatus === 'failed') return `${flow} run failed`
+    if (a.runStatus === 'canceled') return `${flow} run cancelled`
+    if (a.runStatus === 'skipped') return `${flow} run skipped`
+    if (a.outcome === 'ok') return `${flow} run ${a.runStatus === 'pending' ? 'pending' : 'started'}`
+  }
   if (a.product && a.script && a.verb !== undefined) {
     const run = { product: a.product, script: a.script, verb: a.verb, subject: a.subject }
     if (a.outcome === 'running') return productWords(run, 'doing')
@@ -1865,7 +1879,7 @@ export const productIssues = (activity: readonly Activity[]): Activity[] => {
     if (!a.product || a.outcome === 'running') continue
     latest.set(`${a.product}|${a.script}|${a.verb}|${a.subject}`, a)
   }
-  return [...latest.values()].filter(a => a.outcome === 'failed' || a.outcome === 'blocked' || isProductWarning(a))
+  return [...latest.values()].filter(a => a.outcome === 'failed' || a.outcome === 'blocked' || (isProductWarning(a) && !(a.product === 'bdi' && a.verb === 'run')))
 }
 
 /** Each product's share of the session: bc-integration's steps, then each other plugin's, by what they took. */
@@ -2057,4 +2071,31 @@ export const monthView = (spent: number, monthlyUsd: number): BudgetView | undef
   if (!monthlyUsd || monthlyUsd <= 0) return undefined
   const percent = (spent / monthlyUsd) * 100
   return { level: budgetLevel(percent), percent, text: `Companion this month: ${formatCost(spent)} of ${formatCost(monthlyUsd)}` }
+}
+
+/** A budget the person set, as the BUDGET gauge lists it: what it is and how full. */
+export type BudgetLine = { label: string; level: Level; percent: number; detail: string }
+
+/**
+ * Every budget the person set, for the BUDGET gauge: the session's spend, the
+ * month's Companion amount and Companion's share of the limit, the fullest
+ * first. Empty when none is set.
+ */
+export const budgetLines = (
+  usage: Usage,
+  settings: { budgetUsd: number; companionShare: number; companionSharePeriod: SharePeriod; companionMonthlyUsd: number },
+): BudgetLine[] => {
+  const lines: BudgetLine[] = []
+  const session = budgetOf(usage.usd ?? 0, settings.budgetUsd)
+  if (session) lines.push({ label: 'session', level: session.level, percent: session.percent, detail: `${formatCost(usage.usd ?? 0)} of ${formatCost(settings.budgetUsd)}` })
+  const month = usage.companion?.month
+  if (month) lines.push({ label: 'month', level: month.level, percent: month.percent, detail: month.text.replace(/^Companion this month: /, '') })
+  const share = usage.companion?.week
+  if (share) {
+    const period = settings.companionSharePeriod === 'day' ? 'today' : settings.companionSharePeriod === 'week' ? '7 days' : 'month'
+    lines.push({ label: `share, ${period}`, level: share.level, percent: share.percent, detail: `${Math.round(share.percent)}% of ${settings.companionShare}%` })
+  } else if (settings.companionShare > 0) {
+    lines.push({ label: 'share', level: 'healthy', percent: 0, detail: usage.limits?.length ? 'no Companion work yet' : 'needs a Claude seat' })
+  }
+  return lines.sort((a, b) => b.percent - a.percent)
 }

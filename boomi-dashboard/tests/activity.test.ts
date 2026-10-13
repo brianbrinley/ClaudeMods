@@ -77,7 +77,7 @@ import {
   resumeCommand,
   resumable,
 } from '../hooks/activity'
-import { productWords } from '../hooks/products'
+import { bdiRunId, bdiRunReading, bdiStatusChecks, productWords } from '../hooks/products'
 import type { Activity, Dashboard } from '../types'
 import type { ScannedSession } from '../hooks/activity'
 
@@ -943,4 +943,16 @@ test("Companion's month: this month's earlier sessions on this machine, not this
   expect(monthSpend(sessions, now, 'now', 2)).toBe(5)
   expect(monthView(8.5, 10)).toMatchObject({ level: 'warning', text: 'Companion this month: $8.50 of $10' })
   expect(monthView(1, 0)).toBeUndefined()
+})
+
+test("BDI's run responses: the run ID, the status checks in a command, and how a run went", () => {
+  expect(bdiRunId('{"run_id":"6a1b","status":"pending"}')).toBe('6a1b')
+  expect(bdiStatusChecks('bash s/bdi-flow.sh status flow-1 run-9 && echo done')).toEqual([{ flow: 'flow-1', run: 'run-9' }])
+  expect(bdiStatusChecks("bash s/bdi-flow.sh status 'flow-1' \"run-9\"")).toEqual([{ flow: 'flow-1', run: 'run-9' }])
+  expect(bdiStatusChecks('bash s/bdi-flow.sh runs flow-1 --from a --to b')).toEqual([])
+  expect(bdiRunReading('{"status":"failed","error_description":"No such table"}')).toEqual({ status: 'failed', reason: 'No such table' })
+  expect(bdiRunReading('{"status":"failed","error_description":"Run canceled"}')).toEqual({ status: 'canceled' })
+  expect(bdiRunReading('{"run":{"status":"SUCCEEDED"}}')).toEqual({ status: 'succeeded' })
+  expect(bdiRunReading('NOTE: something\n{"status":"running"}')).toEqual({ status: 'running' })
+  expect(bdiRunReading('ERROR: HTTP 404')).toBeUndefined()
 })

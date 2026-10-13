@@ -100,6 +100,9 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** under **Components this session**, a **Show N earlier** button; pressing it lists those older steps, and **Needs attention** doesn't grow. After a restart, the button is still there. **Fail:** no button when you know there was older work, or old failures under **Needs attention**.
 - [ ] **G9. Recipe components.** Have Claude install a Marketplace recipe, then pull one of its components.
   **Pass:** each copied component under **Components this session** with `✓ from recipe <name>`; after the pull, that row shows the component's name and `✓ pulled from Boomi`. **Fail:** no rows, or the pull makes a second row.
+- [ ] **G10. BDI run result.** Have Claude run a BDI flow and check its status until it finishes.
+  **Pass:** `◐ BDI: flow … run started`, then `✓ BDI: flow … ran and succeeded`; or, if it fails, `✗ … run failed` under **Needs attention** with BDI's reason. **Fail:** it stays ◐ after Claude saw it finish; send the status output.
+
 
 ## H. Usage limits and a Companion budget
 
@@ -113,3 +116,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** `Companion this month: $X of $Y`, where X matches **Past Companion sessions**' this month plus this session. **Fail:** no line, or X far off.
 - [ ] **H4. Full session ID.** Look at the pane's footer.
   **Pass:** `session` followed by the whole ID, and `claude --resume <that ID>` in a new terminal opens this session. **Fail:** a short ID, or the resume fails.
+- [ ] **H5. BUDGET gauge.** Set `budgetUsd` and `companionMonthlyUsd` under `/config` and restart.
+  **Pass:** a **BUDGET** gauge listing `session:` and `month:` with their amounts. **Fail:** no gauge, or a budget missing.
+- [ ] **H6. Pane size.** Run `/bc-dashboard size 30`, then restart and open the pane.
+  **Pass:** the pane opens about 30 rows tall both times; dragging its edge still resizes it. **Fail:** the size doesn't change, or isn't kept.
