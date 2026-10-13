@@ -3,11 +3,11 @@
 Ideas for mods we could build next, starting with Boomi and integration work. The ideas below aren't built yet. Treat it as a brainstorm: add ideas, argue with the rankings, and claim one to build.
 
 **Built from this page so far:**
-- The Companion guardrail, now the [boomi-standards](boomi-standards/README.md) mod.
+- The Companion guardrail, built as the boomi-standards mod and then set aside; see [Boomi standards: bring it back](#boomi-standards-bring-it-back).
 - The deployment watcher, folded into the [boomi-dashboard](boomi-dashboard/README.md) mod: a live summary of a Companion session that watches components for changes. (Polling the environment's runs is set aside for now; see [Dashboard follow-ups](#dashboard-follow-ups).)
 - The first half of the execution debugger, in the dashboard: **Why?** reads a failed run's process log and **Ask Claude to fix** drafts the request. A session report (`/bc-dashboard report`) came with it.
 - Dashboard follow-ups: **Run again** for a failed test, a spend budget (`budgetUsd`), and the next step (deploy, then test) suggested in the prompt box.
-- Guardrails at a glance: the dashboard's **Guardrails** section shows what boomi-standards blocked and the runtime's state.
+- Guardrails at a glance: the dashboard's **Guardrails** section shows the runtime's state, and what boomi-standards blocked once that mod is back.
 - Companion's activity log as a second source, and a new-session banner with the last session's recap and tips.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
@@ -54,6 +54,7 @@ quadrantChart
 
 | Rank | Idea | Business value | Effort | Status |
 |---|---|---|---|---|
+| Next | [Boomi standards: bring it back](#boomi-standards-bring-it-back) | High | Small | Built, set aside; to restore soon |
 | 1 | [Execution debugger](#execution-debugger) | High | Small to medium | Log reading built into the dashboard; per-step documents next |
 | 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Secure-storage token tried and removed; API-user guide kept |
 | 3 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
@@ -64,6 +65,16 @@ quadrantChart
 | 8 | [Credential broker: full](#credential-broker) | Medium | Large | Idea |
 
 ## The ideas
+
+### Boomi standards: bring it back
+
+**Hold Companion's components to the team's standards before they reach Boomi. Built, then set aside; it comes back in the near future.**
+
+- **What it was:** the boomi-standards mod (0.2.0) read each component's XML before Companion created, pushed or deployed it, and refused the call when it broke a rule: naming per component type, allowed folders, forbidden text such as production hosts, passwords typed into password fields, and a Try/Catch in every process. Teams set the rules in a checked-in `boomi-standards.json`. Its tests passed and it was run against a live Boomi account.
+- **Why it's out:** set aside in October 2026 to focus on the dashboard. Nothing was wrong with it.
+- **To restore:** `git checkout cd07899 -- boomi-standards`, then add it back to the **Mods** table in the [README](README.md), to `PAGES` and `COPY_PATHS` in `site/build.py`, and to the `paths` in `.github/workflows/pages.yml`. Restore the standards half of checklist item B10, and the boomi-standards links in the dashboard README (**Guardrails**, and **⚠ save blocked** in the stages table).
+- **Already waiting for it:** the dashboard still reads boomi-standards' `activity` state for its **Guardrails** section, with tests, so that comes back without changes.
+- **Before it returns:** run `claude plugin validate` and `claude plugin test` on it against the Claude Code of the day, and recheck it against Companion's current XML format.
 
 ### Execution debugger
 

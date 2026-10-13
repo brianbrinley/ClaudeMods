@@ -29,8 +29,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **B9. Pane basics.** Theme buttons switch Day, Night and Terminal; **☐** closes an item and **Reopen** brings it back.
   **Pass:** both. **Fail:** say which.
 
-- [ ] **B10. Guardrails.** With boomi-standards loaded, have Claude push a component with a password typed into a password field.
-  **Pass:** the push is refused, and the dashboard's **Guardrails** section shows `⚠ Standards blocked the last push:` with the reason. After `/boomi up`, it shows `◐ Runtime … installing`, then `✓ Runtime … online`. **Fail:** no **Guardrails** section, or it doesn't change.
+- [ ] **B10. Guardrails.** With boomi-runtime loaded, run `/boomi up`.
+  **Pass:** the dashboard's **Guardrails** section shows `◐ Runtime … installing`, then `✓ Runtime … online`. **Fail:** no **Guardrails** section, or it doesn't change. (The standards half of this check comes back with boomi-standards; see IDEAS.md.)
 
 ## C. Windows (WSL)
 

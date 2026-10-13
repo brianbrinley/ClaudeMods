@@ -25,12 +25,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PAGES = [
     ("README.md", "", "Home"),
     ("boomi-runtime/README.md", "boomi-runtime", "Boomi Runtime"),
-    ("boomi-standards/README.md", "boomi-standards", "Boomi Standards"),
     ("boomi-dashboard/README.md", "boomi-dashboard", "Companion Dashboard"),
     ("site/style.md", "style", None),
 ]
 # Copied verbatim to the same path on the site (only what the pages use)
-COPY_PATHS = ["brand/valence.css", "brand/assets", "boomi-runtime/assets", "boomi-standards/assets", "boomi-dashboard/assets"]
+COPY_PATHS = ["brand/valence.css", "brand/assets", "boomi-runtime/assets", "boomi-dashboard/assets"]
 # Built files offered as downloads on a page: {page dir: [(source directory, filename regex)]}
 DOWNLOADS = {}
 

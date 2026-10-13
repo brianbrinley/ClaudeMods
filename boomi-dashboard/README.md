@@ -49,7 +49,7 @@ Never read, print or copy my .env or any Boomi credentials. The mod reads them i
 - **Needs attention:** what's still broken, each with a next step.
 - **Components this session:** each component's stages, tokens and cost.
 - **Claude's latest steps:** what Claude just did with Companion. **More** shows older steps.
-- **Guardrails:** with [boomi-standards](../boomi-standards/README.md) or [boomi-runtime](../boomi-runtime/README.md) loaded, the last standards check (what it blocked, and why) and the runtime's state and smoke test.
+- **Guardrails:** with [boomi-runtime](../boomi-runtime/README.md) loaded, the runtime's state and smoke test.
 - **Past Companion sessions:** what earlier sessions on this machine did and cost. **More** pages through them.
 - **Watched components:** components you asked to watch, and who last changed them in Boomi.
 - **Themes:** **Day**, **Night** or **Terminal** (your terminal's colors), from the buttons or `/bc-dashboard theme night`. The choice is kept.
@@ -78,7 +78,7 @@ Anything left to fix from the last session stays under **Needs attention**, and 
 | ✓ saved v4 | Companion pushed it; Boomi has version 4. |
 | ✓ deployed / ◐ redeploy needed | Deployed, or saved again since, so the environment runs an older version. |
 | ✓ test passed / ✗ test ERROR | The latest test execution's result. |
-| ⚠ save blocked | Another mod, such as [boomi-standards](../boomi-standards/README.md), refused the push. |
+| ⚠ save blocked | Another mod refused the push. |
 | ✗ save failed, ✗ deploy failed | Companion's script reported an error. |
 
 Icons always come with a label: ✓ done, ◐ in progress or still to do, ⚠ blocked or unreachable, ✗ failed. A later success clears an earlier failure.
