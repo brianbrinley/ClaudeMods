@@ -56,6 +56,17 @@ import {
   stages,
   statusLine,
   summary,
+  recapOf,
+  recapLine,
+  welcomeLine,
+  TIPS,
+  parseActivityLog,
+  logStep,
+  newLogSteps,
+  choicesOf,
+  choiceLabel,
+  choiceFrom,
+  choiceList,
 } from '../hooks/activity'
 import type { Activity, Dashboard } from '../types'
 import type { ScannedSession } from '../hooks/activity'
@@ -225,7 +236,7 @@ test('the summary has each section, in plain words', () => {
   expect(text).toContain('✓ Nothing needs attention.')
   expect(text).toContain('New Map (map): ◐ edited, not in Boomi yet')
   expect(text).toContain('Edited New Map, 2m ago')
-  expect(text).toContain('Process runs in Boomi, last 24h')
+  expect(text).not.toContain('Process runs')
   expect(text).toContain('Session: $0.50 so far · context 42% full')
 })
 
@@ -696,4 +707,102 @@ test('a session is named by its own title first, then its first request; one fol
   expect(parts.head).toBe('Oct 10, 09:00 · 47m · $3.50 · "Orders sync build"')
   expect(parts.detail).toBe('1 push · 1 deploy · 2 tests · Orders · 2.0k tokens')
   expect(projectsDiffer(pastSessions({ sessions: [SCAN.sessions[0]!, { ...SCAN.sessions[0]!, id: 'x' }] }))).toBe(false)
+})
+
+// --- A new session's banner ---
+
+test("the recap counts only this session's own Companion steps, and says what is left", () => {
+  const state = dashboard([
+    act('push', 'ok', 'Old', NOW - 30 * HOUR, { file: 'active-development/x/Old.xml', isRestored: true }),
+    act('push', 'ok', 'Orders Sync', NOW - HOUR, { file: FILE, componentId: ID }),
+    act('deploy', 'ok', 'Orders Sync', NOW - HOUR, { file: FILE, componentId: ID }),
+    act('test', 'failed', 'Orders Sync', NOW - 30 * 60_000, { componentId: ID, executionStatus: 'ERROR' }),
+  ])
+  const recap = recapOf(state, NOW, 24 * HOUR, 2.5)!
+  expect(recap).toEqual({ endedAt: NOW - 30 * 60_000, components: 1, saves: 1, deploys: 1, tests: 1, testsFailed: 1, open: 1, usd: 2.5 })
+  expect(recapLine(recap, NOW + 14 * HOUR)).toEqual({
+    level: 'critical',
+    text: 'Last session 15h ago: 1 component · 1 save · 1 deploy · 1 test (1 failed) · 1 left to fix · $2.50',
+  })
+  expect(recapOf(dashboard([act('other', 'ok', 'x', NOW, { script: 'component-search' })]), NOW, 24 * HOUR)).toBeUndefined()
+})
+
+test('the welcome line turns from the recap through every tip and back', () => {
+  const recap = { endedAt: NOW - HOUR, components: 2, saves: 2, deploys: 0, tests: 0, testsFailed: 0, open: 0 }
+  expect(welcomeLine(0, recap, NOW)).toEqual({ level: 'healthy', text: 'Last session 1h ago: 2 components · 2 saves · nothing left to fix' })
+  expect(welcomeLine(1, recap, NOW).text).toBe(TIPS[0])
+  expect(welcomeLine(TIPS.length + 1, recap, NOW).text).toMatch(/^Last session/)
+  expect(welcomeLine(0, undefined, NOW).text).toBe(TIPS[0])
+  for (const tip of TIPS) expect(tip.startsWith('Tip: ')).toBe(true)
+})
+
+// --- Companion's activity log ---
+
+/** A line as Companion's log_activity writes it (v1.0.83). */
+const logLine = (at: string, operation: string, result: string, details: Record<string, unknown>, http: number | null = 200) =>
+  JSON.stringify({ timestamp: at, skill_name: 'boomi-integration', skill_version: '1.0.83', workspace: 'w', operation, script: `boomi-${operation}`, user: 'me', boomi_user: 'me@example.com', account_id: 'a', environment_id: null, result, http_code: http, details })
+
+test("Companion's log reads into steps in the dashboard's words, skipping lines it can't read", () => {
+  const log = [
+    '_code":200,"details":{}}',
+    logLine('2026-10-12T11:00:00Z', 'component-create', 'success', { component_name: 'Orders Sync', component_id: ID, file_path: FILE, branch: 'account-default' }),
+    logLine('2026-10-12T11:01:00Z', 'deploy-package', 'fail', { component_name: 'Orders Sync', component_id: ID, error: 'Component is not deployable' }, 400),
+    logLine('2026-10-12T11:02:00Z', 'test-execute', 'success', { process_id: ID, atom_id: 'x', request_id: 'r', waited: false }),
+    logLine('2026-10-12T11:03:00Z', 'undeploy', 'success', { deployment_id: 'd-1', environment_id: 'env' }),
+    logLine('2026-10-12T11:04:00Z', 'folder-list', 'success', {}),
+    'not json',
+  ].join('\n')
+  const entries = parseActivityLog(log)
+  expect(entries.map(e => e.operation)).toEqual(['component-create', 'deploy-package', 'test-execute', 'undeploy', 'folder-list'])
+  const steps = entries.map(e => logStep(e, 'active-development', NOW - 30 * 60_000))
+  expect(steps[0]).toMatchObject({ kind: 'create', outcome: 'ok', subject: 'Orders Sync', componentId: ID, file: FILE, source: 'log', isRestored: true })
+  expect(steps[1]).toMatchObject({ kind: 'deploy', outcome: 'failed', detail: 'ERROR: deploy-package failed (HTTP 400): Component is not deployable' })
+  expect(describe({ id: 1, ...steps[2]! })).toBe(`Test of ${ID} submitted, not waited for`)
+  expect(steps[3]).toMatchObject({ kind: 'undeploy', subject: 'deployment d-1' })
+  expect(steps[4]).toBeUndefined()
+})
+
+test("Claude's own runs cover their log entries, one each, so a loop's entries aren't added again", () => {
+  const at = Date.parse('2026-10-12T11:00:00Z')
+  const loop = [
+    act('create', 'ok', 'Request Profile', at, { startedAt: at - 500, endedAt: at + 2_000, componentId: 'p1' }),
+    act('create', 'ok', 'Response Profile', at, { startedAt: at - 500, endedAt: at + 2_000, componentId: 'p2' }),
+  ]
+  const entries = parseActivityLog(
+    [
+      logLine('2026-10-12T11:00:00Z', 'component-create', 'success', { component_name: 'Request Profile', component_id: 'p1' }),
+      logLine('2026-10-12T11:00:01Z', 'component-create', 'success', { component_name: 'Response Profile', component_id: 'p2' }),
+      // A third, from a terminal a minute later: Claude didn't run it.
+      logLine('2026-10-12T11:01:00Z', 'component-create', 'success', { component_name: 'Error Profile', component_id: 'p3' }),
+    ].join('\n'),
+  )
+  const opts = { now: NOW, windowMs: 24 * HOUR, sessionStart: 0, componentsDir: 'active-development' }
+  const fresh = newLogSteps(entries, loop, opts)
+  expect(fresh.map(s => s.subject)).toEqual(['Error Profile'])
+  // Once added, it's known by its key.
+  expect(newLogSteps(entries, [...loop, { id: 9, ...fresh[0]! }], opts)).toEqual([])
+  // Outside the window, nothing.
+  expect(newLogSteps(entries, [], { ...opts, windowMs: HOUR / 2 })).toEqual([])
+})
+
+// --- Picking an item for a command ---
+
+test('a command picks its item by label or by number, from the items it fits', () => {
+  const needs = attention(
+    dashboard([
+      act('deploy', 'failed', 'Weather API', NOW - HOUR, { file: 'active-development/w/W.xml' }),
+      act('test', 'failed', 'Orders Sync', NOW, { componentId: ID, executionStatus: 'ERROR', executionId: 'execution-1' }),
+    ]),
+    NOW,
+    24 * HOUR,
+  )
+  const choices = choicesOf(needs, n => n.executionId !== undefined)
+  expect(choices.map(c => c.n)).toEqual([1])
+  expect(choiceLabel(choices[0]!)).toBe('1. Test of Orders Sync ended ERROR')
+  expect(choiceFrom('1. Test of Orders Sync ended ERROR', choices)?.n).toBe(1)
+  expect(choiceFrom(' 1 ', choices)?.n).toBe(1)
+  expect(choiceFrom('2', choices)).toBeUndefined()
+  expect(choiceList('Which?', choices, '/bc-dashboard why', NOW)).toBe(
+    'Which?\n  1. ✗ Test of Orders Sync ended ERROR, just now\nRun /bc-dashboard why <number> with one of them.',
+  )
 })

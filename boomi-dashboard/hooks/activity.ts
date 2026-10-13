@@ -3,7 +3,7 @@
 // attention, the recent feed and the live environment. Plain functions:
 // nothing here touches the engine, so the tests call them directly.
 
-import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, PastSession, Run, RuntimeSeen, StandardsSeen, TokenSplit, Watched } from '../types'
+import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, PastSession, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
@@ -963,7 +963,6 @@ export const duration = (ms: number): string => {
 
 /** The whole dashboard as text: what /bc-dashboard and Claude's summary tool show. */
 export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowMs: number): string => {
-  const hours = Math.round(windowMs / 3_600_000)
   const lines: string[] = []
   const needs = attention(dashboard, now, windowMs)
   lines.push(needs.length > 0 ? `Needs attention (${needs.length}):` : '✓ Nothing needs attention.')
@@ -988,18 +987,13 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
     lines.push('', "Claude's latest steps (what Claude just did with Companion, newest first):")
     for (const a of feed) {
       const spent = formatSpend(all.get(a.id))
-      lines.push(`  ${STATUS[levelOf(a)].icon} ${describe(a)}, ${ago(when(a), now)}${spent ? `  [${spent}]` : ''}`)
+      lines.push(`  ${STATUS[levelOf(a)].icon} ${describe(a)}, ${ago(when(a), now)}${a.source === 'log' ? " (from Companion's log)" : ''}${spent ? `  [${spent}]` : ''}`)
     }
   }
 
-  lines.push('', `Process runs in Boomi, last ${hours}h (runs of this session's components):`)
-  if (dashboard.platform.phase !== 'ok') lines.push(`  ${dashboard.platform.message}`)
-  else {
-    if (runs.length === 0) lines.push(rows.length > 0 ? `  None of this session's components ran in the last ${hours}h.` : "  Runs show up here once this session's components run.")
-    for (const run of runs) lines.push(`  ${runLine(run, now)}`)
-  }
   if (dashboard.watched.length > 0) {
     lines.push('', 'Watched components:')
+    if (dashboard.platform.phase !== 'ok' && dashboard.platform.checkedAt !== undefined) lines.push(`  ${dashboard.platform.message}`)
     for (const w of dashboard.watched) lines.push(`  ${watchedLine(w)}`)
   }
 
@@ -1249,10 +1243,9 @@ const cell = (text: string) => text.replace(/\|/g, '\\|')
 /**
  * The session as Markdown, for a PR, a ticket or a hand-off: what was built and
  * where it stands, what was deployed and tested, what failed and was closed,
- * the environment's runs, and the spend.
+ * and the spend.
  */
 export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, windowMs: number): string => {
-  const hours = Math.round(windowMs / 3_600_000)
   const all = spends(dashboard.activity)
   const runs = sessionRuns(dashboard, now, windowMs)
   const rows = components(dashboard.activity)
@@ -1295,10 +1288,6 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
   if (needs.length === 0) lines.push('Nothing open.')
   for (const n of needs) lines.push(`- ${STATUS[n.level].icon} ${n.title}`)
   if (closed > 0) lines.push(`- ☑ ${closed} closed as expected or handled`)
-
-  lines.push('', `## Process runs in Boomi, last ${hours}h`, '')
-  if (dashboard.platform.phase !== 'ok') lines.push(dashboard.platform.message)
-  else lines.push(runsSummary(runs, hours).text)
 
   lines.push('', '## Spend', '')
   if (u.usd !== undefined) lines.push(`- Cost: ${formatCost(u.usd)}`)
@@ -1500,3 +1489,224 @@ export const guardrails = (standards: StandardsSeen | undefined, runtime: Runtim
 /** The guardrail lines as text, for /bc-dashboard text. */
 export const guardrailText = (lines: readonly GuardLine[]): string =>
   lines.length === 0 ? '' : ['Guardrails:', ...lines.map(l => `  ${l.level ? `${STATUS[l.level].icon} ` : ''}${l.text}`)].join('\n')
+
+// --- A new session's banner ---------------------------------------------------------
+
+/**
+ * What this session did with Companion, for the next session's banner. Only
+ * this session's own steps count, not ones brought back from an earlier one.
+ * Undefined when it did nothing with Companion.
+ */
+export const recapOf = (dashboard: Dashboard, now: number, windowMs: number, usd?: number): SessionRecap | undefined => {
+  const fresh = dashboard.activity.filter(a => !a.isRestored && a.outcome !== 'running')
+  if (!fresh.some(a => a.kind !== 'other')) return undefined
+  const count = (kind: ActivityKind, outcome?: Outcome) => fresh.filter(a => a.kind === kind && (!outcome || a.outcome === outcome)).length
+  return {
+    endedAt: Math.max(...fresh.map(when)),
+    components: components(fresh).length,
+    saves: count('create') + count('push'),
+    deploys: count('deploy'),
+    tests: count('test'),
+    testsFailed: count('test', 'failed'),
+    open: attention({ ...dashboard, activity: fresh }, now, windowMs).filter(n => n.key.startsWith('step:')).length,
+    usd,
+  }
+}
+
+/** The banner's "Last session" line: when, what it did, how it ended and what it cost. */
+export const recapLine = (recap: SessionRecap, now: number): { level: Level; text: string } => {
+  const did = [
+    recap.components > 0 ? plural(recap.components, 'component') : undefined,
+    recap.saves > 0 ? plural(recap.saves, 'save') : undefined,
+    recap.deploys > 0 ? plural(recap.deploys, 'deploy') : undefined,
+    recap.tests > 0 ? `${plural(recap.tests, 'test')}${recap.testsFailed > 0 ? ` (${recap.testsFailed} failed)` : ''}` : undefined,
+  ].filter(Boolean)
+  const ended = recap.open > 0 ? `${recap.open} left to fix` : 'nothing left to fix'
+  return {
+    level: recap.open > 0 ? 'critical' : 'healthy',
+    text: `Last session ${ago(recap.endedAt, now)}: ${[...did, ended, formatCost(recap.usd)].filter(Boolean).join(' · ')}`,
+  }
+}
+
+/** What the banner turns through at the start of a session, before Companion has done anything. */
+export const TIPS: readonly string[] = [
+  'Tip: Why? on a failed test reads its log; Ask Claude to fix drafts the request',
+  "Tip: Run again repeats a failed test without a turn of Claude's",
+  'Tip: ask Claude "what\'s left to fix?" and it answers from the dashboard',
+  'Tip: /bc-dashboard report save writes the session up for a PR or a hand-off',
+  'Tip: set budgetUsd under /config for a warning at 80% of a spend budget',
+  'Tip: Scan under Past Companion sessions shows what earlier sessions cost',
+  'Tip: /bc-dashboard watch <component> flags changes someone else makes in Boomi',
+  "Tip: BOOMI_COMPANION_LOG_ACTIVITY=1 in Companion's .env adds its activity log as a second source",
+  'Tip: the Day, Night and Terminal buttons in the pane change its colors',
+]
+
+/**
+ * The line the banner shows at turn `n` of its rotation: the last session's
+ * recap first, when there is one, then each tip in turn.
+ */
+export const welcomeLine = (n: number, recap: SessionRecap | undefined, now: number): { level?: Level; text: string } => {
+  const lines: { level?: Level; text: string }[] = [...(recap ? [recapLine(recap, now)] : []), ...TIPS.map(text => ({ text }))]
+  return lines[((n % lines.length) + lines.length) % lines.length]!
+}
+
+// --- Companion's activity log -------------------------------------------------------
+
+/**
+ * One line of Companion's `.activity-log/activity.jsonl`, written by its
+ * scripts' `log_activity` when `BOOMI_COMPANION_LOG_ACTIVITY=1` is in its .env.
+ */
+export type LogEntry = {
+  at: number
+  operation: string
+  result: string
+  httpCode?: number | string
+  details: Record<string, unknown>
+  /** What makes the entry unique: its time, operation, subject and result. */
+  key: string
+}
+
+/** The log's operations that are a step of a component, as the dashboard's kinds. */
+const LOG_KINDS: Record<string, ActivityKind> = {
+  'component-create': 'create',
+  'component-push': 'push',
+  'component-pull': 'pull',
+  'deploy-package': 'deploy',
+  deploy: 'deploy',
+  undeploy: 'undeploy',
+  'test-execute': 'test',
+}
+
+const textOf = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined)
+
+/** Reads the log's lines; a line that isn't a log entry (a partial first line, say) is skipped. */
+export const parseActivityLog = (log: string): LogEntry[] => {
+  const entries: LogEntry[] = []
+  for (const line of log.split(/\r?\n/)) {
+    if (!line.trim().startsWith('{')) continue
+    let raw: Record<string, unknown>
+    try {
+      raw = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    const at = Date.parse(String(raw.timestamp ?? ''))
+    const operation = textOf(raw.operation)
+    if (Number.isNaN(at) || !operation) continue
+    const details = raw.details && typeof raw.details === 'object' ? (raw.details as Record<string, unknown>) : {}
+    const subject = textOf(details.component_id) ?? textOf(details.process_id) ?? textOf(details.deployment_id) ?? textOf(details.file_path) ?? ''
+    entries.push({
+      at,
+      operation,
+      result: String(raw.result ?? ''),
+      httpCode: (raw.http_code as number | string | null) ?? undefined,
+      details,
+      key: `${raw.timestamp}|${operation}|${subject}|${raw.result}`,
+    })
+  }
+  return entries
+}
+
+/** A log entry as a step, in the words the dashboard uses for the same script's output. */
+export const logStep = (entry: LogEntry, componentsDir: string, sessionStart: number): Omit<Activity, 'id'> | undefined => {
+  const kind = LOG_KINDS[entry.operation]
+  if (!kind) return undefined
+  const d = entry.details
+  const componentId = textOf(d.component_id) ?? textOf(d.process_id)
+  const filePath = textOf(d.file_path)
+  const file = filePath ? componentPath(filePath, componentsDir) : undefined
+  const deployment = textOf(d.deployment_id)
+  const subject = textOf(d.component_name) ?? filePath?.split('/').pop() ?? componentId ?? (deployment ? `deployment ${deployment}` : 'a component')
+  const executionStatus = textOf(d.status)
+  const isFailed = entry.result !== 'success' || isFailedStatus(executionStatus)
+  const http = entry.httpCode === undefined || entry.httpCode === '' ? '' : ` (HTTP ${entry.httpCode})`
+  const why = textOf(d.error) ?? (executionStatus ? `status=${executionStatus}` : undefined)
+  const step: Omit<Activity, 'id'> = {
+    kind,
+    outcome: isFailed ? 'failed' : 'ok',
+    subject,
+    detail: isFailed
+      ? shorten(`ERROR: ${entry.operation} failed${http}${why ? `: ${why}` : ''}`)
+      : kind === 'test' && !executionStatus
+        ? 'submitted, not waited for'
+        : "from Companion's activity log",
+    startedAt: entry.at,
+    endedAt: entry.at,
+    source: 'log',
+    logKey: entry.key,
+  }
+  if (file) step.file = file
+  if (componentId) step.componentId = componentId
+  if (textOf(d.component_type)) step.type = textOf(d.component_type)
+  if (textOf(d.version)) step.version = textOf(d.version)
+  if (executionStatus) step.executionStatus = executionStatus
+  if (textOf(d.execution_id)) step.executionId = textOf(d.execution_id)
+  if (entry.at < sessionStart) step.isRestored = true
+  return step
+}
+
+/** How far outside a step's own span its log entry may be: the log's times are whole seconds. */
+const SAME_RUN_MS = 3_000
+
+/**
+ * The log's steps the dashboard doesn't have yet: entries in the window that
+ * no step already covers. Claude's own script runs are seen in its tool
+ * calls, so their entries match a step of the same kind and component that
+ * was running when the entry was written; each step covers one entry, so a
+ * loop over six components is six. The rest ran outside Claude's tool calls.
+ */
+export const newLogSteps = (
+  entries: readonly LogEntry[],
+  activity: readonly Activity[],
+  opts: { now: number; windowMs: number; sessionStart: number; componentsDir: string },
+): Omit<Activity, 'id'>[] => {
+  const known = new Set(activity.map(a => a.logKey).filter(Boolean))
+  const covered = new Set<number>()
+  const out: Omit<Activity, 'id'>[] = []
+  for (const entry of entries) {
+    if (opts.now - entry.at > opts.windowMs || known.has(entry.key)) continue
+    const step = logStep(entry, opts.componentsDir, opts.sessionStart)
+    if (!step) continue
+    known.add(entry.key)
+    const same = activity.find(
+      a =>
+        a.source !== 'log' &&
+        !covered.has(a.id) &&
+        a.kind === step.kind &&
+        entry.at >= a.startedAt - SAME_RUN_MS &&
+        entry.at <= (a.endedAt ?? opts.now) + SAME_RUN_MS &&
+        (!a.componentId || !step.componentId || a.componentId === step.componentId),
+    )
+    if (same) {
+      covered.add(same.id)
+      continue
+    }
+    out.push(step)
+  }
+  return out
+}
+
+// --- Picking an item for a command ---------------------------------------------------
+
+/** A Needs attention item a command can act on, with its number in the text summary. */
+export type Choice = { n: number; item: Attention }
+
+/** The items a command can act on, numbered as /bc-dashboard text numbers them. */
+export const choicesOf = (needs: readonly Attention[], fits: (item: Attention) => boolean): Choice[] =>
+  needs.map((item, i) => ({ n: i + 1, item })).filter(c => fits(c.item))
+
+/** A choice as an option of the picker: short, and numbered so a typed number finds it too. */
+export const choiceLabel = (c: Choice): string => {
+  const label = `${c.n}. ${c.item.title}`
+  return label.length > 48 ? `${label.slice(0, 47)}…` : label
+}
+
+/** The choice an answer names: its option's label, or a number typed under "Other". */
+export const choiceFrom = (answer: string, choices: readonly Choice[]): Choice | undefined => {
+  const typed = answer.trim()
+  return choices.find(c => choiceLabel(c) === typed) ?? choices.find(c => String(c.n) === typed.replace(/^#|\.$/g, ''))
+}
+
+/** The choices as a list to pick from by number, where no picker can be shown. */
+export const choiceList = (question: string, choices: readonly Choice[], command: string, now: number): string =>
+  [question, ...choices.map(c => `  ${c.n}. ${STATUS[c.item.level].icon} ${c.item.title}, ${ago(c.item.at, now)}`), `Run ${command} <number> with one of them.`].join('\n')

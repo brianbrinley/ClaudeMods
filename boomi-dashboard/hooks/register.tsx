@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
-import type { Activity, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, RuntimeSeen, StandardsSeen, Watched } from '../types'
+import type { Activity, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -41,8 +41,6 @@ import {
   formatTokens,
   assignResults,
   parseResults,
-  isFailedStatus,
-  isRunningStatus,
   friendlyType,
   githubUrl,
   headline,
@@ -54,16 +52,10 @@ import {
   modelName,
   modelSplits,
   pixelCells,
-  newFailures,
   readOutput,
   recentRuns,
-  sessionRuns,
-  runsOf,
   reopenAll,
   restoredNote,
-  runsSummary,
-  runLevel,
-  runText,
   scriptRuns,
   spendOf,
   spends,
@@ -78,8 +70,16 @@ import {
   watchedLine,
   watchedText,
   worst,
+  choicesOf,
+  choiceFrom,
+  choiceLabel,
+  choiceList,
+  recapOf,
+  welcomeLine,
+  parseActivityLog,
+  newLogSteps,
 } from './activity'
-import type { Level, Reading, ScriptRun, Usage } from './activity'
+import type { Attention, Level, Reading, ScriptRun, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import type { Credentials } from './platform'
 
@@ -102,8 +102,14 @@ const isWorking = atom({ plugin: 'boomi-dashboard', key: 'isWorking' } as const,
 /** The theme picked in the pane or with /bc-dashboard theme; null follows the setting. */
 const pickedTheme = atom({ plugin: 'boomi-dashboard', key: 'theme' } as const, null as PaneTheme | null)
 
-/** Whether the Process runs in Boomi section is folded to one line, for this session. */
-const isRunsCollapsed = atom({ plugin: 'boomi-dashboard', key: 'isRunsCollapsed' } as const, false)
+/** Which line the banner shows while a new session hasn't worked with Companion yet: the recap, then the tips. */
+const tip = atom({ plugin: 'boomi-dashboard', key: 'tip' } as const, 0)
+
+/** What the last session in this folder did with Companion, for the banner. */
+const recap = atom({ plugin: 'boomi-dashboard', key: 'recap' } as const, null as SessionRecap | null)
+
+/** Whether the session runs in a Companion workspace: the banner only greets there. */
+const isCompanionFolder = atom({ plugin: 'boomi-dashboard', key: 'isCompanionFolder' } as const, false)
 
 /** What each failed execution's log says, by execution ID, once someone asks Why?. */
 const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const, {} as Record<string, DiagnosisState>)
@@ -140,6 +146,7 @@ type Settings = {
   budgetUsd: number
   isSuggesting: boolean
   historyDays: number
+  isReadingLog: boolean
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -154,6 +161,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   budgetUsd: Math.max(0, Number(options.budgetUsd ?? 0) || 0),
   isSuggesting: options.suggestions !== false,
   historyDays: Math.max(1, Number(options.historyDays ?? 90) || 90),
+  isReadingLog: options.activityLog !== false,
 })
 
 const PANE = 'boomi-dashboard'
@@ -164,6 +172,15 @@ const HISTORY_KEY = 'history'
 
 /** How often the flamingo's frame moves on while Claude works. */
 const FLAMINGO_TICK_MS = 500
+
+/** How long the banner shows each line of a new session's recap and tips. */
+const TIP_MS = 20_000
+
+/** How often Companion's activity log is checked for steps Claude's tool calls didn't show. */
+const LOG_CHECK_MS = 10_000
+
+/** Companion's activity log, relative to the workspace, where its scripts write it. */
+const ACTIVITY_LOG = '.activity-log/activity.jsonl'
 
 const THEMES: readonly PaneTheme[] = ['day', 'night', 'terminal']
 const THEME_NAMES: Record<PaneTheme, string> = { day: 'Day', night: 'Night', terminal: 'Terminal' }
@@ -234,21 +251,29 @@ const activityKey = async ($: Engine) => `activity:${await $.session.cwd()}`
  * this mod, for one) doesn't empty the dashboard. Session state alone is
  * gone when the session ends.
  */
-const saveActivity = async ($: Engine) => {
+const saveActivity = async ($: Engine, settings: Settings) => {
   try {
-    const list = (await read($, dashboard)).activity.filter(a => a.outcome !== 'running')
-    const { closedSteps, seenRuns } = await read($, dashboard)
-    await $.store.set(await activityKey($), { savedAt: await $.clock.now(), activity: list.slice(-100), closedSteps, seenRuns })
+    const current = await read($, dashboard)
+    const list = current.activity.filter(a => a.outcome !== 'running')
+    const { closedSteps, seenRuns } = current
+    const now = await $.clock.now()
+    // The recap is this session's once it has worked with Companion; until then the last one's stands.
+    const last = recapOf(current, now, settings.windowMs, (await usageOf($)).usd) ?? (await read($, recap)) ?? undefined
+    await $.store.set(await activityKey($), { savedAt: now, activity: list.slice(-100), closedSteps, seenRuns, recap: last })
   } catch {}
 }
 
-/** At the start of a session with nothing yet, brings back this folder's steps from the last window. */
+/**
+ * At the start of a session with nothing yet, brings back this folder's steps
+ * from the last window, and what the last session did, for the banner.
+ */
 const restoreActivity = async ($: Engine, settings: Settings) => {
   try {
     if ((await read($, dashboard)).activity.length > 0) return
     const saved = (await $.store.get(await activityKey($))) as
-      | { activity?: Activity[]; closedSteps?: number[]; seenRuns?: string[] }
+      | { activity?: Activity[]; closedSteps?: number[]; seenRuns?: string[]; recap?: SessionRecap }
       | undefined
+    if (saved?.recap) await update($, recap, () => saved.recap!)
     const now = await $.clock.now()
     const kept = (saved?.activity ?? [])
       .filter(a => now - (a.endedAt ?? a.startedAt) <= settings.windowMs)
@@ -364,9 +389,7 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
   await record($, list => [...list.map(a => done.find(d => d.id === a.id) ?? a), ...added])
   for (const a of [...done, ...added]) announce($, settings, a)
   void refreshStatus($, settings)
-  void saveActivity($)
-  // A deploy or test starts runs in Boomi: look for them soon.
-  if ([...done, ...added].some(a => a.kind === 'deploy' || a.kind === 'test')) pollSoon($, settings, 5_000)
+  void saveActivity($, settings)
 }
 
 /** A toast for what someone would want to hear about without looking. */
@@ -411,7 +434,7 @@ const noteEdit = async ($: Engine, settings: Settings, path: string) => {
   })
   if (isFirst) openPane($)
   void refreshStatus($, settings)
-  void saveActivity($)
+  void saveActivity($, settings)
 }
 
 // --- The Platform API --------------------------------------------------------
@@ -440,63 +463,25 @@ const loadCredentials = async ($: Engine, settings: Settings): Promise<Credentia
 }
 
 let isPolling = false
-let isFollowUpDue = false
 
 /**
- * A check of Boomi soon, on top of the regular poll: after a deploy or test,
- * and while a run is still in progress, so a new run shows without the
- * regular poll's wait. One is pending at a time.
+ * Checks the watched components' versions in Boomi and toasts a change by
+ * someone else. No Platform API call while nothing is watched. (Up to 0.10.0
+ * this also read the environment's process runs; that's set aside for now,
+ * see IDEAS.md.)
  */
-const pollSoon = ($: Engine, settings: Settings, ms: number) => {
-  if (settings.pollSeconds <= 0 || isFollowUpDue) return
-  isFollowUpDue = true
-  $.clock.after(ms, async () => {
-    isFollowUpDue = false
-    await poll($, settings)
-  })
-}
-
-/** Polls the environment's recent runs and the watched components; toasts what's new. */
 const poll = async ($: Engine, settings: Settings): Promise<void> => {
-  if (isPolling) return
+  if (isPolling || (await read($, dashboard)).watched.length === 0) return
   isPolling = true
   try {
+    const checkedAt = await $.clock.now()
     const loaded = await loadCredentials($, settings)
     if (typeof loaded === 'string') {
-      await update($, dashboard, c => ({ ...c, platform: { ...OFF, message: loaded } }))
+      await update($, dashboard, c => ({ ...c, platform: { ...OFF, message: loaded, checkedAt } }))
       return
     }
     const client = platformClient((url, init) => $.http.fetch(url, init), loaded)
     const before = await read($, dashboard)
-    const checkedAt = await $.clock.now()
-
-    let platform: Platform
-    if (!loaded.environmentId) {
-      platform = { phase: 'off', message: 'Not connected: set BOOMI_ENVIRONMENT_ID to choose which environment to show.', runs: [], checkedAt }
-    } else {
-      try {
-        const atoms = await client.environmentAtoms(loaded.environmentId)
-        const runs = await client.recentRuns(atoms)
-        platform = {
-          phase: 'ok',
-          message: atoms.length === 0 ? 'No runtimes are attached to the environment, so nothing can run there yet.' : `Watching ${atoms.length} runtime${atoms.length === 1 ? '' : 's'}.`,
-          environmentId: loaded.environmentId,
-          checkedAt,
-          runs,
-        }
-        // The first poll sets the baseline: only failures after it are news.
-        if (before.platform.checkedAt !== undefined) {
-          // Only this session's components: other processes' failures aren't this person's news.
-          const rows = components(before.activity)
-          for (const run of newFailures(before.platform.runs, runs).filter(run => rows.some(row => runsOf(row, [run]).length > 0))) {
-            toast($, settings, `${STATUS.critical.icon} ${runText(run, checkedAt)}`)
-          }
-        }
-      } catch (error) {
-        platform = { ...before.platform, phase: 'error', message: `Couldn't reach Boomi: ${messageOf(error)}`, checkedAt }
-      }
-    }
-
     const watched: Watched[] = []
     for (const w of before.watched) {
       try {
@@ -515,13 +500,64 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
     // A watch added or removed while this poll ran stands.
     await update($, dashboard, c => ({
       ...c,
-      platform,
+      platform: { phase: 'ok' as const, message: 'Connected.', checkedAt, runs: [] },
       watched: c.watched.map(w => watched.find(fresh => fresh.componentId === w.componentId) ?? w),
     }))
-    if (platform.runs.some(run => isRunningStatus(run.status))) pollSoon($, settings, 10_000)
   } finally {
     isPolling = false
   }
+}
+
+// --- Companion's activity log ------------------------------------------------
+
+/** The log's size and time when it was last read, so an unchanged log isn't read again. */
+let logSeen = ''
+
+/** Over this, only the log's tail is read, through tail(1): a mod's one read is capped at 4 MiB. */
+const LOG_READ_MAX = 3_500_000
+
+/**
+ * Reads Companion's activity log, when its scripts write one
+ * (BOOMI_COMPANION_LOG_ACTIVITY=1), and adds the steps Claude's tool calls
+ * didn't show: a script run in a terminal, by another tool, or before this
+ * mod loaded. Steps the dashboard already has are matched and left alone.
+ */
+const readActivityLog = async ($: Engine, settings: Settings) => {
+  if (!settings.isReadingLog) return
+  try {
+    const path = `${await $.session.cwd()}/${ACTIVITY_LOG}`
+    const stat = await $.fs.stat(path).catch(() => undefined)
+    if (!stat || stat.kind !== 'file') return
+    const seenNow = `${stat.size}:${stat.mtimeMs}`
+    if (seenNow === logSeen) return
+    const text =
+      stat.size <= LOG_READ_MAX
+        ? String(await $.fs.read(path))
+        : (await $.process.run(['tail', '-c', String(LOG_READ_MAX), path], { timeoutMs: 10_000 })).stdout
+    const now = await $.clock.now()
+    const usage = await usageOf($)
+    const steps = newLogSteps(parseActivityLog(text), (await read($, dashboard)).activity, {
+      now,
+      windowMs: settings.windowMs,
+      sessionStart: usage.startedAt ?? now,
+      componentsDir: settings.componentsDir,
+    })
+    logSeen = seenNow
+    if (steps.length === 0) return
+    let added: Activity[] = []
+    await update($, dashboard, c => {
+      // A step's logKey keeps it from being added twice, however reads overlap.
+      const keys = new Set(c.activity.map(a => a.logKey))
+      let id = nextId(c.activity)
+      added = steps.filter(step => !keys.has(step.logKey)).map(step => ({ ...step, id: id++ }))
+      return { ...c, activity: [...c.activity, ...added].sort((a, b) => a.startedAt - b.startedAt).slice(-150) }
+    })
+    for (const a of added) if (!a.isRestored) announce($, settings, a)
+    if (added.length > 0) {
+      void refreshStatus($, settings)
+      void saveActivity($, settings)
+    }
+  } catch {}
 }
 
 // --- Watching components -----------------------------------------------------
@@ -563,15 +599,9 @@ const unwatch = async ($: Engine, target: string): Promise<string> => {
 
 /** Marks every watched change as seen, so only new ones count. */
 const seen = async ($: Engine): Promise<string> => {
-  const current = await read($, dashboard)
-  const failedRuns = current.platform.runs.filter(run => isFailedStatus(run.status)).map(run => run.executionId)
-  const changed = current.watched.filter(w => w.changedBy).length
-  await update($, dashboard, c => ({
-    ...c,
-    watched: c.watched.map(w => ({ ...w, changedBy: undefined })),
-    seenRuns: [...new Set([...(c.seenRuns ?? []), ...failedRuns])].slice(-200),
-  }))
-  return `Marked as seen: ${failedRuns.length} failed run${failedRuns.length === 1 ? '' : 's'} and ${changed} watched change${changed === 1 ? '' : 's'}. They leave Needs attention; the runs stay listed under Process runs in Boomi.`
+  const changed = (await read($, dashboard)).watched.filter(w => w.changedBy).length
+  await update($, dashboard, c => ({ ...c, watched: c.watched.map(w => ({ ...w, changedBy: undefined })) }))
+  return `Marked as seen: ${changed} watched change${changed === 1 ? '' : 's'}. They leave Needs attention.`
 }
 
 // --- Why a run failed ------------------------------------------------------------
@@ -645,11 +675,37 @@ const askToFix = async ($: Engine, title: string, executionId: string) => {
   await $.prompt.fill({ text: draft.text.trim() ? `\n${text}` : text, mode: draft.text.trim() ? 'append' : 'replace' }).catch(() => undefined)
 }
 
-/** /bc-dashboard why <number>: reads the log of a Needs attention item, by its number. */
+type Ask = { fits: (item: Attention) => boolean; none: string; question: string; header: string; command: string }
+
+/**
+ * The Needs attention item a command means: the one numbered, else the only
+ * one it fits, else the person's pick in Claude Code's question dialog (up to
+ * four, newest first; "Other" takes a number). Where no dialog can be shown,
+ * or it's dismissed, the answer is the list to pick from by number.
+ */
+const pickItem = async ($: Engine, settings: Settings, target: string, ask: Ask): Promise<Attention | string> => {
+  const now = await $.clock.now()
+  const choices = choicesOf(attention(await read($, dashboard), now, settings.windowMs), ask.fits)
+  if (choices.length === 0) return ask.none
+  if (target) return choiceFrom(target, choices)?.item ?? `${target} isn't one of these.\n${choiceList(ask.question, choices, ask.command, now)}`
+  if (choices.length === 1) return choices[0]!.item
+  const shown = choices.slice(0, 4)
+  const answer = await $.ui
+    .ask(ask.question, { header: ask.header, options: shown.map(choiceLabel) })
+    .catch(() => undefined)
+  return (answer !== undefined && choiceFrom(answer, choices)?.item) || choiceList(ask.question, choices, ask.command, now)
+}
+
+/** /bc-dashboard why [number]: reads the log of a failed test or run under Needs attention. */
 const whyByNumber = async ($: Engine, settings: Settings, target: string): Promise<string> => {
-  const needs = attention(await read($, dashboard), await $.clock.now(), settings.windowMs)
-  const item = needs[Number(target) - 1]
-  if (!item) return `Usage: /bc-dashboard why <1-${needs.length}>, a number from /bc-dashboard text.`
+  const item = await pickItem($, settings, target, {
+    fits: n => n.executionId !== undefined,
+    none: 'Nothing to look into: no failed test or run under Needs attention has a log to read.',
+    question: 'Which failure should the dashboard read the log of?',
+    header: 'Why?',
+    command: '/bc-dashboard why',
+  })
+  if (typeof item === 'string') return item
   if (!item.executionId) return `${item.title} has no execution log to read.`
   const state = await explain($, settings, item.executionId)
   if (state.phase !== 'ready') return `Couldn't read the log of ${item.executionId}: ${state.error}`
@@ -687,11 +743,16 @@ const rerun = async ($: Engine, settings: Settings, stepId: number): Promise<str
   return done ? `${STATUS[levelOf(done)].icon} ${describe(done)}` : 'Ran the test again.'
 }
 
-/** /bc-dashboard rerun <number>: runs a failed test in Needs attention again. */
+/** /bc-dashboard rerun [number]: runs a failed test under Needs attention again. */
 const rerunByNumber = async ($: Engine, settings: Settings, target: string): Promise<string> => {
-  const needs = attention(await read($, dashboard), await $.clock.now(), settings.windowMs)
-  const item = needs[Number(target) - 1]
-  if (!item) return `Usage: /bc-dashboard rerun <1-${needs.length}>, a number from /bc-dashboard text.`
+  const item = await pickItem($, settings, target, {
+    fits: n => n.rerunId !== undefined,
+    none: 'Nothing to run again: no failed test Claude ran is under Needs attention.',
+    question: 'Which failed test should run again?',
+    header: 'Run again',
+    command: '/bc-dashboard rerun',
+  })
+  if (typeof item === 'string') return item
   if (item.rerunId === undefined) return `${item.title} isn't a test Claude ran, so there's nothing to run again.`
   return rerun($, settings, item.rerunId)
 }
@@ -801,9 +862,9 @@ const reportCommand = async ($: Engine, settings: Settings, target: string): Pro
 }
 
 /** Closes one Needs attention item by its key, and keeps that for later sessions. */
-const close = async ($: Engine, key: string) => {
+const close = async ($: Engine, settings: Settings, key: string) => {
   await update($, dashboard, c => closeItem(c, key))
-  void saveActivity($)
+  void saveActivity($, settings)
 }
 
 /** /bc-dashboard close <number|all>: closes items by their number in the text summary. */
@@ -812,13 +873,13 @@ const closeByNumber = async ($: Engine, settings: Settings, target: string): Pro
   if (needs.length === 0) return 'Nothing needs attention.'
   const picked = target === 'all' ? needs : needs.filter((_, i) => String(i + 1) === target)
   if (picked.length === 0) return `Usage: /bc-dashboard close <1-${needs.length} | all>`
-  for (const item of picked) await close($, item.key)
+  for (const item of picked) await close($, settings, item.key)
   return `Closed: ${picked.map(item => item.title).join('; ')}. /bc-dashboard reopen brings closed items back.`
 }
 
-const reopen = async ($: Engine): Promise<string> => {
+const reopen = async ($: Engine, settings: Settings): Promise<string> => {
   await update($, dashboard, reopenAll)
-  void saveActivity($)
+  void saveActivity($, settings)
   return 'Closed items are back under Needs attention, where they still apply.'
 }
 
@@ -847,16 +908,16 @@ const theme = async ($: Engine, settings: Settings, target: string): Promise<str
 const USAGE = [
   '/bc-dashboard                 open the dashboard pane (Esc closes it); where no pane fits, print it here',
   '/bc-dashboard text            the same as text, here in the conversation',
-  '/bc-dashboard poll            check Boomi now',
+  '/bc-dashboard poll            check the watched components in Boomi now',
   '/bc-dashboard watch <id|file> watch a component for changes someone else makes',
   '/bc-dashboard unwatch <id>    stop watching it',
   '/bc-dashboard close <n|all>   close a Needs attention item by its number, or all of them',
   '/bc-dashboard reopen          bring closed items back',
-  '/bc-dashboard why <n>         read the log of a failed run or test and show what failed',
-  '/bc-dashboard rerun <n>       run a failed test again, the same way Claude ran it',
+  '/bc-dashboard why [n]         read the log of a failed test or run (no number: pick one)',
+  '/bc-dashboard rerun [n]       run a failed test again, the same way Claude ran it (no number: pick one)',
   '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
   '/bc-dashboard history         past Companion sessions on this machine and what each cost',
-  '/bc-dashboard seen            mark failed runs and watched changes as seen (expected)',
+  '/bc-dashboard seen            mark watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
 ].join('\n')
@@ -925,7 +986,7 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
     case 'history':
       return historyCommand($, settings)
     case 'reopen':
-      return reopen($)
+      return reopen($, settings)
     case 'theme':
       return theme($, settings, target)
     case 'banner':
@@ -1011,7 +1072,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | why <n> | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
+      argumentHint: 'text | poll | why [n] | rerun [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal]',
     })
     await $.tool.register({
       name: 'summary',
@@ -1068,6 +1129,22 @@ export const register: Register = (on, options) => {
       $.clock.after(2_000, () => poll($, settings))
       $.clock.every(settings.pollSeconds * 1000, () => poll($, settings))
     }
+
+    // The banner greets only where Companion works: its components folder, its log, or an earlier session here.
+    const cwd = await $.session.cwd()
+    const exists = (path: string) => $.fs.exists(path.startsWith('/') ? path : `${cwd}/${path}`).catch(() => false)
+    const isCompanion =
+      (await read($, recap)) !== null ||
+      (await read($, dashboard)).activity.length > 0 ||
+      (await exists(settings.componentsDir)) ||
+      (await exists(ACTIVITY_LOG))
+    await update($, isCompanionFolder, () => isCompanion)
+    // A new session's banner turns through the last session's recap and the tips until Companion does something.
+    $.clock.every(TIP_MS, async () => {
+      if (!(await read($, dashboard)).activity.some(a => !a.isRestored)) await update($, tip, n => n + 1)
+    })
+    await readActivityLog($, settings)
+    $.clock.every(LOG_CHECK_MS, () => readActivityLog($, settings))
     return started
   })
 
@@ -1157,19 +1234,27 @@ export const register: Register = (on, options) => {
   })
 
   // The banner above the prompt: the latest thing Companion did, what needs
-  // attention and the spend so far, on one row. Hidden until there's news.
+  // attention and the spend so far, on one row. At the start of a session in
+  // a Companion workspace, before Companion has done anything, it turns
+  // through what the last session did and tips instead. Elsewhere it waits.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!settings.isBanded || e.props.hasSurvey || (await read($, isBandHidden))) return next(e)
     const current = await read($, dashboard)
     const now = await $.clock.now()
-    const latest = headline(current.activity)
+    const isNew = !current.activity.some(a => !a.isRestored)
+    const latest = isNew ? undefined : headline(current.activity)
     const needs = attention(current, now, settings.windowMs)
-    if (!latest && needs.length === 0) return next(e)
+    const welcome = isNew && (await read($, isCompanionFolder)) ? welcomeLine(await read($, tip), (await read($, recap)) ?? undefined, now) : undefined
+    if (!latest && !welcome && needs.length === 0) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const count = components(current.activity).length
     const usage = await usageOf($)
-    const spent = [usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined, formatCost(usage.usd)].filter(Boolean).join(' · ')
+    const cost = formatCost(usage.usd)
+    const spent = isNew
+      ? cost && `${cost} this session`
+      : [usage.tokens ? `${formatTokens(usage.tokens)} tokens` : undefined, cost].filter(Boolean).join(' · ')
     const icon = (level: Level) => <Text color={STATUS[level].color}>{STATUS[level].icon}</Text>
+    const first = latest ?? welcome
 
     return (
       <Box>
@@ -1183,14 +1268,20 @@ export const register: Register = (on, options) => {
                 {icon(levelOf(latest))} {describe(latest)} <Text dimColor>{ago(latest.endedAt ?? latest.startedAt, now)}</Text>
               </Text>
             )}
+            {welcome && (
+              <Text>
+                {welcome.level ? <Text>{icon(welcome.level)} </Text> : undefined}
+                <Text dimColor={!welcome.level}>{welcome.text}</Text>
+              </Text>
+            )}
             {needs.length > 0 && (
               <Text>
-                <Text dimColor>{latest ? ' │ ' : ''}</Text>
+                <Text dimColor>{first ? ' │ ' : ''}</Text>
                 {icon(worst(needs.map(n => n.level)))} {needs.length} need{needs.length === 1 ? 's' : ''} attention
               </Text>
             )}
             <Text dimColor>
-              {count > 0 ? ` │ ${count} component${count === 1 ? '' : 's'}` : ''}
+              {!isNew && count > 0 ? ` │ ${count} component${count === 1 ? '' : 's'}` : ''}
               {spent ? ` │ ${spent}` : ''}
             </Text>
           </Text>
@@ -1208,7 +1299,6 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Link, Text } = $.ui.resolve(e)
     const themeNow = await themeOf($, settings)
-    const collapsed = await read($, isRunsCollapsed)
     const guards = await guardLines($)
     const past = await read($, history)
     const shown = await read($, historyShown)
@@ -1220,12 +1310,10 @@ export const register: Register = (on, options) => {
     const usage = await usageOf($)
     const working = await read($, isWorking)
     const flamingoFrame = await read($, frame)
-    const hours = Math.round(settings.windowMs / 3_600_000)
     const needs = attention(current, now, settings.windowMs)
     const closedItems = closedCount(current, now, settings.windowMs)
     const whys = await read($, diagnoses)
     const rows = components(current.activity)
-    const runs = sessionRuns(current, now, settings.windowMs)
     const stepsLimit = await read($, stepsShown)
     const steps = current.activity.slice().reverse()
     const feed = steps.slice(0, stepsLimit)
@@ -1358,7 +1446,7 @@ export const register: Register = (on, options) => {
             <Box flexDirection="column">
               <Box>
                 <Box flexShrink={0}>
-                  <Button key={`close-${i}`} label="☐" onPress={() => close($, n.key)} />
+                  <Button key={`close-${i}`} label="☐" onPress={() => close($, settings, n.key)} />
                   {t(' ')}
                 </Box>
                 <Box flexGrow={1} flexShrink={1}>
@@ -1386,7 +1474,7 @@ export const register: Register = (on, options) => {
         {closedItems > 0 && (
           <Box>
             {t(`☑ ${closedItems} closed  `, { color: p.muted })}
-            <Button key="reopen" label="Reopen" onPress={() => reopen($)} />
+            <Button key="reopen" label="Reopen" onPress={() => reopen($, settings)} />
           </Box>
         )}
 
@@ -1408,7 +1496,7 @@ export const register: Register = (on, options) => {
               </Box>
               <Text backgroundColor={p.bg}>
                 {t('  ')}
-                {stages(row, runs).map(s => (
+                {stages(row).map(s => (
                   <Text backgroundColor={p.bg}>
                     {icon(s.level)}
                     {t(` ${s.text}   `)}
@@ -1424,7 +1512,8 @@ export const register: Register = (on, options) => {
         {feed.length > 0 && note('What Claude just did with Companion, newest first, and the tokens each step took.')}
         {feed.map(a => {
           const spent = all.get(a.id)?.tokens
-          return line(levelOf(a), describe(a), [ago(a.endedAt ?? a.startedAt, now), spent ? `${formatTokens(spent)} tok` : undefined].filter(Boolean).join(' · '))
+          const aside = [ago(a.endedAt ?? a.startedAt, now), a.source === 'log' ? 'log' : undefined, spent ? `${formatTokens(spent)} tok` : undefined]
+          return line(levelOf(a), describe(a), aside.filter(Boolean).join(' · '))
         })}
         {steps.length > STEPS_PAGE && (
           <Box>
@@ -1436,20 +1525,6 @@ export const register: Register = (on, options) => {
 
         {guards.length > 0 && heading('Guardrails')}
         {guards.map(g => (g.level ? line(g.level, g.text) : note(g.text)))}
-
-        <Box marginTop={1} justifyContent="space-between">
-          <Box>
-            {t('◇ ', { color: p.rule, bold: true })}
-            {t('PROCESS RUNS IN BOOMI', { color: p.heading, bold: true })}
-            {t(`  last ${hours}h`, { color: p.muted })}
-          </Box>
-          <Button key="runs-toggle" label={collapsed ? 'Show' : 'Hide'} onPress={() => update($, isRunsCollapsed, v => !v)} />
-        </Box>
-        {!collapsed && note("Runs of this session's components in your Boomi environment: tests, listener calls and schedules.")}
-        {current.platform.phase !== 'ok' && line(current.platform.phase === 'error' ? 'serious' : 'warning', current.platform.message)}
-        {current.platform.phase === 'ok' && collapsed && line(runsSummary(runs, hours).level, runsSummary(runs, hours).text)}
-        {current.platform.phase === 'ok' && !collapsed && runs.length === 0 && note(rows.length > 0 ? `None of this session's components ran in the last ${hours}h.` : "Runs show up here once this session's components run.")}
-        {current.platform.phase === 'ok' && !collapsed && runs.slice(0, 6).map(run => line(runLevel(run), runText(run, now)))}
 
         <Box marginTop={1} justifyContent="space-between">
           <Box>
@@ -1501,6 +1576,7 @@ export const register: Register = (on, options) => {
 
         {current.watched.length > 0 && heading('Watched components')}
         {current.watched.length > 0 && note('Flagged when someone other than Companion changes one in Boomi.')}
+        {current.watched.length > 0 && current.platform.phase !== 'ok' && current.platform.checkedAt !== undefined && line('warning', current.platform.message)}
         {current.watched.map(w => line(watchedLevel(w), watchedText(w)))}
 
         <Box marginTop={1}>

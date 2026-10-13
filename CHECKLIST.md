@@ -26,11 +26,11 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** it prints the report and `Saved to …/boomi-session-report-<date>.md`, and the file exists. **Fail:** an error.
 - [ ] **B8. Past sessions.** Press **Scan** under **Past Companion sessions**.
   **Pass:** it lists earlier Companion sessions on this machine, and one session's cost is within a few cents of what `/cost` showed in it. **Fail:** `History needs Perl`, an empty list when you know there were sessions, or a cost far off; send the line.
-- [ ] **B9. Pane basics.** Theme buttons switch Day, Night and Terminal; **☐** closes an item and **Reopen** brings it back; **Hide** folds **Process runs in Boomi**.
-  **Pass:** all three. **Fail:** say which.
+- [ ] **B9. Pane basics.** Theme buttons switch Day, Night and Terminal; **☐** closes an item and **Reopen** brings it back.
+  **Pass:** both. **Fail:** say which.
 
-- [ ] **B10. Guardrails.** With boomi-standards loaded, have Claude push a component with a password typed into a password field.
-  **Pass:** the push is refused, and the dashboard's **Guardrails** section shows `⚠ Standards blocked the last push:` with the reason. After `/boomi up`, it shows `◐ Runtime … installing`, then `✓ Runtime … online`. **Fail:** no **Guardrails** section, or it doesn't change.
+- [ ] **B10. Guardrails.** With boomi-runtime loaded, run `/boomi up`.
+  **Pass:** the dashboard's **Guardrails** section shows `◐ Runtime … installing`, then `✓ Runtime … online`. **Fail:** no **Guardrails** section, or it doesn't change. (The standards half of this check comes back with boomi-standards; see IDEAS.md.)
 
 ## C. Windows (WSL)
 
@@ -52,3 +52,22 @@ When an item passes, tick it here. When every item in a section passes, the sect
 
 - [ ] **E1.** `/boomi up`, then `/boomi smoke`, then `/boomi down`.
   **Pass:** online, `smoke test: passed`, then everything deleted. **Fail:** the phase or message where it stopped.
+
+## F. Dashboard 0.11.0
+
+*boomi-dashboard 0.11.0. Needs a Companion workspace that has had at least one earlier session with the dashboard loaded.*
+
+- [ ] **F1. New-session banner.** Start a new Claude Code session in the Companion workspace and don't ask for anything yet.
+  **Pass:** the banner reads `◆ BC Dashboard`, then `Last session <time> ago:` with what that session did and what it cost, then `│ $0.00 this session`; about 20 seconds later it shows a line starting `Tip:`. **Fail:** the old banner (a step and `N components`), no banner, or no change after a minute.
+- [ ] **F2. Banner switches to work.** In the same session, have Claude push a component.
+  **Pass:** the banner shows `✓ Saved <name> to Boomi (vN)` and the tips stop. **Fail:** a tip or `Last session` still shows.
+- [ ] **F3. Banner stays out of the way.** Start a session in a folder that isn't a Companion workspace.
+  **Pass:** no `BC Dashboard` banner. **Fail:** a banner with a tip.
+- [ ] **F4. Activity log.** Add `BOOMI_COMPANION_LOG_ACTIVITY=1` to Companion's `.env`. In a terminal outside Claude Code, run `boomi-component-push.sh` on a component, then wait 15 seconds.
+  **Pass:** **Claude's latest steps** shows `✓ Saved <name> to Boomi (vN)` with `log` beside its time. **Fail:** nothing after a minute; send `wc -l .activity-log/activity.jsonl`.
+- [ ] **F5. No double steps.** With the log on, have Claude push a component.
+  **Pass:** one `Saved` step for it, without `log`. **Fail:** two steps for the one push.
+- [ ] **F6. Why? picks.** With two failed tests under **Needs attention**, run `/bc-dashboard why`.
+  **Pass:** a question dialog lists both, newest first, and picking one prints its log lines. With none, `Nothing to look into`. **Fail:** `Usage:` or an error.
+- [ ] **F7. No run polling.** Open the pane.
+  **Pass:** no **Process runs in Boomi** section, and watching a component (`/bc-dashboard watch <id>`) still shows it under **Watched components**. **Fail:** the section is there, or the watch errors.

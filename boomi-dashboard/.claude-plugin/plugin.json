@@ -1,7 +1,7 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.10.0",
-  "description": "Boomi Companion at a glance while you build: each component's stage, what needs attention, the live environment and the session's cost",
+  "version": "0.11.0",
+  "description": "Boomi Companion at a glance while you build: each component's stage, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
     "paneTheme": {
@@ -23,14 +23,14 @@
     },
     "recentHours": {
       "type": "number",
-      "title": "Live environment window (hours)",
-      "description": "How far back the live environment's runs count; older failures are not shown or flagged",
+      "title": "Window (hours)",
+      "description": "How far back earlier sessions' steps and Companion's activity log count: older ones are not brought back or flagged",
       "default": 24
     },
     "envFile": {
       "type": "string",
       "title": "Companion .env file",
-      "description": "Path of Boomi Companion's .env, relative to the session's working directory; the dashboard reads the Platform API credentials and BOOMI_ENVIRONMENT_ID from it",
+      "description": "Path of Boomi Companion's .env, relative to the session's working directory; the dashboard reads the Platform API credentials from it to check watched components",
       "default": ".env"
     },
     "componentsDir": {
@@ -39,22 +39,28 @@
       "description": "Where Boomi Companion keeps component XML; edits to files under it show up as edited components",
       "default": "active-development"
     },
+    "activityLog": {
+      "type": "boolean",
+      "title": "Read Companion's activity log",
+      "description": "Also read .activity-log/activity.jsonl, which Companion writes when BOOMI_COMPANION_LOG_ACTIVITY=1 is in its .env, for script runs Claude's tool calls didn't show",
+      "default": true
+    },
     "pollSeconds": {
       "type": "number",
       "title": "Platform poll interval (seconds)",
-      "description": "How often to check Boomi for the environment's runs and the watched components; 0 turns polling off",
+      "description": "How often to check the watched components in Boomi; 0 turns polling off",
       "default": 60
     },
     "toasts": {
       "type": "boolean",
       "title": "Toasts",
-      "description": "Pop up a toast when a step fails, a deploy or test finishes, a run fails in the environment, or a watched component changes",
+      "description": "Pop up a toast when a step fails, a deploy or test finishes, or a watched component changes",
       "default": true
     },
     "banner": {
       "type": "boolean",
       "title": "Banner above the prompt",
-      "description": "Show the latest Companion step and what needs attention above the prompt",
+      "description": "Show the latest Companion step and what needs attention above the prompt; at the start of a session, the last session's recap and tips",
       "default": true
     },
     "budgetUsd": {

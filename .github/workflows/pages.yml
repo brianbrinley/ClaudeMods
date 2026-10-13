@@ -12,7 +12,6 @@ on:
       - "brand/**"
       - "site/**"
       - "boomi-runtime/**"
-      - "boomi-standards/**"
       - "boomi-dashboard/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
