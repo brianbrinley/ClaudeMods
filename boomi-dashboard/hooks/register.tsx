@@ -80,6 +80,8 @@ import {
   quarantineLines,
   agents,
   agentStages,
+  connectors,
+  connectorStages,
   agentName,
   agentOfDeployment,
   budgetLines,
@@ -101,7 +103,7 @@ import {
 } from './activity'
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
-import { agentstudioReading, bdiRunId, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
+import { agentstudioReading, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import type { Credentials } from './platform'
 
@@ -529,7 +531,9 @@ const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun
   for (const run of runs) {
     const found = await subjectOf($, settings, run, current)
     const args = run.kind === 'test' && run.args ? { args: run.args } : {}
-    const product = run.product ? { product: run.product, verb: run.verb ?? '', ...(run.ref ? { ref: run.ref } : {}) } : {}
+    const product = run.product
+      ? { product: run.product, verb: run.verb ?? '', ...(run.ref ? { ref: run.ref } : {}), ...(run.project ? { project: run.project } : {}), ...(run.group ? { group: run.group } : {}), ...(run.version ? { version: run.version } : {}) }
+      : {}
     started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found, ...args, ...product })
   }
   if (!current.activity.some(a => a.kind !== 'other' || a.product)) void openPane($, settings)
@@ -577,6 +581,28 @@ const readAgentstudio = (a: Activity, before: Activity, output: string) => {
   } else if (a.script === 'agentstudio-session') {
     if (r.sessionId) a.sessionId = r.sessionId
     a.detail = r.sessionId ? `answered, session ${r.sessionId}` : 'answered'
+  }
+}
+
+/**
+ * A connector step's output: the version its words named (set, delete),
+ * which the output never repeats; and, when it was the command's only
+ * script run, an upload's new version ID, a version change's status, and
+ * the line saying why a lint or doctor failed.
+ */
+const readConnectordev = (a: Activity, before: Activity, output: string) => {
+  if (before.version) a.version = before.version
+  if (!output || !a.script) return
+  const r = connectordevReading(a.script, a.verb ?? '', output)
+  if (r.detail && (a.outcome === 'failed') === r.detail.startsWith('ERROR:')) a.detail = r.detail.slice(0, 160)
+  if (a.outcome !== 'ok') return
+  if (r.versionId) {
+    a.version = r.versionId
+    a.detail = /^WARNING:/.test(a.detail) ? a.detail : `version ${r.versionId}`
+  }
+  if (r.status) {
+    a.runStatus = r.status
+    a.detail = `status ${r.status}`
   }
 }
 
@@ -639,6 +665,7 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
         a.detail = `ERROR: the deployment ended ${status}`
       } else if (deploymentId) a.detail = `deployment ${deploymentId}${status ? `: ${status}` : ''}`
     }
+    if (a.product === 'connectordev' && ran.deny === undefined) readConnectordev(a, started.find(s => s.id === a.id)!, started.length === 1 ? output : '')
     if (a.product === 'agentstudio' && ran.deny === undefined) readAgentstudio(a, started.find(s => s.id === a.id)!, started.length === 1 ? output : '')
     if (a.product === 'bdi' && a.verb === 'run' && a.outcome === 'ok') {
       const runId = bdiRunId(output)
@@ -1822,6 +1849,7 @@ export const register: Register = (on, options) => {
     const whys = await read($, diagnoses)
     const rows = components(current.activity)
     const agentRows = agents(current.activity)
+    const connectorRows = connectors(current.activity)
     const stepsLimit = await read($, stepsShown)
     const steps = current.activity.filter(a => !a.recipe).reverse()
     const feed = steps.slice(0, stepsLimit)
@@ -1847,6 +1875,31 @@ export const register: Register = (on, options) => {
         {STATUS[level].icon}
       </Text>
     )
+    /** A product's row, as a component's: its name and spend, then its stages. */
+    const stageRow = (name: string, ids: number[], list: { level: Level; text: string }[]) => {
+      const spent = formatSpend(spendOf(ids, all))
+      return (
+        <Box flexDirection="column">
+          <Box justifyContent="space-between">
+            <Box flexShrink={1}>
+              <Text backgroundColor={p.bg} wrap="truncate-end">
+                {t(name, { bold: true })}
+              </Text>
+            </Box>
+            {spent ? <Box flexShrink={0}>{t(`  ${spent}`, { color: p.muted })}</Box> : undefined}
+          </Box>
+          <Text backgroundColor={p.bg}>
+            {t('  ')}
+            {list.map(s => (
+              <Text backgroundColor={p.bg}>
+                {icon(s.level)}
+                {t(` ${s.text}   `)}
+              </Text>
+            ))}
+          </Text>
+        </Box>
+      )
+    }
     const heading = (text: string, aside?: string) => (
       <Box marginTop={1}>
         {t('◇ ', { color: p.rule, bold: true })}
@@ -2036,31 +2089,12 @@ export const register: Register = (on, options) => {
         })}
         {rows.length > 8 && t(`…and ${rows.length - 8} more: /bc-dashboard lists them all.`, { color: p.muted })}
 
+        {connectorRows.length > 0 && heading('Custom connectors')}
+        {connectorRows.slice(0, 6).map(row => stageRow(row.name, row.ids, connectorStages(row)))}
+        {connectorRows.length > 6 && t(`…and ${connectorRows.length - 6} more: /bc-dashboard lists them all.`, { color: p.muted })}
+
         {agentRows.length > 0 && heading('Agentstudio agents')}
-        {agentRows.slice(0, 6).map(row => {
-          const spent = formatSpend(spendOf(row.ids, all))
-          return (
-            <Box flexDirection="column">
-              <Box justifyContent="space-between">
-                <Box flexShrink={1}>
-                  <Text backgroundColor={p.bg} wrap="truncate-end">
-                    {t(row.name, { bold: true })}
-                  </Text>
-                </Box>
-                {spent ? <Box flexShrink={0}>{t(`  ${spent}`, { color: p.muted })}</Box> : undefined}
-              </Box>
-              <Text backgroundColor={p.bg}>
-                {t('  ')}
-                {agentStages(row).map(s => (
-                  <Text backgroundColor={p.bg}>
-                    {icon(s.level)}
-                    {t(` ${s.text}   `)}
-                  </Text>
-                ))}
-              </Text>
-            </Box>
-          )
-        })}
+        {agentRows.slice(0, 6).map(row => stageRow(row.name, row.ids, agentStages(row)))}
         {agentRows.length > 6 && t(`…and ${agentRows.length - 6} more: /bc-dashboard lists them all.`, { color: p.muted })}
 
         {feed.length > 0 && heading("Claude's latest steps")}

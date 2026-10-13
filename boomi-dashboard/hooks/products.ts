@@ -211,7 +211,17 @@ const shortTarget = (word: string): string => {
 }
 
 /** One run of another plugin's script: its product, its verb and what it acted on. */
-export type ProductRun = { product: Product; script: string; verb: string; target?: string; ref?: string }
+export type ProductRun = {
+  product: Product
+  script: string
+  verb: string
+  target?: string
+  ref?: string
+  /** A connector step: its project folder, its connector group, and the version it names. */
+  project?: string
+  group?: string
+  version?: string
+}
 
 /**
  * A run of another plugin's script, from its name and the words after it.
@@ -246,6 +256,7 @@ export const productRun = (name: string, args: readonly string[]): ProductRun | 
     run.target = shortTarget(raw)
     run.ref = raw
   }
+  if (script.product === 'connectordev') Object.assign(run, connectorFacts(run.script, verb, positional, flags))
   return run
 }
 
@@ -446,3 +457,61 @@ export const agentstudioReading = (output: string): AgentstudioReading => {
   }
   return Object.fromEntries(Object.entries(found).filter(([, v]) => v !== undefined)) as AgentstudioReading
 }
+
+// --- Connector releases -------------------------------------------------------------
+
+/**
+ * The connector project a path is in: the folder above its src/, build/ or
+ * target/, else the file's own folder; '.' for the working directory.
+ */
+export const connectorProject = (path: string): string => {
+  const p = path.replace(/\\/g, '/').replace(/^['"]|['"]$/g, '')
+  const at = p.match(/(?:^|\/)(?:src|build|target)\//)
+  if (at && at.index !== undefined) return p.slice(0, at.index) || '.'
+  return p.includes('/') ? p.slice(0, p.lastIndexOf('/')) || '/' : '.'
+}
+
+/** What a connector step's words name: its project (from a descriptor or archive), its group, the version it sets or deletes. */
+const connectorFacts = (script: string, verb: string, positional: readonly string[], flags: Record<string, string>): Partial<ProductRun> => {
+  const path = positional.find(word => /\.(xml|zip)['"]?$/i.test(word))
+  const facts: Partial<ProductRun> = path ? { project: connectorProject(path) } : {}
+  if (script === 'connectordev-version' && verb === 'upload' && flags['--group']) facts.group = flags['--group']
+  if (script === 'connectordev-version' && verb === 'delete') {
+    if (positional[0]) facts.group = positional[0]
+    if (positional[1]) facts.version = positional[1]
+  }
+  if (script === 'connectordev-version-change' && verb === 'set' && positional[1]) facts.version = positional[1]
+  if (script === 'connectordev-group' && verb === 'delete' && positional[0]) facts.group = positional[0]
+  return facts
+}
+
+/**
+ * What a connector script's output says beyond its exit code: a lint's
+ * schema or the line naming what failed, doctor's first failed check, an
+ * upload's new version ID, a version change's status when the response
+ * names one (a PUBLIC connector's change waits for approval).
+ */
+export const connectordevReading = (script: string, verb: string, output: string): { detail?: string; versionId?: string; status?: string } => {
+  if (script === 'connectordev-descriptor-lint') {
+    const failed = output.split('\n').find(line => /Schemas? validity error|parser error|fails to validate/.test(line))
+    if (failed) return { detail: `ERROR: ${failed.trim()}` }
+    const sdk = output.match(/^Schema: .* from connector-sdk-model (\S+)/m)?.[1]
+    return sdk ? { detail: `matches the schema of SDK ${sdk}` } : {}
+  }
+  if (script === 'connectordev-doctor') {
+    const failed = output.match(/^\s*FAIL\s+(.+)$/m)?.[1]
+    return failed ? { detail: `ERROR: ${failed.trim()}` } : {}
+  }
+  if (script === 'connectordev-version' && verb === 'upload') {
+    const versionId = output.match(/"versionId"\s*:\s*"?([\w.-]+)/)?.[1]
+    return versionId ? { versionId } : {}
+  }
+  if (script === 'connectordev-version-change' && verb === 'set') {
+    const status = output.match(/"(?:status|state|changeStatus)"\s*:\s*"([^"]+)"/)?.[1]
+    return status ? { status } : {}
+  }
+  return {}
+}
+
+/** A version change's status read leniently: anything naming a request, review or wait is still waiting for approval. */
+export const isAwaitingApproval = (status: string | undefined): boolean => !!status && /pend|request|review|await|submit|approval/i.test(status) && !/approved|complete|active/i.test(status)

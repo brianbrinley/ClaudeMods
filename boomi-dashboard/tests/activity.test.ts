@@ -77,7 +77,7 @@ import {
   resumeCommand,
   resumable,
 } from '../hooks/activity'
-import { agentstudioReading, bdiRunId, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, productWords, quarantineChecks, quarantineReading } from '../hooks/products'
+import { agentstudioReading, bdiRunId, connectorProject, connectordevReading, isAwaitingApproval, productRun, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, productWords, quarantineChecks, quarantineReading } from '../hooks/products'
 import { reviewPrompt, reviewSession, reviewText } from '../hooks/review'
 import type { Activity, Dashboard } from '../types'
 import type { ScannedSession } from '../hooks/activity'
@@ -1048,4 +1048,29 @@ test('productWords says "an" before a vowel and before MCP', () => {
   expect(productWords({ product: 'agentstudio', script: 'agentstudio-agent', verb: 'create' }, 'doing')).toBe('Agentstudio: create an agent…')
   expect(productWords({ product: 'agentstudio', script: 'agentstudio-source', verb: 'create' }, 'did')).toBe('Agentstudio: added an MCP server')
   expect(productWords({ product: 'agentstudio', script: 'agentstudio-tool', verb: 'create' }, 'did')).toBe('Agentstudio: created a tool')
+})
+
+test('connectorProject finds the project above src/, build/ or target/, else the file folder', () => {
+  expect(connectorProject('orders/src/main/resources/connector-descriptor.xml')).toBe('orders')
+  expect(connectorProject('src/main/resources/connector-descriptor.xml')).toBe('.')
+  expect(connectorProject('/work/orders/build/connector/orders-car.zip')).toBe('/work/orders')
+  expect(connectorProject('/tmp/car/META-INF/connector-descriptor.xml')).toBe('/tmp/car/META-INF')
+  expect(connectorProject('connector-descriptor.xml')).toBe('.')
+})
+
+test('a connector run carries its project, group and version', () => {
+  expect(productRun('connectordev-version.sh', ['upload', 'orders/build/o.zip', '--group', 'acme-orders'])).toMatchObject({ project: 'orders', group: 'acme-orders' })
+  expect(productRun('connectordev-version-change.sh', ['set', 'acme-orders-dev', '4', '--notes', 'x'])).toMatchObject({ ref: 'acme-orders-dev', version: '4' })
+  expect(productRun('connectordev-version.sh', ['delete', 'acme-orders', '2'])).toMatchObject({ group: 'acme-orders', version: '2' })
+})
+
+test('connectordevReading reads what each connector script says', () => {
+  expect(connectordevReading('connectordev-descriptor-lint', '', 'Schema: g.xsd from connector-sdk-model 2.25.0\nd.xml validates')).toEqual({ detail: 'matches the schema of SDK 2.25.0' })
+  expect(connectordevReading('connectordev-descriptor-lint', '', "d.xml:3: element x: Schemas validity error : bad\nd.xml fails to validate").detail).toBe('ERROR: d.xml:3: element x: Schemas validity error : bad')
+  expect(connectordevReading('connectordev-doctor', '', 'JDK\n  PASS  java 17\n  FAIL  gradle missing\n')).toEqual({ detail: 'ERROR: gradle missing' })
+  expect(connectordevReading('connectordev-version', 'upload', '{"versionId":7}')).toEqual({ versionId: '7' })
+  expect(connectordevReading('connectordev-version-change', 'set', '{"status":"PENDING"}')).toEqual({ status: 'PENDING' })
+  expect(isAwaitingApproval('PENDING_APPROVAL')).toBe(true)
+  expect(isAwaitingApproval('APPROVED')).toBe(false)
+  expect(isAwaitingApproval(undefined)).toBe(false)
 })

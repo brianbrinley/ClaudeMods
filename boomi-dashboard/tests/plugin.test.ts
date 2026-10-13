@@ -1563,3 +1563,59 @@ test('an Agentstudio response that says success: false fails its step, and packa
   text = (await $.command.run(dashboard('text'))).text ?? ''
   expect(text).toContain('agent-1: ✓ packaged v2  ✓ deployed')
 })
+
+test('a custom connector shows its release: lint, validate, upload and the version made active', async ($, on) => {
+  world(on)
+  const GROUP = 'acme-AB12CD-orders'
+  const lint = 'bash scripts/connectordev-descriptor-lint.sh orders-connector/src/main/resources/connector-descriptor.xml'
+  const validate = 'bash scripts/connectordev-version.sh validate /tmp/car/META-INF/connector-descriptor.xml'
+  const upload = `bash scripts/connectordev-version.sh upload orders-connector/build/connector/orders-connector-car.zip --group ${GROUP} --changelog "First cut"`
+  const set = `bash scripts/connectordev-version-change.sh set ${GROUP}-dev 2 --notes "First cut"`
+  let lintOut = { out: "Schema: genericconnectordesc.xsd from connector-sdk-model 2.25.0\norders-connector/src/main/resources/connector-descriptor.xml:12: element field: Schemas validity error : Element 'field': This element is not expected.\norders-connector/src/main/resources/connector-descriptor.xml fails to validate", isError: true }
+  productShell(on, {
+    get [lint]() {
+      return lintOut
+    },
+    [validate]: { out: '{"success":true}' },
+    [upload]: { out: `{"groupType":"${GROUP}","versionId":2,"changeLog":"First cut"}` },
+    [set]: { out: '{"classificationType":"acme-AB12CD-orders-dev","versionId":2}' },
+  })
+
+  await $.tool.call({ tool: 'Bash', command: lint })
+  let text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain("ERROR: orders-connector/src/main/resources/connector-descriptor.xml:12: element field: Schemas validity error")
+  expect(text).toContain('Custom connectors:\n  orders-connector: ✗ lint failed')
+
+  lintOut = { out: 'Schema: genericconnectordesc.xsd from connector-sdk-model 2.25.0\norders-connector/src/main/resources/connector-descriptor.xml validates', isError: false }
+  await $.tool.call({ tool: 'Bash', command: lint })
+  await $.tool.call({ tool: 'Bash', command: validate })
+  await $.tool.call({ tool: 'Bash', command: upload })
+  text = (await $.command.run(dashboard('text'))).text ?? ''
+  // The built descriptor, unpacked to a temporary folder, joins the same connector.
+  expect(text).toContain('orders-connector: ✓ descriptor linted  ✓ validated  ✓ uploaded v2  ◐ v2 not active yet')
+  expect(text).toContain('✓ Nothing needs attention.')
+
+  await $.tool.call({ tool: 'Bash', command: set })
+  text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('orders-connector: ✓ descriptor linted  ✓ validated  ✓ uploaded v2  ✓ v2 active on dev')
+  expect((await $.command.run(dashboard('report'))).text).toContain(`| orders-connector (${GROUP}) |`)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ type: 'Text', text: 'CUSTOM CONNECTORS' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: ' v2 active on dev   ' })).toBeDefined()
+})
+
+test("a PUBLIC connector's version change waits for approval, and a rejected descriptor needs attention", async ($, on) => {
+  world(on)
+  const set = 'bash scripts/connectordev-version-change.sh set acme-orders-prod 3'
+  const validate = 'bash scripts/connectordev-version.sh validate build/connector-descriptor.xml'
+  productShell(on, {
+    [set]: { out: '{"classificationType":"acme-orders-prod","versionId":3,"status":"PENDING_APPROVAL"}' },
+    [validate]: { out: '{"errors":["bad field"]}\nERROR: descriptor rejected — read the messages in the response above', isError: true },
+  })
+  await $.tool.call({ tool: 'Bash', command: set })
+  await $.tool.call({ tool: 'Bash', command: validate })
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('acme-orders: ◐ v3 awaiting approval on prod')
+  expect(text).toContain('Connector project: ✗ descriptor rejected')
+  expect(text).toContain('ERROR: descriptor rejected')
+})

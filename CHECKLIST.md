@@ -111,6 +111,10 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** an **Agentstudio agents** section with the agent's name and `✓ created  ✓ packaged v1  ✓ deployed  ✓ 1 test conversation, 2 turns, all answered`, and the steps read `Agentstudio: started a test conversation with <name>`, then `continued …`. **Fail:** no section, the agent shown by its ID after it was created, no `v1`, or the conversation on a row of its own (`deployment …`); send the create, package-create and deploy output, so their field names can be confirmed.
 - [ ] **G14. Agentstudio edit not live.** *(0.20.0)* After G13, have Claude update the agent without packaging it.
   **Pass:** the row adds `◐ changed since packaged`; after Claude packages and deploys again, it's gone and the version moves. **Fail:** no warning, or one that stays.
+- [ ] **G15. Connector release.** *(0.21.0)* Have Claude lint a connector's descriptor, build it, validate the built descriptor, upload the archive and set the new version on the dev classification.
+  **Pass:** a **Custom connectors** section with the project folder's name and `✓ descriptor linted  ✓ validated  ✓ uploaded vN`, `◐ vN not active yet` until the version change, then `✓ vN active on dev`. **Fail:** two rows for one connector, no version number, or the warning staying after the change; send the upload's and the version change's output, so their field names can be confirmed.
+- [ ] **G16. A failed lint.** *(0.21.0)* Break the descriptor (an element in the wrong place) and have Claude lint it.
+  **Pass:** `✗ lint failed` on the row, and under **Needs attention** the line xmllint gave, naming the file, line and element. **Fail:** only `failed`, or a pass.
 
 
 ## H. Usage limits and a Companion budget

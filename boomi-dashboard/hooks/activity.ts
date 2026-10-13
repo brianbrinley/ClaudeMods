@@ -4,7 +4,7 @@
 // nothing here touches the engine, so the tests call them directly.
 
 import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, PastSession, Product, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
-import { PRODUCT_NAMES, deployState, isProductScript, productRun, productWords } from './products'
+import { PRODUCT_NAMES, deployState, isAwaitingApproval, isProductScript, productRun, productWords } from './products'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
@@ -89,6 +89,9 @@ export type ScriptRun = {
   verb?: string
   target?: string
   ref?: string
+  project?: string
+  group?: string
+  version?: string
 }
 
 const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefined => {
@@ -653,6 +656,116 @@ export const components = (activity: readonly Activity[]): ComponentRow[] => {
 
 export type Stage = { level: Level; text: string }
 
+// --- Connector releases ---------------------------------------------------------
+
+const isConnectorStep = (a: Activity) =>
+  a.product === 'connectordev' &&
+  (a.script === 'connectordev-descriptor-lint' ||
+    (a.script === 'connectordev-version' && (a.verb === 'validate' || a.verb === 'upload')) ||
+    a.script === 'connectordev-version-change')
+
+/** A folder the OS keeps for temporary files: a descriptor checked there was unpacked from an archive. */
+const isTempFolder = (path: string) => /^(?:\/tmp|\/private\/tmp|\/var\/folders|\/private\/var\/folders)\b/.test(path)
+
+/** One custom connector this session: its latest descriptor checks, upload and version change. */
+export type ConnectorRow = {
+  key: string
+  name: string
+  project?: string
+  group?: string
+  linted?: Activity
+  validated?: Activity
+  uploaded?: Activity
+  changed?: Activity
+  lastAt: number
+  ids: number[]
+}
+
+/** A classification's tier: what follows its group in `<groupType>-<tier>`, as dev, qa or prod. */
+const tierOf = (classification: string, group?: string) =>
+  group && classification.startsWith(`${group}-`) ? classification.slice(group.length + 1) : (classification.split('-').pop() ?? classification)
+
+/**
+ * The session's custom connectors, newest first. A descriptor check or an
+ * upload names a path in its project, and an upload names its group too, so
+ * steps group by project, then by group; a version change finds its row
+ * through its classification, `<groupType>-<tier>`. A descriptor checked in
+ * a temporary folder, unpacked from an archive, joins the latest connector.
+ */
+export const connectors = (activity: readonly Activity[]): ConnectorRow[] => {
+  const rows = new Map<string, ConnectorRow>()
+  const byProject = new Map<string, string>()
+  const byGroup = new Map<string, string>()
+  let latest: string | undefined
+  for (const a of activity) {
+    if (!isConnectorStep(a)) continue
+    const isChange = a.script === 'connectordev-version-change'
+    const group =
+      a.group ??
+      (isChange && a.ref ? ([...byGroup.keys()].find(g => a.ref!.startsWith(`${g}-`)) ?? a.ref.replace(/-[^-]+$/, '')) : undefined)
+    const isCheck = a.script === 'connectordev-descriptor-lint' || a.verb === 'validate'
+    const key =
+      (a.project && byProject.get(a.project)) ||
+      (group && byGroup.get(group)) ||
+      (isCheck && a.project && isTempFolder(a.project) && latest) ||
+      (a.project ? `project:${a.project}` : group ? `group:${group}` : undefined)
+    if (!key) continue
+    const row: ConnectorRow = rows.get(key) ?? { key, name: '', lastAt: a.startedAt, ids: [] }
+    if (a.project && !isTempFolder(a.project) && !row.project) row.project = a.project
+    if (group && !row.group) row.group = group
+    const folder = row.project && row.project !== '.' && row.project !== '/' ? row.project.split('/').filter(Boolean).pop() : undefined
+    row.name = folder ?? (row.group ? (row.group.length > 24 ? `${row.group.slice(0, 8)}…` : row.group) : 'Connector project')
+    row.ids.push(a.id)
+    row.lastAt = Math.max(row.lastAt, a.endedAt ?? a.startedAt)
+    if (a.script === 'connectordev-descriptor-lint') row.linted = a
+    else if (a.verb === 'validate') row.validated = a
+    else if (a.verb === 'upload') row.uploaded = a
+    else row.changed = a
+    rows.set(key, row)
+    if (row.project) byProject.set(row.project, key)
+    if (a.project) byProject.set(a.project, key)
+    if (row.group) byGroup.set(row.group, key)
+    latest = key
+  }
+  return [...rows.values()].sort((a, b) => b.lastAt - a.lastAt)
+}
+
+/** A connector's release as short steps, each with an icon and a label, as a component's are. */
+export const connectorStages = (row: ConnectorRow): Stage[] => {
+  const out: Stage[] = []
+  const { linted, validated, uploaded, changed } = row
+  const common = (a: Activity, doing: string, failed: string): Stage | undefined => {
+    if (a.outcome === 'running') return { level: 'warning', text: `${doing}…` }
+    if (a.outcome === 'blocked') return { level: 'serious', text: `${doing} blocked` }
+    if (a.outcome === 'failed') return { level: 'critical', text: failed }
+    return undefined
+  }
+  if (linted) out.push(common(linted, 'linting', 'lint failed') ?? { level: 'healthy', text: 'descriptor linted' })
+  if (validated) {
+    out.push(
+      common(validated, 'validating', 'descriptor rejected') ??
+        (/^WARNING:/.test(validated.detail) ? { level: 'warning', text: 'validated with warnings' } : { level: 'healthy', text: 'validated' }),
+    )
+  }
+  if (uploaded) out.push(common(uploaded, 'uploading', 'upload failed') ?? { level: 'healthy', text: uploaded.version ? `uploaded v${uploaded.version}` : 'uploaded' })
+  if (changed) {
+    const tier = changed.ref ? tierOf(changed.ref, row.group) : 'its classification'
+    const v = changed.version ? `v${changed.version}` : 'the version'
+    if (changed.verb === 'cancel') out.push(common(changed, 'cancelling', 'cancel failed') ?? { level: 'healthy', text: `change on ${tier} cancelled` })
+    else {
+      out.push(
+        common(changed, 'changing the version', 'version change failed') ??
+          (isAwaitingApproval(changed.runStatus) ? { level: 'warning', text: `${v} awaiting approval on ${tier}` } : { level: 'healthy', text: `${v} active on ${tier}` }),
+      )
+    }
+  }
+  // An upload is used only once a version change makes it active: say so until one does.
+  if (uploaded?.outcome === 'ok' && (!changed || changed.outcome !== 'ok' || changed.verb !== 'set' || when(changed) < when(uploaded) || (!!changed.version && !!uploaded.version && changed.version !== uploaded.version))) {
+    out.push({ level: 'warning', text: `${uploaded.version ? `v${uploaded.version}` : 'the upload'} not active yet` })
+  }
+  return out
+}
+
 // --- Agentstudio agents ---------------------------------------------------------
 
 /** A turn of a test conversation with a deployed Agentstudio agent. */
@@ -1206,6 +1319,15 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   const byProduct = productSpendLine(dashboard.activity, all)
   if (byProduct) lines.push(`  ${byProduct}`)
 
+  const connectorRows = connectors(dashboard.activity)
+  if (connectorRows.length > 0) {
+    lines.push('', 'Custom connectors:')
+    for (const row of connectorRows) {
+      const spent = formatSpend(spendOf(row.ids, all))
+      lines.push(`  ${row.name}: ${connectorStages(row).map(s => `${STATUS[s.level].icon} ${s.text}`).join('  ')}${spent ? `  [${spent}]` : ''}`)
+    }
+  }
+
   const agentRows = agents(dashboard.activity)
   if (agentRows.length > 0) {
     lines.push('', 'Agentstudio agents:')
@@ -1586,6 +1708,17 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
       lines.push(
         `| ${cell(row.name)} | ${cell(friendlyType(row.type) ?? '')} | ${cell(where)} | ${spent.tokens ? formatTokens(spent.tokens) : ''} | ${formatCost(spent.usd) ?? ''} |`,
       )
+    }
+  }
+
+  const connectorRows = connectors(dashboard.activity)
+  if (connectorRows.length > 0) {
+    lines.push('', `## Custom connectors (${connectorRows.length})`, '')
+    lines.push('| Connector | Where it stands | Tokens | Cost |', '|---|---|---|---|')
+    for (const row of connectorRows) {
+      const spent = spendOf(row.ids, all)
+      const where = connectorStages(row).map(s => `${STATUS[s.level].icon} ${s.text}`).join(' · ')
+      lines.push(`| ${cell(row.name)}${row.group && row.name !== row.group ? ` (${cell(row.group)})` : ''} | ${cell(where)} | ${spent.tokens ? formatTokens(spent.tokens) : ''} | ${formatCost(spent.usd) ?? ''} |`)
     }
   }
 
