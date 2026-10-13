@@ -151,6 +151,52 @@ Two optional settings under `/config` give Companion work a budget of its own. B
 
 The limit is shared, so in a Companion session anything else that uses Claude at the same time, on this machine or another, counts too. Sessions on other machines, and Claude Code on the web, aren't added up.
 
+### Set up a budget
+
+There are three budgets. Set any of them, or none. They only warn: nothing is ever stopped.
+
+| You want to cap | Setting | Works on | Example |
+|---|---|---|---|
+| This one session's cost | `budgetUsd` | a seat or an API key | `5` warns at $4.00 and $5.00 |
+| Companion's share of your weekly Claude limit | `companionShare` and `companionSharePeriod` | a Claude seat only | `30` and `day`: about 4.3% of the weekly limit each day |
+| Companion's cost this calendar month, all sessions on this computer | `companionMonthlyUsd` | a seat or an API key | `50` warns at $40 and $50 |
+
+Not sure? On a Pro or Max seat, start with `companionShare` (your limit is what runs out). On an API key, start with `companionMonthlyUsd` (your bill is what grows).
+
+**In Claude Code (easiest):**
+
+1. Run `/config`.
+2. Find the **boomi-dashboard** rows: **Spend budget (USD)**, **Companion's share of your usage limit (%)**, **Companion share period** and **Companion's monthly amount (USD)**.
+3. Type a number (no `$` or `%`), or pick the period. `0` turns a budget off.
+4. The dashboard reloads with the new values. If the pane doesn't show **BUDGET** within a minute, restart Claude Code.
+
+**In the settings file:** the same values live in your user settings, `~/.claude/settings.json`, under `pluginConfigs`. Add or edit only this block, and keep the rest of the file as it is:
+
+```json
+{
+  "pluginConfigs": {
+    "boomi-dashboard": {
+      "options": {
+        "budgetUsd": 5,
+        "companionShare": 30,
+        "companionSharePeriod": "day",
+        "companionMonthlyUsd": 50
+      }
+    }
+  }
+}
+```
+
+Numbers go in without quotes. The period is `"day"`, `"week"` or `"month"`. Leave out a budget you don't want, or set it to `0`. Then restart Claude Code.
+
+**Check that it took:**
+
+- The pane shows a **BUDGET** gauge with a line for each budget you set, such as `✓ session: $1.25 of $5.00` or `◐ share, today: 84% of 30%`.
+- `/bc-dashboard text` prints the same lines.
+- No **BUDGET** gauge means no budget is set, or the value isn't a number. Open `/config` again and check.
+
+**When it warns:** at 80%, the status line shows `◐` and the percent, and one toast appears. At 100% you get `✗` and a second toast. Each toast shows once, not on every refresh. To keep working past a budget, raise it or set it to `0`.
+
 ## Watched components
 
 `/bc-dashboard watch <component ID or XML file>` watches a component across sessions. Every 60 seconds the dashboard reads (never writes) its version in Boomi; when someone other than Companion's API user changes it, it shows under **Needs attention**: pull before you push. `/bc-dashboard seen` clears the changes you expected. With nothing watched, the dashboard makes no Platform API calls.
