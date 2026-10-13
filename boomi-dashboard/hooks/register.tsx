@@ -104,6 +104,7 @@ import {
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
+import { reportHtml } from './report-html'
 import { RESTART, checkText, compareVersions, isCheckDue, parseUpgrade, planText } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
@@ -1329,8 +1330,39 @@ const reportNow = async ($: Engine, settings: Settings) => {
   )
 }
 
-/** /bc-dashboard report [save]: the report as text, and with save, as a file in the workspace too. */
+/** The dashboard's version, from its own plugin.json. */
+const ownVersion = async ($: Engine): Promise<string | undefined> => {
+  const json = await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).catch(() => undefined)
+  return typeof json === 'string' ? json.match(/"version"\s*:\s*"([^"]+)"/)?.[1] : undefined
+}
+
+/**
+ * /bc-dashboard report html: the report as one HTML file in the workspace, to
+ * open in a browser or send to someone: Valence Day and Night, sortable
+ * tables, a filterable list of steps and the spend charted.
+ */
+const reportHtmlCommand = async ($: Engine, settings: Settings): Promise<string> => {
+  const now = await $.clock.now()
+  const footer = await footerOf($)
+  const page = reportHtml(
+    await read($, dashboard),
+    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await withBudget($, settings), version: await ownVersion($) },
+    now,
+    settings.windowMs,
+  )
+  const stamp = new Date(now).toISOString().slice(0, 16).replace(/[-:T]/g, '')
+  const path = `${await $.session.cwd()}/boomi-session-report-${stamp}.html`
+  await $.fs.write(path, page)
+  return [
+    `Saved the report as a web page: ${path}`,
+    'Open it in a browser (it works offline; with a connection it also loads the Valence fonts). It is one file with nothing live in it and no credentials, so you can send it as it is.',
+    'In it: Day and Night colors, sortable tables (click a column), the steps filtered by product or by what failed, a search, and the spend charted.',
+  ].join('\n')
+}
+
+/** /bc-dashboard report [save|html]: the report as text; save also writes it as Markdown, html as a web page. */
 const reportCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  if (target === 'html') return reportHtmlCommand($, settings)
   const text = await reportNow($, settings)
   if (target !== 'save') return text
   const stamp = new Date(await $.clock.now()).toISOString().slice(0, 16).replace(/[-:T]/g, '')
@@ -1409,6 +1441,7 @@ const USAGE = [
   '/bc-dashboard why [n]         read the log of a failed test or run (no number: pick one)',
   '/bc-dashboard rerun [n]       run a failed test again, the same way Claude ran it (no number: pick one)',
   '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
+  '/bc-dashboard report html     the session as a web page to open in a browser or share: one file, sortable and filterable',
   '/bc-dashboard history         past Companion sessions on this machine and what each cost',
   '/bc-dashboard resume [n]      copy the command that reopens a past session in a new terminal',
   '/bc-dashboard review [n]      what made a past session cost what it did, and what to change next time',
@@ -1661,7 +1694,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | upgrade [--check] [--yes] [--rollback]',
+      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save|html] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | upgrade [--check] [--yes] [--rollback]',
     })
     await $.tool.register({
       name: 'summary',

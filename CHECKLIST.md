@@ -162,3 +162,16 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** `✓ Rolled back to Y`, and the old version loads. Running `/bc-dashboard upgrade` again returns to the new one. **Fail:** an error, or the version doesn't change.
 - [ ] **J5. Nudge.** With the checkout behind again, set `updateCheckHours` to `1` and start a new session; wait 20 seconds.
   **Pass:** one toast, `bc-dashboard X is available …`, and none in a second session within the hour. With the network off, nothing at all. **Fail:** no toast, one every session, or an error.
+
+## K. Report as a web page
+
+*boomi-dashboard 0.23.0, in a Companion session with some steps, ideally including one failure and one other plugin.*
+
+- [ ] **K1. Save it.** Run `/bc-dashboard report html`.
+  **Pass:** `Saved the report as a web page: …/boomi-session-report-<time>.html`, and the file exists. **Fail:** an error.
+- [ ] **K2. Open it.** Open the file in Chrome, Safari or Edge.
+  **Pass:** a navy Boomi Companion bar, the tiles, **Needs attention**, the charts and the tables, matching what `/bc-dashboard text` says. **Fail:** a blank or unstyled page, or numbers that don't match; send a screenshot.
+- [ ] **K3. Use it.** Switch **Dark** and **Light**, hover a chart bar, click a product in **Outcomes by product**, sort **Components** by **Cost**, and search the steps.
+  **Pass:** each works: the theme changes, a tooltip appears, the steps list shows only that product, the table re-orders, and the search narrows the list. **Fail:** say which didn't.
+- [ ] **K4. Share it.** Send the file to someone (or open it on another computer or a phone).
+  **Pass:** it looks the same there, and on a phone nothing runs off the side of the screen; the tables scroll inside their cards. **Fail:** say what's off.
