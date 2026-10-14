@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { PastSession } from '../types'
-import { BACK, GROUPS, fieldNamed, groupNamed, listing, menuQuestion, parseValue, pastSpend, questionFor, roundUp, show, valueOf } from '../hooks/config'
+import { BACK, GROUPS, fieldNamed, groupNamed, groupWithValue, listing, menuQuestion, parseValue, pastSpend, questionFor, roundUp, show, valueOf } from '../hooks/config'
 
 const NOW = Date.parse('2026-10-14T12:00:00Z')
 const past = (costUsd: number, daysAgo: number): PastSession =>
@@ -102,4 +102,14 @@ test('the menu and the listing', () => {
   expect(fieldNamed('BUDGETUSD')?.key).toBe('budgetUsd')
   expect(groupNamed('data')?.name).toBe('Data and reports')
   expect(groupNamed('Done')).toBeUndefined()
+})
+
+test('a group named with a value saves nothing and says which setting the value fits', () => {
+  const budget = groupNamed('budget')!
+  expect(groupWithValue(budget, 'warn')).toBe(
+    'Budget is a group of settings, so "warn" wasn\'t saved. Did you mean /bc-dashboard config budgetEnforce warn? Run /bc-dashboard config budget on its own to go through the group a question at a time.',
+  )
+  expect(groupWithValue(budget, 'lots')).toBe(
+    'Budget is a group of settings, so "lots" wasn\'t saved. Run /bc-dashboard config budget on its own to go through the group a question at a time.',
+  )
 })

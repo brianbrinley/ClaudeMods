@@ -234,6 +234,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** it prints every setting by group with its value, and how to change one with `/bc-dashboard config <setting> <value>`. **Fail:** it hangs or prints nothing.
 - [ ] **M4. Theme and size in /config.** *(0.34.0)* Press **Night** in the pane, run `/bc-dashboard size 24`, then open `/config`.
   **Pass:** the boomi-dashboard rows show **Pane colors** `night` and **Pane height (rows)** `24`. Set **Pane colors** back to `day` in `/config`: the pane turns Day. Restart, and the pane is still Day, 24 rows tall. **Fail:** `/config` still shows the old values, or the pane ignores a change made in `/config`.
+- [ ] **M5. A group with a value.** *(0.39.6)* Run `/bc-dashboard config budget warn`.
+  **Pass:** no questions. The reply says `"warn" wasn't saved` and suggests `/bc-dashboard config budgetEnforce warn`, and `/config` is unchanged. **Fail:** the Budget questions start, or any setting changes.
 
 ## N. Budget enforcement
 
