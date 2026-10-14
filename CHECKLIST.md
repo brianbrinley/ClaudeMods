@@ -186,7 +186,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **K8. No doubled steps.** *(0.26.0)* Have Claude create, deploy and test a process in one command, with its file named through a variable (as in `D=active-development/processes && bash … "$D/X.xml"`), then make the report.
   **Pass:** one step each for create, deploy and test, the component's type is `process`, and the test's result is its own `status …`, not the create's `SUCCESS:` line. **Fail:** a step twice, a blank type, or a test showing another script's line.
 - [ ] **K9. Old sessions' costs.** *(0.26.1)* In the folder from your 0.26.0 all-sessions report (the one that showed $0.00), run `/bc-dashboard report html all`.
-  **Pass:** the **Sessions** table lists each day's session separately, with its own ID and cost, not one "Earlier" row. Each cost is within a few cents of what **Past Companion sessions** shows for that session, and the Cost tile is their sum. The same deploy package or test execution appears once under **Deployments and tests**. **Fail:** $0.00, a single earlier session, or a doubled step; send the Sessions table.
+  **Pass:** the sessions under the summary list each day's session separately, with its own ID and cost, not one "Earlier" row. Each cost is within a few cents of what **Past Companion sessions** shows for that session, and the Cost tile is their sum. The same deploy package or test execution appears once under **Deployments and tests**. **Fail:** $0.00, a single earlier session, or a doubled step; send the Sessions table.
 - [ ] **K10. The sessions.** *(0.30.0)* In a folder with two or more Companion sessions, run `/bc-dashboard report html all`.
   **Pass:** under the summary, one row per session, oldest first, each saying when it ran, what it did in words, how its steps went and what it cost. Clicking a row opens that session's steps. The newest session that did real work is the only one open at first. **Fail:** a row out of order, a "what it did" that doesn't match the steps, or a click that goes nowhere.
 - [ ] **K11. Report speed.** *(0.27.1)* Time `/bc-dashboard report html all` in your busiest folder, then run it again.
@@ -195,6 +195,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** beside the summary, a meter for the session and one for the month, each with a percent and an icon. The summary says how many sessions reached the session budget, and those sessions' timeline bands say "⊗ N% of budget". With both settings back at 0, the report says "No budget set" and how to set one. **Fail:** a meter missing, a percent that doesn't match the pane's BUDGET gauge, or no budget note on a session that went over.
 - [ ] **K13. Swimlanes and IDs.** *(0.29.0)* In the same report, look at **Components**, then click a component ID.
   **Pass:** each row's Saved, Deployed and Tested columns show the stage with its icon, its time, and the version, package or execution. The clicked ID is copied: paste it somewhere to check. **Fail:** a stage in the wrong column, or nothing copied.
+
 ## L. Installed Companion plugins
 
 *boomi-dashboard 0.24.0. Needs a Companion workspace (an `active-development` folder) and a session restart between steps.*
