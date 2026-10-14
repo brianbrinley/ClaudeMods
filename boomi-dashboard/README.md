@@ -63,7 +63,7 @@ The install above uses no marketplace and copies nothing. Claude Code loads the 
 
 Anything it prints is masked for tokens and keys (`glc_`, `sk-`, `eyJ`, `Bearer …`, `Basic …`), and it never reads `.env`.
 
-**Update nudge:** at the start of a session, at most once every `updateCheckHours` (24), the dashboard fetches and toasts `bc-dashboard X.Y.Z is available` when you're behind. It never installs, and says nothing when offline. Turn it off with `updateCheck` under `/config`.
+**Update nudge:** at the start of a session, at most once every `updateCheckHours` (24), the dashboard fetches its checkout to see whether you're behind. A version you haven't heard about gets one toast, `bc-dashboard X.Y.Z is available`. After that, the pane's footer says `↑ bc-dashboard X.Y.Z is available: /bc-dashboard upgrade` until you install it, and only a newer release toasts again. It never installs, and says nothing when offline. Turn it off with `updateCheck` under `/config`.
 
 By hand, the same thing is `git -C ~/ClaudeMods pull --ff-only`, then `claude plugin validate` and `claude plugin test` on the mod, then a restart.
 

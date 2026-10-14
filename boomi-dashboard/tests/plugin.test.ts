@@ -1877,3 +1877,47 @@ test("when Claude Code's plugin list can't be read, every section shows as befor
   const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
   expect(await band.find({ text: /Companion here/ })).toBeUndefined()
 })
+
+test('a new version is toasted once, then the pane mentions it quietly until a newer one comes', async ($, on) => {
+  const toasts = world(on, { '.claude-plugin/plugin.json': '{ "name": "boomi-dashboard", "version": "0.21.0" }' })
+  const store: Record<string, unknown> = {}
+  on('store.get', async (_$, e) => ({ value: store[e.key] }))
+  on('store.set', async (_$, e) => {
+    store[e.key] = JSON.parse(JSON.stringify(e.value))
+    return { value: undefined }
+  })
+  startable(on)
+  let check = UPGRADE_CHECK
+  let checks = 0
+  on('process.run', async (_$, e) => {
+    if (!String(e.argv[1] ?? '').endsWith('/scripts/upgrade.sh')) return { deny: 'not the upgrade script' }
+    checks++
+    return { value: { exitCode: 0, stdout: check, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  const announced = () => toasts.filter(t => /is available/.test(t))
+
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.advance(20_000)
+  expect(announced()).toEqual(['bc-dashboard 0.23.0 is available (you have 0.21.0): run /bc-dashboard upgrade'])
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: '↑ bc-dashboard 0.23.0 is available: /bc-dashboard upgrade' })).toBeDefined()
+  await pane.unmount()
+
+  // A day later (the last check moved back a day), the same version: checked again, not toasted again, still in the footer.
+  store.upgradeCheckedAt = NOW - 25 * 3_600_000
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  const footer = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await footer.find({ text: /0\.23\.0 is available/ })).toBeDefined()
+  await footer.unmount()
+  await clock.advance(20_000)
+  expect(checks).toBe(2)
+  expect(announced()).toHaveLength(1)
+
+  // Another day, a newer release: that one is news.
+  check = UPGRADE_CHECK.replace('LATEST: 0.23.0', 'LATEST: 0.24.0')
+  store.upgradeCheckedAt = NOW - 25 * 3_600_000
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.advance(20_000)
+  expect(announced()).toHaveLength(2)
+  expect(announced()[1]).toContain('0.24.0 is available')
+})
