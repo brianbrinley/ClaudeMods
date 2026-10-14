@@ -31,7 +31,7 @@ import {
   stages,
   withoutEchoes,
 } from './activity'
-import type { Level, ReportFacts, Stage } from './activity'
+import type { BudgetLine, Level, ReportFacts, Stage } from './activity'
 import { PRODUCT_NAMES } from './products'
 import { mask } from './upgrade'
 
@@ -65,10 +65,10 @@ const badges = (list: readonly Stage[]) =>
 /** A cell that sorts by a number, not its text. */
 const num = (value: number | undefined, shown: string | undefined) => `<td class="n" data-sort="${value ?? -1}">${esc(shown ?? '')}</td>`
 
-const table = (id: string, caption: string, head: string[], rows: string[], cls = '') =>
+const table = (id: string, caption: string, head: string[], rows: string[], cls = '', note = '') =>
   rows.length === 0
     ? ''
-    : `<section id="${id}"><h2>${esc(caption)} <span class="count">${rows.length}</span></h2>
+    : `<section id="${id}"><h2>${esc(caption)} <span class="count">${rows.length}</span>${note ? ` <span class="aside">${esc(note)}</span>` : ''}</h2>
 <div class="scroll"><table class="sortable${cls ? ` ${cls}` : ''}"><thead><tr>${head.map((h, i) => `<th scope="col"><button type="button" data-col="${i}">${esc(h)}</button></th>`).join('')}</tr></thead>
 <tbody>${rows.join('\n')}</tbody></table></div></section>`
 
@@ -183,31 +183,6 @@ const costOverTime = (activity: readonly Activity[], endUsd: number | undefined,
 ${dataTable(['Time (UTC)', 'Cost so far'], points.map(p => [new Date(p.at).toISOString().slice(11, 16), formatCost(p.usd) ?? '$0']))}</figure>`
 }
 
-/** How far the session's components got: touched, saved in Boomi, deployed, tested and passing. */
-const pipeline = (dashboard: Dashboard, isAll = false): string => {
-  const rows = components(dashboard.activity)
-  if (rows.length === 0) return ''
-  const ok = (a: Activity | undefined) => a?.outcome === 'ok'
-  const steps = [
-    { name: 'Worked on', n: rows.length },
-    { name: 'Saved in Boomi', n: rows.filter(r => ok(r.saved) && r.saved!.kind !== 'pull').length },
-    { name: 'Deployed', n: rows.filter(r => ok(r.deployed) && r.deployed!.kind === 'deploy').length },
-    { name: 'Tested, passing', n: rows.filter(r => ok(r.tested) && levelOf(r.tested!) === 'healthy').length },
-  ]
-  const max = steps[0]!.n || 1
-  const rowH = 30
-  const left = 120
-  const marks = steps
-    .map((s, i) => {
-      const w = Math.max(2, (s.n / max) * 340)
-      return `<g class="hit" tabindex="0" data-tip="${esc(`${s.name}: ${s.n} of ${rows.length}`)}"><rect x="0" y="${i * rowH}" width="560" height="${rowH}" class="target"/>
-<text x="0" y="${i * rowH + 19}" class="label">${esc(s.name)}</text><path d="${hbar(left, i * rowH + 6, s.n === 0 ? 2 : w, 18)}" class="seq"/><text x="${(left + (s.n === 0 ? 2 : w) + 6).toFixed(1)}" y="${i * rowH + 19}" class="value">${s.n}</text></g>`
-    })
-    .join('')
-  return `<figure class="chart"><figcaption><h3>Component pipeline</h3><span class="sub">how far ${isAll ? 'these sessions\'' : 'this session\'s'} components got</span></figcaption>
-<svg viewBox="0 0 560 ${steps.length * rowH}" role="img" aria-label="Component pipeline">${marks}</svg>
-${dataTable(['Stage', 'Components'], steps.map(s => [s.name, s.n]))}</figure>`
-}
 
 /** Which steps a report covers: this Claude Code session's, or every session's this folder kept. */
 export type ReportScope = 'session' | 'all'
@@ -396,7 +371,8 @@ const sessionAnchor = (id: string) => `s-${id.replace(/[^A-Za-z0-9-]/g, '')}`
  * root of its length (a two-hour session doesn't crowd out a ten-minute one),
  * the idle time between them a short gap that says how long it was, each step
  * a tick at its moment, and anything that didn't go well marked above the band
- * with its icon. A band's heading goes to that session's steps.
+ * with its icon. A band's heading goes to that session's steps. `costs` is
+ * markup, each session's cost already escaped.
  */
 export const timeline = (steps: readonly Activity[], sessionOf: (a: Activity) => string, label: (id: string) => string, costs: ReadonlyMap<string, string>): string => {
   if (steps.length === 0) return ''
@@ -417,17 +393,17 @@ export const timeline = (steps: readonly Activity[], sessionOf: (a: Activity) =>
         const level = levelOf(a)
         const at = b.last === b.first ? 50 : 1.5 + ((a.startedAt - b.first) / span) * 97
         const tip = `${clock(a.startedAt)} UTC · ${LABEL[level]}: ${describe(a)}`
-        return `<span class="tl-tick tick-${level}" style="left:${at.toFixed(2)}%" data-tip="${esc(tip)}">${level === 'healthy' ? '' : icon(level)}</span>`
+        return `<button type="button" class="tl-tick tick-${level}" style="left:${at.toFixed(2)}%" data-tip="${esc(tip)}" data-step="${a.id}" aria-label="${esc(tip)}">${level === 'healthy' ? '' : icon(level)}</button>`
       })
       .join('')
     const failed = b.list.filter(a => levelOf(a) !== 'healthy').length
-    const facts = [`${b.list.length} step${b.list.length === 1 ? '' : 's'}`, failed ? `${failed} not healthy` : undefined, costs.get(b.id)].filter(Boolean).join(' · ')
+    const facts = [esc(`${b.list.length} step${b.list.length === 1 ? '' : 's'}`), failed ? esc(`${failed} not healthy`) : undefined, costs.get(b.id)].filter(Boolean).join(' · ')
     parts.push(
-      `<li class="tl-session" style="flex-grow:${Math.sqrt(span / 60_000).toFixed(2)}"><a class="tl-head" href="#${sessionAnchor(b.id)}"><span class="tl-name">${esc(label(b.id))}</span><span class="tl-when">${esc(`${day(b.first)}, ${clock(b.first)}–${clock(b.last)}`)}</span></a><div class="tl-band">${ticks}</div><div class="tl-foot">${esc(facts)}</div></li>`,
+      `<li class="tl-session" style="flex-grow:${Math.sqrt(span / 60_000).toFixed(2)}"><a class="tl-head" href="#${sessionAnchor(b.id)}" title="${esc(b.id === 'this' || isUnnamed(b.id) ? label(b.id) : b.id)}"><span class="tl-name">${esc(label(b.id))}</span><span class="tl-when">${esc(`${day(b.first)}, ${clock(b.first)}–${clock(b.last)}`)}</span></a><div class="tl-band">${ticks}</div><div class="tl-foot">${facts}</div></li>`,
     )
   })
-  return `<figure class="timeline" aria-label="The sessions over time"><ol class="tl">${parts.join('')}</ol>
-${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], level: l })))}
+  return `<figure class="timeline" aria-label="The sessions over time"><ol class="tl" data-ticks>${parts.join('')}</ol>
+<div class="tl-key">${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], level: l })))}<p class="note">Each tick is a step; arrow keys move between them, Enter opens one. “Not healthy” counts warned, blocked and failed steps.</p></div>
 ${dataTable(['Session', 'From (UTC)', 'To (UTC)', 'Steps', 'Not healthy'], bands.map(b => [label(b.id), `${day(b.first)} ${clock(b.first)}`, `${day(b.last)} ${clock(b.last)}`, b.list.length, b.list.filter(a => levelOf(a) !== 'healthy').length]))}</figure>`
 }
 
@@ -444,6 +420,10 @@ export type HtmlFacts = ReportFacts & {
   boomi?: BoomiFacts
   /** The workspace folder's name (not its path). */
   folder?: string
+  /** Every budget the person set, as the pane's BUDGET gauge lists them. */
+  budgets?: BudgetLine[]
+  /** The per-session spend budget (budgetUsd), to hold each session against in an all-sessions report. */
+  sessionBudgetUsd?: number
 }
 
 /** The session report as one HTML page, styles and scripts inside it. */
@@ -507,47 +487,51 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     facts.version ? `boomi-dashboard ${esc(facts.version)}` : undefined,
   ].filter(Boolean).join(' · ')
 
-  const attentionList =
-    needs.length === 0
-      ? `<p>${status('healthy', 'Nothing needs attention.')}</p>`
-      : `<ol class="attention">${needs.map(n => `<li class="alert alert-${n.level}">${status(n.level, n.title)}<div class="hint">${esc(n.hint)}</div></li>`).join('')}</ol>`
+  const attentionList = `<ol class="attention">${needs.map(n => `<li class="alert alert-${n.level}">${status(n.level, n.title)}<div class="hint">${esc(n.hint)}</div></li>`).join('')}</ol>`
 
+  // Copyable IDs: a click puts the ID on the clipboard.
+  const idCode = (id: string) => `<code class="copy" data-copy="${esc(id)}" title="Copy">${esc(id)}</code>`
+  const shortClock = (t: number) => (isAll ? `${day(t)}, ${new Date(t).toISOString().slice(11, 16)}` : new Date(t).toISOString().slice(11, 16))
+
+  // Components as swimlanes: saved, deployed, tested, each in its own column, in the dashboard's own words.
+  const laneRank: Record<Level, number> = { critical: 0, serious: 1, warning: 2, healthy: 3 }
+  const lane = (list: readonly Stage[], step: Activity | undefined, sub: string | undefined) => {
+    if (list.length === 0) return '<td class="lane" data-sort="-1"><span class="muted">—</span></td>'
+    const worst = list.reduce((w, s) => (laneRank[s.level] < laneRank[w.level] ? s : w), list[0]!)
+    const when = step && step.outcome !== 'running' ? shortClock(step.endedAt ?? step.startedAt) : undefined
+    return `<td class="lane" data-sort="${laneRank[worst.level]}">${list.map(s => status(s.level, s.text)).join('<br>')}${[when, sub].filter(Boolean).length ? `<div class="sub">${[when && esc(when), sub].filter(Boolean).join(' · ')}</div>` : ''}</td>`
+  }
+  const isDeployStage = (s: Stage) => /deploy|undeploy|\bruns?\b|ok$/.test(s.text) && !/^test/.test(s.text)
+  const isTestStage = (s: Stage) => /^test/.test(s.text)
+  const savedOk = rows.filter(r => r.saved?.outcome === 'ok').length
+  const deployedOk = rows.filter(r => r.deployed?.outcome === 'ok' && r.deployed.kind === 'deploy').length
+  const passing = rows.filter(r => r.tested && levelOf(r.tested) === 'healthy').length
   const componentRows = rows.map(row => {
     const spent = spendOf(row.ids, all)
     const d = row.componentId ? boomi?.components[row.componentId] : undefined
+    const list = stages(row, runs)
+    const deployList = list.filter(isDeployStage)
+    const testList = list.filter(isTestStage)
+    const saveList = list.filter(s => !isDeployStage(s) && !isTestStage(s))
+    const type = friendlyType(d?.type ?? row.type) ?? d?.type ?? row.type
+    const about = [type, d?.folderName].filter(Boolean).map(t => esc(t!)).join(' · ')
     const renamed = d?.name && d.name !== row.name ? `<div class="sub">In Boomi now: ${esc(d.name)}</div>` : ''
-    const type = friendlyType(d?.type ?? row.type) ?? d?.type ?? row.type ?? ''
     const link = row.componentId && boomi?.accountId ? ` <a href="${esc(boomiLink(boomi.accountId, row.componentId))}" target="_blank" rel="noopener">Open in Boomi</a>` : ''
-    const id = row.componentId ? `<code>${esc(row.componentId)}</code>${link}` : '<span class="muted">not created in Boomi</span>'
-    const version = d?.version ?? row.saved?.version
-    const changed = d?.modifiedDate ? `${esc(d.modifiedDate.replace('T', ' ').slice(0, 16))}${d.modifiedBy ? `<br>${esc(d.modifiedBy)}` : ''}` : ''
-    return `<tr><th scope="row">${esc(row.name)}${renamed}${row.recipe ? `<div class="sub">from recipe ${esc(row.recipe)}</div>` : ''}</th><td data-sort="${esc(type)}">${esc(type)}${d?.folderName ? `<div class="sub">${esc(d.folderName)}</div>` : ''}</td><td class="id">${id}</td><td data-sort="${version === undefined ? -1 : Number(version)}">${version === undefined ? '' : `v${esc(version)}`}${changed ? `<div class="sub">${changed}</div>` : ''}</td><td class="stages">${badges(stages(row, runs))}</td>${num(spent.tokens, spent.tokens ? formatTokens(spent.tokens) : '')}${num(spent.usd, formatCost(spent.usd))}</tr>`
+    const id = row.componentId ? `<div class="sub">${idCode(row.componentId)}${link}</div>` : '<div class="sub">not created in Boomi</div>'
+    const inBoomi = d?.version ? `in Boomi v${esc(d.version)}${d.modifiedBy ? ` by ${esc(d.modifiedBy)}` : ''}` : undefined
+    const pkg = row.deployed ? packageOf(row.deployed.detail) : undefined
+    const exec = row.tested?.executionId
+    return `<tr><th scope="row" data-sort="${esc(row.name)}">${esc(row.name)}${about ? `<div class="sub">${about}</div>` : ''}${renamed}${row.recipe ? `<div class="sub">from recipe ${esc(row.recipe)}</div>` : ''}${id}</th>${lane(saveList, row.saved ?? row.edited, inBoomi)}${lane(deployList, row.deployed, pkg ? `package ${idCode(pkg)}` : undefined)}${lane(testList, row.tested, exec ? idCode(exec) : undefined)}${num(spent.usd, formatCost(spent.usd))}</tr>`
   })
-
-  // Every deploy and test with the ID to find it by in Boomi: the package, or the execution.
-  const releaseRows = steps
-    .filter(a => !a.product && (a.kind === 'deploy' || a.kind === 'undeploy' || a.kind === 'test') && a.outcome !== 'running')
-    .reverse()
-    .map(a => {
-      const id = a.kind === 'test' ? a.executionId : (packageOf(a.detail) ?? a.deploymentId)
-      const what = a.kind === 'test' ? (a.executionId ? 'execution' : '') : a.kind === 'deploy' ? 'package' : 'deployment'
-      return `<tr><td data-sort="${a.startedAt}"><time datetime="${new Date(a.startedAt).toISOString()}">${esc(when(a.startedAt))} UTC</time></td><th scope="row">${status(levelOf(a), describe(a))}</th><td>${id ? `<span class="muted">${what}</span> <code>${esc(id)}</code>` : ''}</td>${a.kind === 'test' ? `<td>${esc(a.executionStatus ?? '')}</td>` : '<td></td>'}${isAll ? `<td>${isUnnamed(sessionOf(a)) ? esc(shortSession(sessionOf(a))) : `<code>${esc(shortSession(sessionOf(a)))}</code>`}</td>` : ''}</tr>`
-    })
-
-  const sessionRows = sessions.map(s => {
-    const cost = s.usd === undefined ? 'not recorded' : `${s.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(s.usd) ?? '$0'}`
-    const label = sessionLabel(s.id)
-    const named = isUnnamed(s.id) ? esc(label) : `<code>${esc(label)}</code>`
-    return `<tr><th scope="row">${named}${s.isCurrent ? ' <span class="tag tag-1">this session</span>' : ''}</th><td data-sort="${s.firstAt}">${esc(when(s.firstAt))} UTC</td><td data-sort="${s.lastAt}">${esc(when(s.lastAt))} UTC</td>${num(s.steps, String(s.steps))}${num(s.failed, String(s.failed))}${num(s.components, String(s.components))}${num(s.usd, cost)}</tr>`
-  })
+  const pipelineLine = rows.length > 0 ? `${savedOk} saved · ${deployedOk} deployed · ${passing} passing` : ''
 
   const account = boomi && (boomi.accountId || boomi.environmentId)
-    ? `<aside id="account" class="account"><h2>Boomi account</h2><dl class="facts">${[
-        boomi.accountName && `<dt>Account</dt><dd>${esc(boomi.accountName)}</dd>`,
-        boomi.accountId && `<dt>Account ID</dt><dd><code>${esc(boomi.accountId)}</code></dd>`,
-        boomi.environmentId && `<dt>Environment ID</dt><dd><code>${esc(boomi.environmentId)}</code></dd>`,
-        boomi.apiHost && `<dt>Platform API</dt><dd>${esc(boomi.apiHost)}</dd>`,
-      ].filter(Boolean).join('')}</dl>${boomi.note ? `<p class="muted">${esc(boomi.note)}</p>` : ''}</aside>`
+    ? `<p class="account-line" id="account"><span class="label">Boomi account</span> ${[
+        boomi.accountName && `<strong>${esc(boomi.accountName)}</strong>`,
+        boomi.accountId && idCode(boomi.accountId),
+        boomi.environmentId && `environment ${idCode(boomi.environmentId)}`,
+        boomi.apiHost && esc(boomi.apiHost),
+      ].filter(Boolean).join(' · ')}${boomi.note ? ` <span class="muted">${esc(boomi.note)}</span>` : ''}</p>`
     : ''
   const connectorRows = connectors(dashboard.activity).map(row => {
     const spent = spendOf(row.ids, all)
@@ -560,29 +544,32 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
 
   const quarantine = quarantineLines(dashboard, now)
   const products = PRODUCT_ORDER.filter(k => steps.some(a => productKey(a) === k)).map(productName)
+  const isRelease = (a: Activity) => !a.product && (a.kind === 'deploy' || a.kind === 'undeploy' || a.kind === 'test')
   const stepItem = (a: Activity) => {
-      const level = levelOf(a)
-      const product = productName(productKey(a))
-      const spent = all.get(a.id)
-      const aside = [spent?.tokens ? `${formatTokens(spent.tokens)} tokens` : '', formatCost(spent?.usd) ?? '', a.source === 'log' ? "from Companion's log" : ''].filter(Boolean).join(' · ')
-      const pkg = a.kind === 'deploy' ? packageOf(a.detail) : undefined
-      const took = a.endedAt !== undefined && a.endedAt > a.startedAt ? duration(a.endedAt - a.startedAt) : undefined
-      const detail = [
-        a.detail && `<dt>Result</dt><dd>${esc(a.detail)}</dd>`,
-        a.componentId && `<dt>Component</dt><dd><code>${esc(a.componentId)}</code>${boomi?.accountId ? ` <a href="${esc(boomiLink(boomi.accountId, a.componentId))}" target="_blank" rel="noopener">Open in Boomi</a>` : ''}</dd>`,
-        a.version && `<dt>Version</dt><dd>v${esc(a.version)}</dd>`,
-        pkg && `<dt>Package</dt><dd><code>${esc(pkg)}</code></dd>`,
-        a.executionId && `<dt>Execution</dt><dd><code>${esc(a.executionId)}</code></dd>`,
-        a.ref && `<dt>Acts on</dt><dd><code>${esc(a.ref)}</code></dd>`,
-        a.file && `<dt>File</dt><dd><code>${esc(a.file)}</code></dd>`,
-        took && `<dt>Took</dt><dd>${esc(took)}</dd>`,
-        `<dt>Seen in</dt><dd>${a.source === 'log' ? "Companion's activity log" : "Claude's tool call"}</dd>`,
-        isAll && `<dt>Session</dt><dd>${isUnnamed(sessionOf(a)) ? esc(sessionLabel(sessionOf(a))) : `<code>${esc(sessionOf(a))}</code>`}</dd>`,
-      ]
-        .filter(Boolean)
-        .join('')
-      const at = isAll ? `${when(a.startedAt)} UTC` : `${new Date(a.startedAt).toISOString().slice(11, 16)} UTC`
-      return `<li data-level="${level}" data-product="${esc(product)}" data-at="${a.startedAt}"><details><summary><time datetime="${new Date(a.startedAt).toISOString()}">${esc(at)}</time> ${status(level, describe(a))} <span class="tag tag-${slot(productKey(a))}">${esc(product)}</span>${aside ? ` <span class="aside">${esc(aside)}</span>` : ''}</summary><dl>${detail}</dl></details></li>`
+    const level = levelOf(a)
+    const product = productName(productKey(a))
+    const spent = all.get(a.id)
+    const aside = [spent?.tokens ? `${formatTokens(spent.tokens)} tokens` : '', formatCost(spent?.usd) ?? '', a.source === 'log' ? "from Companion's log" : ''].filter(Boolean).join(' · ')
+    const pkg = a.kind === 'deploy' ? packageOf(a.detail) : undefined
+    const took = a.endedAt !== undefined && a.endedAt > a.startedAt ? duration(a.endedAt - a.startedAt) : undefined
+    const detail = [
+      a.detail && `<dt>Result</dt><dd>${esc(a.detail)}</dd>`,
+      a.componentId && `<dt>Component</dt><dd>${idCode(a.componentId)}${boomi?.accountId ? ` <a href="${esc(boomiLink(boomi.accountId, a.componentId))}" target="_blank" rel="noopener">Open in Boomi</a>` : ''}</dd>`,
+      a.version && `<dt>Version</dt><dd>v${esc(a.version)}</dd>`,
+      pkg && `<dt>Package</dt><dd>${idCode(pkg)}</dd>`,
+      a.executionId && `<dt>Execution</dt><dd>${idCode(a.executionId)}</dd>`,
+      a.ref && `<dt>Acts on</dt><dd>${idCode(a.ref)}</dd>`,
+      a.file && `<dt>File</dt><dd><code>${esc(a.file)}</code></dd>`,
+      took && `<dt>Took</dt><dd>${esc(took)}</dd>`,
+      `<dt>Seen in</dt><dd>${a.source === 'log' ? "Companion's activity log" : "Claude's tool call"}</dd>`,
+      isAll && `<dt>Session</dt><dd>${isUnnamed(sessionOf(a)) ? esc(sessionLabel(sessionOf(a))) : idCode(sessionOf(a))}</dd>`,
+    ]
+      .filter(Boolean)
+      .join('')
+    const at = isAll ? `${when(a.startedAt)} UTC` : `${new Date(a.startedAt).toISOString().slice(11, 16)} UTC`
+    // A failure says what went wrong without being opened.
+    const why = level === 'critical' || level === 'serious' ? `<div class="why">${esc(a.detail)}${a.executionId ? ` · execution ${idCode(a.executionId)}` : ''}</div>` : ''
+    return `<li id="step-${a.id}" data-level="${level}" data-product="${esc(product)}"${isRelease(a) ? ' data-kind="release"' : ''} data-at="${a.startedAt}"><details><summary><time datetime="${new Date(a.startedAt).toISOString()}">${esc(at)}</time> ${status(level, describe(a))} <span class="tag tag-${slot(productKey(a))}">${esc(product)}</span>${aside ? ` <span class="aside">${esc(aside)}</span>` : ''}${why}</summary><dl>${detail}</dl></details></li>`
   }
   // The steps by session, newest first (the page's Oldest first turns both around); one report's session needs no heading.
   const groups = new Map<string, Activity[]>()
@@ -593,7 +580,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     .map(g => {
       const summary = sessions.find(s => s.id === g.id)
       const cost = summary?.usd === undefined ? undefined : `${summary.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(summary.usd) ?? '$0'}`
-      const name = isUnnamed(g.id) ? esc(sessionLabel(g.id)) : `Session <code>${esc(g.id)}</code>`
+      const name = isUnnamed(g.id) ? esc(sessionLabel(g.id)) : `Session ${idCode(g.id)}`
       const facts = [`${esc(when(g.firstAt))} – ${esc(when(g.lastAt).slice(11))} UTC`, esc(`${g.list.length} step${g.list.length === 1 ? '' : 's'}`), cost && esc(cost)].filter(Boolean).join(' · ')
       const head = isAll ? `<h3 class="group-head">${name}${summary?.isCurrent ? ' <span class="tag tag-1">this session</span>' : ''} <span class="aside">${facts}</span></h3>` : ''
       const items = [...g.list].sort((a, b) => b.startedAt - a.startedAt).map(stepItem).join('\n')
@@ -603,25 +590,46 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
 
   const spendFacts = [
     limitsLine(u.limits, u.now ?? now) ? `<li>${esc(limitsLine(u.limits, u.now ?? now)!)}</li>` : '',
-    ...[u.companion?.week, u.companion?.month].filter(Boolean).map(b => `<li>${status(b!.level, b!.text)}</li>`),
     u.split ? `<li>Tokens: ${esc(u.split)}</li>` : '',
     ...(u.modelSplits ?? []).map(line => `<li class="sub">${esc(line)}</li>`),
   ].join('')
 
+  // Budgets: every one the person set, as a meter; in an all-sessions report, each session against the session budget too.
+  const budgetRows = (facts.budgets ?? []).map(b => {
+    const label = b.label === 'session' ? (isAll ? 'This session' : 'Session') : b.label === 'month' ? 'Companion this month' : `Companion's share (${b.label.replace(/^share,? ?/, '') || 'limit'})`
+    const shown = Math.min(100, Math.max(0, b.percent))
+    return `<li class="meter meter-${b.level}"><div class="meter-head"><span>${esc(label)}</span>${status(b.level, `${Math.round(b.percent)}%`)}</div><div class="meter-bar" role="img" aria-label="${esc(`${label}: ${Math.round(b.percent)}%, ${b.detail}`)}"><span style="width:${shown.toFixed(1)}%"></span></div><div class="sub">${esc(b.detail)}</div></li>`
+  })
+  const perSession = isAll && facts.sessionBudgetUsd ? sessions.filter(s => s.usd !== undefined) : []
+  const over = perSession.filter(s => s.usd! >= facts.sessionBudgetUsd!)
+  const budgetBlock = `<aside class="budgets" id="budget" aria-label="Budgets"><h2>Budget</h2>${
+    budgetRows.length > 0
+      ? `<ul class="plain">${budgetRows.join('')}</ul>`
+      : '<p class="note">No budget set. Set <code>budgetUsd</code> for each session, or <code>companionMonthlyUsd</code> for the month, under <code>/config</code> to see spending against it.</p>'
+  }${perSession.length > 0 ? `<p class="note">${over.length === 0 ? status('healthy', `Every session stayed under the ${formatCost(facts.sessionBudgetUsd!)} session budget`) : status('critical', `${over.length} of ${perSession.length} sessions reached the ${formatCost(facts.sessionBudgetUsd!)} session budget`)}.</p>` : ''}</aside>`
+  if (over.length > 0) lede.splice(lede.length - 1, 0, `${plural(over.length, 'session')} reached the ${strong(formatCost(facts.sessionBudgetUsd!) ?? '$0')} session budget.`)
+
+  const ofBudget = (usd: number) => {
+    if (!facts.sessionBudgetUsd) return ''
+    const pct = Math.round((usd / facts.sessionBudgetUsd) * 100)
+    const level: Level = pct >= 100 ? 'critical' : pct >= 80 ? 'warning' : 'healthy'
+    return ` · ${level === 'healthy' ? esc(`${pct}% of budget`) : status(level, `${pct}% of budget`)}`
+  }
+  const costs = new Map(sessions.flatMap(s => (s.usd === undefined ? [] : [[s.id, `${esc(`${s.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(s.usd) ?? '$0'}`)}${ofBudget(s.usd)}`] as [string, string]])))
+  if (!isAll && u.usd !== undefined) costs.set('this', `${esc(formatCost(u.usd) ?? '$0')}${ofBudget(u.usd)}`)
+  const strip = timeline(steps, a => (isAll ? sessionOf(a) : 'this'), id => (id === 'this' ? 'This session' : isUnnamed(id) ? `Earlier ${id.slice(8)}` : id === facts.sessionId ? 'This session' : `Session ${id.slice(0, 8)}`), costs)
+  // A product chart only says something with two products or more.
+  const charts = [products.length > 1 ? outcomesByProduct(steps) : '', isAll ? '' : costOverTime(dashboard.activity, u.usd, now), products.length > 1 ? spendByProduct(dashboard.activity, all) : ''].filter(Boolean)
+
   const sectionsShown: [string, string][] = [
+    ['timeline', isAll ? 'Sessions' : 'Timeline'],
     ...(needs.length > 0 ? ([['attention', 'Attention']] as [string, string][]) : []),
-    ...(isAll ? ([['sessions', 'Sessions']] as [string, string][]) : []),
     ['components', 'Components'],
-    ...(releaseRows.length > 0 ? ([['releases', 'Deploys & tests']] as [string, string][]) : []),
-    ['charts', 'Charts'],
+    ...(charts.length > 0 ? ([['charts', 'Charts']] as [string, string][]) : []),
     ['steps', 'Steps'],
   ]
   const nav = sectionsShown.map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join('')
-
-  const costs = new Map(sessions.flatMap(s => (s.usd === undefined ? [] : [[s.id, `${s.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(s.usd) ?? '$0'}`] as [string, string]])))
-  if (!isAll && u.usd !== undefined) costs.set('this', formatCost(u.usd) ?? '$0')
-  const strip = timeline(steps, a => (isAll ? sessionOf(a) : 'this'), id => (id === 'this' ? 'This session' : isUnnamed(id) ? `Earlier ${id.slice(8)}` : id === facts.sessionId ? 'This session' : `Session ${id.slice(0, 8)}`), costs)
-  const charts = [outcomesByProduct(steps), isAll ? '' : costOverTime(dashboard.activity, u.usd, now), spendByProduct(dashboard.activity, all), pipeline(dashboard, isAll)].filter(Boolean)
+  const atLeastNote = total.isAtLeast ? '<p class="note">“At least”: a session from before the dashboard recorded session IDs, that no transcript on this machine covers, is counted up to its last Companion step.</p>' : ''
 
   return `<!doctype html>
 <html lang="en">
@@ -645,24 +653,27 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     </div>
   </div>
 </header>
-<main id="top">
-<div class="opening${account ? '' : ' alone'}">
-<div>
-<h1>${esc(title)}</h1>
-<p class="lede">${lede.join(' ')}</p>
-<p class="dateline">${dateline}</p>
+<div class="band" id="top">
+  <div class="band-inner">
+    <div class="opening">
+      <div>
+        <h1>${esc(title)}</h1>
+        <p class="lede">${lede.join(' ')}</p>
+        ${atLeastNote}
+        <p class="dateline">${dateline}</p>
+      </div>
+      ${budgetBlock}
+    </div>
+    <div id="timeline">${strip}</div>
+  </div>
 </div>
+<main>
 ${account}
-</div>
-${strip}
 ${needs.length > 0 ? `<section id="attention"><h2>Needs attention</h2>${attentionList}</section>` : ''}
-${isAll ? table('sessions', 'Sessions', ['Session', 'Started', 'Last step', 'Steps', 'Failed or blocked', 'Components', 'Cost'], sessionRows) : ''}
-${componentRows.length === 0 ? `<section id="components"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Type · folder', 'Component ID', 'In Boomi', 'Where it stands', 'Tokens', 'Cost'], componentRows, 'wide')}
-${table('releases', 'Deployments and tests', ['When', 'Step', 'ID in Boomi', 'Status', ...(isAll ? ['Session'] : [])], releaseRows)}
+${componentRows.length === 0 ? `<section id="components"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Saved', 'Deployed', 'Tested', 'Cost'], componentRows, 'lanes', pipelineLine)}
 ${table('connectors', 'Custom connectors', ['Connector', 'Group', 'Where it stands', 'Tokens', 'Cost'], connectorRows)}
 ${table('agents', 'Agentstudio agents', ['Agent', 'Where it stands', 'Tokens', 'Cost'], agentRows)}
 ${quarantine.length === 0 ? '' : `<section id="quarantine"><h2>Data Hub quarantine</h2><ul class="plain">${quarantine.map(q => `<li>${status(q.level, q.text)}</li>`).join('')}</ul></section>`}
-${spendFacts ? `<section id="usage"><h2>Usage</h2><ul class="plain">${spendFacts}</ul></section>` : ''}
 ${charts.length > 0 ? `<section id="charts"><h2>Charts</h2><div class="charts">${charts.join('\n')}</div></section>` : ''}
 <section id="steps"><h2>Claude's steps <span class="count">${steps.length}</span></h2>
 ${
@@ -673,17 +684,20 @@ ${
   <div class="filters" role="group" aria-label="Show">
     <button type="button" data-filter="all" aria-pressed="true">All</button>
     <button type="button" data-filter="issues" aria-pressed="false">Failed or warned</button>
+    <button type="button" data-filter="kind:release" aria-pressed="false">Deploys &amp; tests</button>
     ${products.length > 1 ? products.map(p => `<button type="button" data-filter="product:${esc(p)}" aria-pressed="false">${esc(p)}</button>`).join('\n    ') : ''}
   </div>
   <div class="filters order" role="group" aria-label="Order">
     <button type="button" data-order="desc" aria-pressed="true">Newest first</button>
     <button type="button" data-order="asc" aria-pressed="false">Oldest first</button>
+    <button type="button" data-expand aria-pressed="false">Expand all</button>
   </div>
   <span class="shown" aria-live="polite"></span>
 </div>
 <div class="step-groups" data-steps>${stepGroups}</div>`
 }
 </section>
+${spendFacts ? `<section id="usage"><h2>Usage</h2><ul class="plain">${spendFacts}</ul></section>` : ''}
 </main>
 <footer><svg class="maker" viewBox="0 0 12 16" aria-hidden="true" focusable="false" shape-rendering="crispEdges">${FLAMINGO_IDLE.flatMap((row, y) => [...row].map((c, x) => (c === '.' ? '' : `<rect x="${x}" y="${y}" width="1" height="1"/>`))).join('')}</svg>A snapshot of ${isAll ? `every Boomi Companion session the dashboard kept in ${esc(facts.folder ?? 'this folder')}` : 'a Boomi Companion session'}${facts.sessionId ? ` (Claude Code session ${esc(facts.sessionId)})` : ''}, made by boomi-dashboard${facts.version ? ` ${esc(facts.version)}` : ''} on ${esc(new Date(now).toISOString().replace('T', ' ').slice(0, 16))} UTC, styled to Boomi's Exosphere design system. Nothing in it is live, and it holds no credentials.</footer>
 <div class="tooltip" role="tooltip" hidden></div>
@@ -731,6 +745,7 @@ h1{font-size:1.75rem}h2{font-size:1.25rem;margin-bottom:var(--exo-spacing-small)
 .muted,.note,.hint,.aside,.sub,footer,.count{color:var(--exo-color-font-secondary)}
 main>section{margin-top:2rem;padding-top:1rem;border-top:1px solid var(--exo-color-border-secondary)}
 main>section>h2{margin-bottom:.75rem}
+h2 .aside{font:400 .875rem/1.4 var(--exo-font-family);margin-left:.9rem;white-space:nowrap}
 .chart{margin:0}
 svg.i{display:inline-block;width:1.05em;height:1.05em;vertical-align:-.17em;margin-right:.35em;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}.i .solid{fill:currentColor;stroke:none}
 .status-healthy .i,.badge-healthy .i{color:var(--exo-color-background-success-strong)}.status-warning .i,.badge-warning .i{color:var(--exo-color-background-warning-strong)}.status-serious .i,.badge-serious .i{color:var(--exo-color-background-highlight)}.status-critical .i,.badge-critical .i{color:var(--exo-color-background-danger-strong)}
@@ -803,6 +818,35 @@ button{font:inherit}
 .badge-critical{color:var(--exo-color-background-danger-strong)}.badge-serious{color:var(--exo-color-background-highlight)}
 footer .maker{width:.75rem;height:1rem;vertical-align:-.2rem;margin-right:.5rem;fill:var(--exo-color-font-secondary)}
 @media (max-width:640px){.tl{flex-direction:column;gap:.25rem}.tl-session{min-width:0}.tl-gap{flex-basis:1.5rem}.tl-gap::before{left:50%;right:auto;top:0;bottom:0;border-top:0;border-left:1px dashed var(--exo-color-border)}}
+.band{--band-bg:#072b55;background:var(--band-bg);color:#ffffff;
+--exo-color-font:#ffffff;--exo-color-font-secondary:#cccccc;--exo-color-background:rgba(255,255,255,.07);--exo-color-body:#0d3664;--exo-color-border:rgba(255,255,255,.35);--exo-color-border-secondary:rgba(255,255,255,.18);--exo-color-font-link:#66b6f6;
+--exo-color-background-success-strong:#3ecfa2;--exo-color-background-warning-strong:#ec9932;--exo-color-background-danger-strong:#ff5c6c;--exo-color-background-highlight:#ff8a75;--exo-color-background-selected:#66b6f6}
+.ex-theme-dark .band{--band-bg:#262626;--exo-color-body:#2b2b2b}
+@media (prefers-color-scheme:dark){:root:not(.ex-theme-light) .band{--band-bg:#262626;--exo-color-body:#2b2b2b}}
+.band-inner{max-width:1440px;margin:0 auto;padding:2rem var(--exo-spacing-large) 1.75rem}
+.band .opening{margin-top:0;align-items:start}
+.band .timeline{margin-top:1.75rem}
+.band .legend,.band .note{color:var(--exo-color-font-secondary)}
+.band .tl-tick .i{background:var(--exo-color-body)}
+.band details.data summary{color:var(--exo-color-font-link)}.band details.data table{background:rgba(0,0,0,.2)}
+.budgets h2{font:600 .813rem/1.4 var(--exo-font-family);color:var(--exo-color-font-secondary);margin:0 0 .6rem;letter-spacing:.02em}
+.budgets{padding-left:1.5rem;border-left:1px solid var(--exo-color-border-secondary)}
+.meter{margin:0 0 .9rem}.meter-head{display:flex;justify-content:space-between;gap:1rem;font-size:.875rem}
+.meter-bar{height:.5rem;border-radius:.25rem;background:var(--exo-color-background);margin:.35rem 0 .25rem;overflow:hidden;box-shadow:inset 0 0 0 1px var(--exo-color-border-secondary)}
+.meter-bar span{display:block;height:100%;border-radius:.25rem;background:var(--exo-color-background-success-strong)}
+.meter-warning .meter-bar span{background:var(--exo-color-background-warning-strong)}.meter-critical .meter-bar span{background:var(--exo-color-background-danger-strong)}
+.tl-key{display:flex;flex-wrap:wrap;gap:.25rem 1.5rem;align-items:baseline;margin-top:.75rem}.tl-key .legend{margin:0}.tl-key .note{margin:0;font-size:.75rem}
+.note{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.35rem 0}
+button.tl-tick{appearance:none;border:0;padding:0;font:inherit;cursor:pointer}
+button.tl-tick::after{content:"";position:absolute;inset:-.35rem -.65rem}
+button.tl-tick:focus-visible{outline:2px solid var(--exo-color-background-selected);outline-offset:3px}
+.account-line{font-size:.875rem;margin:1.25rem 0 0;color:var(--exo-color-font-secondary)}.account-line strong{color:var(--exo-color-font);font-weight:600}.account-line .label{font-weight:600;margin-right:.35rem}
+table.lanes td.lane{min-width:11rem}table.lanes tbody th{min-width:16rem}table.lanes td.lane .status{display:inline-block;margin:.05rem 0}
+code.copy{cursor:copy}code.copy.copied{outline:1px solid var(--exo-color-background-success-strong);outline-offset:1px;border-radius:2px}
+.why{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.15rem 0 0 1.4rem}
+svg.maker{display:inline-block}
+@media (max-width:900px){.budgets{padding-left:0;border-left:0;padding-top:1rem;border-top:1px solid var(--exo-color-border-secondary)}}
+@media print{.band{background:none;color:inherit}}
 ol.steps{list-style:none;padding:0;margin:0}
 .step-group+.step-group{margin-top:1.75rem}.group-head{font:600 .95rem/1.4 var(--exo-font-family);margin:0 0 .25rem;padding-bottom:.4rem;border-bottom:1px solid var(--exo-color-border)}.group-head .aside{font-weight:400;font-size:.813rem;margin-left:.35em}
 .order{margin-left:auto}
@@ -858,7 +902,7 @@ const SCRIPT = `
   var items=Array.prototype.slice.call(box.querySelectorAll('ol.steps > li')),filter='all',search=document.querySelector('[data-search]'),shown=document.querySelector('.shown');
   function apply(){var q=(search.value||'').toLowerCase(),n=0;items.forEach(function(li){
     var lv=li.getAttribute('data-level'),pr='product:'+li.getAttribute('data-product');
-    var ok=(filter==='all'||(filter==='issues'&&lv!=='healthy')||filter===pr)&&(!q||li.textContent.toLowerCase().indexOf(q)>=0);
+    var ok=(filter==='all'||(filter==='issues'&&lv!=='healthy')||filter===pr||(filter==='kind:release'&&li.getAttribute('data-kind')==='release'))&&(!q||li.textContent.toLowerCase().indexOf(q)>=0);
     li.hidden=!ok;if(ok)n++});
     groups.forEach(function(g){g.hidden=!g.querySelector('ol.steps > li:not([hidden])')});
     shown.textContent=n===items.length?'':n+' of '+items.length+' shown'}
@@ -875,5 +919,19 @@ const SCRIPT = `
   document.querySelectorAll('[data-pick]').forEach(function(g){function go(){setFilter(g.getAttribute('data-pick'));document.getElementById('steps').scrollIntoView({behavior:'smooth'})}
     g.addEventListener('click',go);g.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}})});
   search.addEventListener('input',apply);
+  var expand=document.querySelector('[data-expand]');
+  if(expand)expand.addEventListener('click',function(){var open=expand.getAttribute('aria-pressed')!=='true';
+    items.forEach(function(li){var d=li.querySelector('details');if(d)d.open=open});expand.setAttribute('aria-pressed',String(open));expand.textContent=open?'Collapse all':'Expand all'});
+  document.addEventListener('click',function(e){var c=e.target.closest&&e.target.closest('[data-copy]');if(!c)return;e.preventDefault();
+    var done=function(){c.classList.add('copied');c.title='Copied';setTimeout(function(){c.classList.remove('copied');c.title='Copy'},1200)};
+    if(navigator.clipboard)navigator.clipboard.writeText(c.getAttribute('data-copy')).then(done,function(){});});
+  var ticks=Array.prototype.slice.call(document.querySelectorAll('[data-ticks] button.tl-tick'));
+  ticks.forEach(function(t,i){
+    t.addEventListener('click',function(){var li=document.getElementById('step-'+t.getAttribute('data-step'));if(!li)return;
+      if(li.hidden){setFilter('all');search.value='';apply()}var d=li.querySelector('details');if(d)d.open=true;li.scrollIntoView({behavior:'smooth',block:'center'});var s=li.querySelector('summary');if(s)s.focus({preventScroll:true})});
+    t.addEventListener('keydown',function(e){var n=e.key==='ArrowRight'?i+1:e.key==='ArrowLeft'?i-1:e.key==='Home'?0:e.key==='End'?ticks.length-1:-1;
+      if(n<0||n>=ticks.length)return;e.preventDefault();ticks[n].focus()});
+    t.tabIndex=i===0?0:-1;t.addEventListener('focus',function(){ticks.forEach(function(x){x.tabIndex=x===t?0:-1})});
+  });
 })();
 `

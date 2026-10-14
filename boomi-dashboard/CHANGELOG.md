@@ -2,6 +2,17 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.29.0
+
+- **Budgets in the report.** Each budget you set gets a meter beside the summary: the session's spend (`budgetUsd`), the month's Companion spend (`companionMonthlyUsd`), and Companion's share of your limit (`companionShare`). Each is marked past 80% and when it's spent. An all-sessions report holds every session against the session budget, on its timeline band and in the summary. With no budget set, the report says how to set one.
+- **A header band.** The top of the report is a navy band with the title, the summary, the budgets and the timeline. The Boomi account follows on one line.
+- **The timeline is the session index,** replacing the Sessions table. Each band shows its session's full ID on hover. Its ticks are buttons: the arrow keys move between them, and Enter or a click opens that step in the list. A key under it explains the ticks and "not healthy", and the summary explains "at least" when it appears.
+- **Components are swimlanes:** columns for Saved, Deployed and Tested, each stage with its icon, its time and the ID to find it by. The heading counts how many were saved, deployed and passing. This replaces the Components table and the pipeline chart.
+- **Deploys and tests are a filter on Claude's steps** instead of a separate table. A failed step shows what went wrong without being opened, and **Expand all** opens every step.
+- **Product charts appear only for two products or more.**
+- **IDs copy with a click.**
+- Fixed: the flamingo in the footer sat on a line of its own.
+
 ## 0.28.0
 
 - The HTML report opens with a timeline of the sessions under its summary:

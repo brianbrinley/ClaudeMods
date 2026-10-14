@@ -65,6 +65,8 @@ test("an all-sessions report: sessions, the Boomi account, each component's ID a
     scope: 'all',
     folder: 'oracle',
     boomi: BOOMI,
+    sessionBudgetUsd: 0.25,
+    budgets: [{ label: 'month', level: 'warning', percent: 86, detail: '$43.10 of $50.00' }],
   }, NOW, 24 * HOUR)
   expect(page).toContain('<title>Companion Sessions Report</title>')
   // A title, then what happened in sentences: no tiles, no label above the heading.
@@ -72,26 +74,36 @@ test("an all-sessions report: sessions, the Boomi account, each component's ID a
   expect(page).toContain('4 sessions in <strong>oracle</strong> between Oct 11 and Oct 14 worked on <strong>3 components</strong> in 5 steps, 1 of which failed or was blocked.')
   expect(page).toContain('They cost <strong>at least $1.17</strong>, counting some sessions only up to their last Companion step, with 1 session not recorded.')
   expect(page).toContain('<span class="sr">Failed: </span>1 thing needs attention: Test of Broken Oracle ended ERROR</span>.')
-  expect(page).toContain('<nav aria-label="Sections"><a href="#attention">Attention</a><a href="#sessions">Sessions</a>')
+  expect(page).toContain('<nav aria-label="Sections"><a href="#timeline">Sessions</a><a href="#attention">Attention</a><a href="#components">Components</a><a href="#steps">Steps</a></nav>')
   expect(page).not.toContain('class="tile')
   expect(page).not.toContain('eyebrow')
-  expect(page).toContain('<h2>Sessions <span class="count">4</span></h2>')
-  expect(page).toContain('<code>cccccccc-3333</code> <span class="tag tag-1">this session</span>')
-  expect(page).toContain('Earlier session 1 (no ID recorded)')
-  expect(page).toContain('not recorded')
-  expect(page).toContain('at least $0.30')
-  // The account, escaped, and no credentials.
-  expect(page).toContain('<dt>Account</dt><dd>Boomi_Me &lt;b&gt;</dd>')
-  expect(page).toContain('<dt>Account ID</dt><dd><code>boomi_me-D1R00U</code></dd>')
-  // Boomi's view of a component: type, folder, version, who changed it, its current name, a link.
-  expect(page).toContain('<div class="sub">In Boomi now: Broken Oracle (demo)</div>')
-  expect(page).toContain('<td data-sort="process">process<div class="sub">Magic8Ball-RandomOracle</div></td>')
+  // The timeline is the session index: no Sessions table, each session's band with its cost and, with a budget, how it stood.
+  expect(page).not.toContain('<h2>Sessions')
+  expect(page).toContain('<a class="tl-head" href="#s-cccccccc-3333" title="cccccccc-3333"><span class="tl-name">This session</span>')
+  expect(page).toContain('<span class="tl-name">Earlier 1</span>')
+  expect(page).toContain('at least $0.30 · <span class="status status-critical">')
+  expect(page).toContain('“At least”: a session from before the dashboard recorded session IDs')
+  // Budgets beside the summary: each one set as a meter, and how the sessions stood against the session budget.
+  expect(page).toContain('<li class="meter meter-warning"><div class="meter-head"><span>Companion this month</span>')
+  expect(page).toContain('2 sessions reached the <strong>$0.25</strong> session budget.')
+  expect(page).toContain('2 of 3 sessions reached the $0.25 session budget')
+  // The account, escaped, on one line, and no credentials.
+  expect(page).toContain('<p class="account-line" id="account"><span class="label">Boomi account</span> <strong>Boomi_Me &lt;b&gt;</strong> · <code class="copy" data-copy="boomi_me-D1R00U" title="Copy">boomi_me-D1R00U</code>')
+  // Components as swimlanes: Boomi's view, a link, and each stage in its column with the ID to find it by.
+  expect(page).toContain('<h2>Components <span class="count">3</span> <span class="aside">2 saved · 1 deployed · 0 passing</span></h2>')
+  expect(page).toContain('<div class="sub">process · Magic8Ball-RandomOracle</div><div class="sub">In Boomi now: Broken Oracle (demo)</div>')
   expect(page).toContain('href="https://platform.boomi.com/AtomSphere.html#build;accountId=boomi_me-D1R00U;components=cfdbd5f3-3802-4629-8abb-9bb27ab3c5e1"')
-  expect(page).toContain('v2<div class="sub">2026-10-13 17:15<br>me@example.com</div>')
-  // Deployments and tests, with the IDs to find them by.
-  expect(page).toContain('<h2>Deployments and tests <span class="count">2</span></h2>')
-  expect(page).toContain('<span class="muted">package</span> <code>9ed168df-6b76-4c26-8c06-6900e25f04df</code>')
-  expect(page).toContain('<span class="muted">execution</span> <code>execution-6fe84020-2026.10.13</code>')
+  expect(page).toContain('in Boomi v2 by me@example.com')
+  expect(page).toContain('package <code class="copy" data-copy="9ed168df-6b76-4c26-8c06-6900e25f04df" title="Copy">')
+  expect(page).toContain('<span class="sr">Failed: </span>test ERROR</span>')
+  // Deploys and tests are a filter on the steps, and a failure says what went wrong without being opened.
+  expect(page).not.toContain('Deployments and tests')
+  expect(page).toContain('<button type="button" data-filter="kind:release" aria-pressed="false">Deploys &amp; tests</button>')
+  expect(page).toContain('data-kind="release"')
+  expect(page).toContain('<div class="why">status ERROR · execution <code class="copy" data-copy="execution-6fe84020-2026.10.13"')
+  // One product: no product charts and no pipeline chart.
+  expect(page).not.toContain('<h3>Outcomes by product</h3>')
+  expect(page).not.toContain('Component pipeline')
   // One session's cost line doesn't span several.
   expect(page).not.toContain('<h3>Cost over the session</h3>')
 })
@@ -207,12 +219,29 @@ test('the timeline: sessions oldest first on one strip, the idle time between th
   expect(strip.indexOf('Session one')).toBeLessThan(strip.indexOf('Session two'))
   expect(strip).toContain('<li class="tl-gap" aria-hidden="true"><span>28h 50m</span></li>')
   // Each band's heading goes to its session's steps; its foot says what it held.
-  expect(strip).toContain('<a class="tl-head" href="#s-one">')
+  expect(strip).toContain('<a class="tl-head" href="#s-one" title="one">')
   expect(strip).toContain('<div class="tl-foot">2 steps · 1 not healthy · $1.00</div>')
+  // Ticks are buttons a keyboard reaches, each naming and opening its step.
+  expect(strip).toContain('data-step="2" aria-label="')
   // A failure is marked with its icon and named in its tooltip; a healthy tick carries no icon.
-  expect(strip).toMatch(/<span class="tl-tick tick-critical" style="left:[\d.]+%" data-tip="[^"]*Failed: Test of A failed"><svg class="i"/)
-  expect(strip).toMatch(/<span class="tl-tick tick-healthy" style="left:[\d.]+%" data-tip="[^"]*"><\/span>/)
+  expect(strip).toMatch(/<button type="button" class="tl-tick tick-critical" style="left:[\d.]+%" data-tip="[^"]*Failed: Test of A failed" data-step="2" aria-label="[^"]*"><svg class="i"/)
+  expect(strip).toMatch(/<button type="button" class="tl-tick tick-healthy" style="left:[\d.]+%" data-tip="[^"]*" data-step="1" aria-label="[^"]*"><\/button>/)
   // Its data as a table too.
   expect(strip).toContain('<summary>Show the data</summary>')
   expect(timeline([], a => a.session!, id => id, new Map())).toBe('')
+})
+
+test("a session's budget: a meter and a warning in the summary near it, and how to set one when there's none", () => {
+  const view = scoped(DASHBOARD, 'session')
+  const base = { session: 'cccccccc-3333', sessionId: 'cccccccc-3333', date: '2026-10-14', scope: 'session' as const }
+  const none = reportHtml(view, { ...base, usage: { usd: 0.4 }, budgets: [] }, NOW, 24 * HOUR)
+  expect(none).toContain('No budget set. Set <code>budgetUsd</code> for each session')
+  expect(none).not.toContain('class="meter')
+  const near = reportHtml(view, { ...base, usage: { usd: 0.9, budgetUsd: 1 }, budgets: [{ label: 'session', level: 'warning', percent: 90, detail: '$0.90 of $1.00' }], sessionBudgetUsd: 1 }, NOW, 24 * HOUR)
+  expect(near).toContain('<li class="meter meter-warning"><div class="meter-head"><span>Session</span><span class="status status-warning">')
+  expect(near).toContain('<span style="width:90.0%"></span>')
+  expect(near).toContain('It has cost <strong>$0.90</strong> so far <span class="status status-warning">')
+  expect(near).toContain('90% of the $1.00 budget</span>')
+  // The timeline's band says it too, with its icon.
+  expect(near).toContain('$0.90 · <span class="status status-warning">')
 })

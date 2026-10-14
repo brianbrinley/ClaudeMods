@@ -191,6 +191,10 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** under the summary, one band per session, oldest on the left, with a gap between them saying how long it was. A failed test shows its ✕ icon on its tick. Hovering a tick names the step, and clicking a session's name scrolls to that session's steps. On a phone the bands stack. **Fail:** bands out of order, a failure with no icon, a click that goes nowhere, or anything cut off; send a screenshot.
 - [ ] **K11. Report speed.** *(0.27.1)* Time `/bc-dashboard report html all` in your busiest folder, then run it again.
   **Pass:** the first run takes a few seconds at most, and the second is no slower. **Fail:** either takes more than about 10 seconds; say how long.
+- [ ] **K12. Budgets.** *(0.29.0)* Under `/config`, set `budgetUsd` a little under what one of your recent sessions cost, and set `companionMonthlyUsd`. Restart, then run `/bc-dashboard report html all`.
+  **Pass:** beside the summary, a meter for the session and one for the month, each with a percent and an icon. The summary says how many sessions reached the session budget, and those sessions' timeline bands say "⊗ N% of budget". With both settings back at 0, the report says "No budget set" and how to set one. **Fail:** a meter missing, a percent that doesn't match the pane's BUDGET gauge, or no budget note on a session that went over.
+- [ ] **K13. Swimlanes and the keyboard.** *(0.29.0)* In the same report, press Tab until a timeline tick has focus, then use the arrow keys and Enter. Then click a component ID.
+  **Pass:** the arrow keys move along the ticks and their names appear, and Enter scrolls to that step in the list and opens it. In **Components**, each row's Saved, Deployed and Tested columns show the stage with its icon, its time, and the version, package or execution. The clicked ID is copied: paste it somewhere to check. **Fail:** a tick you can't reach, Enter doing nothing, or a stage in the wrong column.
 
 ## L. Installed Companion plugins
 
