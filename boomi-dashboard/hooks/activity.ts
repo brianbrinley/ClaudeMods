@@ -4,7 +4,7 @@
 // nothing here touches the engine, so the tests call them directly.
 
 import type { Activity, ActivityKind, CompanionPlugin, Dashboard, Ledger, Outcome, PastSession, Product, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
-import { PRODUCT_NAMES, deployState, isAwaitingApproval, isProductScript, productRun, productWords } from './products'
+import { PRODUCT_NAMES, bdiReasonOf, deployState, isAwaitingApproval, isProductScript, productRun, productWords } from './products'
 import { installedTip } from './plugins'
 
 const SCRIPTS: Record<string, ActivityKind> = {
@@ -1039,9 +1039,14 @@ export type Attention = {
   hint: string
   at: number
   executionId?: string
+  /** A failed BDI run, whose log Why? reads: its flow, run and the reason BDI gave. */
+  bdiRun?: { flow: string; run: string; reason?: string }
   /** A failed test's step, when it can be run again. */
   rerunId?: number
 }
+
+/** Where an item's Why? keeps what it read: a test's execution, or a BDI run. */
+export const logKeyOf = (n: Pick<Attention, 'executionId' | 'bdiRun'>): string | undefined => n.executionId ?? (n.bdiRun ? `bdi:${n.bdiRun.run}` : undefined)
 
 /** Runs in the window, newest first: a run from last month isn't news. */
 export const recentRuns = (runs: readonly Run[], now: number, windowMs: number): Run[] =>
@@ -1086,7 +1091,17 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
   }
   for (const a of productIssues(dashboard.activity)) {
     if (closedSteps.has(a.id) || a.isEarlier) continue
-    items.push({ key: `step:${a.id}`, level: levelOf(a), title: describe(a), hint: a.detail, at: when(a) })
+    // A failed BDI run whose flow and run are known: Why? reads its log.
+    const isBdiRun = a.product === 'bdi' && a.verb === 'run' && a.outcome === 'failed' && a.runId !== undefined && a.ref !== undefined
+    const reason = isBdiRun ? bdiReasonOf(a.detail) : undefined
+    items.push({
+      key: `step:${a.id}`,
+      level: levelOf(a),
+      title: describe(a),
+      hint: isBdiRun ? `${reason ? `${reason}. ` : ''}Run ${a.runId!.slice(0, 8)}…: press Why? to read its log.` : a.detail,
+      at: when(a),
+      ...(isBdiRun ? { bdiRun: { flow: a.ref!, run: a.runId!, ...(reason ? { reason } : {}) } } : {}),
+    })
   }
   for (const [universe, q] of Object.entries(dashboard.quarantine ?? {})) {
     if (q.count <= (q.seen ?? 0)) continue
@@ -1756,6 +1771,14 @@ export const diagnose = (log: string): Diagnosis => {
   const picked = severe.length > 0 ? severe.slice(-5) : errors.length > 0 ? errors : lines.slice(-5)
   return { lines: picked.map(strip), severe: severe.length, warnings }
 }
+
+/** The request "Ask Claude to fix" puts in the prompt box for a failed BDI run. */
+export const bdiFixPrompt = (title: string, run: { flow: string; run: string }, diagnosis: Diagnosis): string =>
+  [
+    `${title} (flow ${run.flow}, run ${run.run}). BDI says:`,
+    ...diagnosis.lines.map(line => `  ${line}`),
+    "Find the cause in the flow, following bc-bdi's troubleshooting guide, and propose a fix. Don't change the flow until I approve it.",
+  ].join('\n')
 
 /** The request the "Ask Claude to fix" button puts in the prompt box. */
 export const fixPrompt = (title: string, executionId: string, diagnosis: Diagnosis): string =>

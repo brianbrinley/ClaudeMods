@@ -20,7 +20,9 @@ import {
   closeItem,
   closedCount,
   diagnose,
+  bdiFixPrompt,
   fixPrompt,
+  logKeyOf,
   report,
   pastSessions,
   pastParts,
@@ -107,7 +109,7 @@ import {
 } from './activity'
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
-import { agentstudioReading, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
+import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
 import type { BoomiFacts, ReportScope } from './report-html'
 import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, listing, menuQuestion, parseValue, pastSpend, questionFor, show, valueOf } from './config'
@@ -1142,12 +1144,66 @@ const explain = async ($: Engine, settings: Settings, executionId: string): Prom
   return state
 }
 
-/** Puts a fix request for a failed execution in the prompt box, after whatever is typed there. */
-const askToFix = async ($: Engine, title: string, executionId: string) => {
-  const state = (await read($, diagnoses))[executionId]
+/** bc-bdi's scripts: the newest bc-bdi in the plugin cache. Undefined when it isn't installed. */
+const findBdiScripts = async ($: Engine): Promise<string | undefined> => {
+  const found = await $.process
+    .run(['bash', '-c', 'ls -d "$HOME"/.claude/plugins/cache/*/bc-bdi/*/skills/boomi-bdi/scripts 2>/dev/null | sort -V | tail -1'], { timeoutMs: 10_000 })
+    .catch(() => undefined)
+  const dir = found?.stdout.trim()
+  return dir ? dir : undefined
+}
+
+/**
+ * Reads a failed BDI run's evidence the way bc-bdi's troubleshooting guide
+ * does: the run's log (bdi-flow.sh logs, its ERROR lines) and, for a logic
+ * flow, the first step that failed (bdi-flow.sh steps), led by the reason BDI
+ * gave. Run in the workspace, so bc-bdi finds its own settings; read-only.
+ */
+const explainBdi = async ($: Engine, run: NonNullable<Attention['bdiRun']>): Promise<DiagnosisState> => {
+  const key = logKeyOf({ bdiRun: run })!
+  await setDiagnosis($, key, { phase: 'loading', source: 'bdi' })
+  let state: DiagnosisState
+  try {
+    const scripts = await findBdiScripts($)
+    if (!scripts) {
+      state = { phase: 'error', source: 'bdi', error: "Couldn't find bc-bdi's scripts. Is the bc-bdi plugin installed?" }
+    } else {
+      const cwd = await $.session.cwd()
+      const logs = await $.process.run(['bash', `${scripts}/bdi-flow.sh`, 'logs', run.flow, run.run], { cwd, timeoutMs: 120_000 })
+      if (logs.exitCode !== 0) {
+        const why = `${logs.stderr}\n${logs.stdout}`.split(/\r?\n/).map(line => line.trim()).find(Boolean)
+        state = { phase: 'error', source: 'bdi', error: why ? why.slice(0, 300) : `bdi-flow.sh logs exited with ${logs.exitCode}.` }
+      } else {
+        // Only a logic flow has steps; any other answers with an error, which says nothing about the failure.
+        const steps = await $.process.run(['bash', `${scripts}/bdi-flow.sh`, 'steps', run.flow, run.run], { cwd, timeoutMs: 120_000 }).catch(() => undefined)
+        const step = steps && steps.exitCode === 0 ? bdiFailedStep(steps.stdout) : undefined
+        const found = bdiDiagnosis(logs.stdout, run.reason, step)
+        state = { phase: 'ready', source: 'bdi', lines: found.lines, severe: found.errors, warnings: found.warnings }
+      }
+    }
+  } catch (error) {
+    state = { phase: 'error', source: 'bdi', error: messageOf(error) }
+  }
+  await setDiagnosis($, key, state)
+  return state
+}
+
+/** Why? for an item under Needs attention: a test's execution log, or a BDI run's. */
+const explainItem = (
+  $: Engine,
+  settings: Settings,
+  n: Pick<Attention, 'executionId' | 'bdiRun'>,
+): Promise<DiagnosisState> | undefined =>
+  n.executionId ? explain($, settings, n.executionId) : n.bdiRun ? explainBdi($, n.bdiRun) : undefined
+
+/** Puts a fix request for a failed execution or BDI run in the prompt box, after whatever is typed there. */
+const askToFix = async ($: Engine, n: Pick<Attention, 'title' | 'executionId' | 'bdiRun'>) => {
+  const key = logKeyOf(n)
+  const state = key ? (await read($, diagnoses))[key] : undefined
   if (state?.phase !== 'ready') return
   const draft = await $.prompt.read().catch(() => ({ text: '', cursor: 0 }))
-  const text = fixPrompt(title, executionId, { lines: state.lines ?? [], severe: state.severe ?? 0, warnings: state.warnings ?? 0 })
+  const found = { lines: state.lines ?? [], severe: state.severe ?? 0, warnings: state.warnings ?? 0 }
+  const text = n.executionId ? fixPrompt(n.title, n.executionId, found) : bdiFixPrompt(n.title, n.bdiRun!, found)
   await $.prompt.fill({ text: draft.text.trim() ? `\n${text}` : text, mode: draft.text.trim() ? 'append' : 'replace' }).catch(() => undefined)
 }
 
@@ -1175,17 +1231,18 @@ const pickItem = async ($: Engine, settings: Settings, target: string, ask: Ask)
 /** /bc-dashboard why [number]: reads the log of a failed test or run under Needs attention. */
 const whyByNumber = async ($: Engine, settings: Settings, target: string): Promise<string> => {
   const item = await pickItem($, settings, target, {
-    fits: n => n.executionId !== undefined,
+    fits: n => logKeyOf(n) !== undefined,
     none: 'Nothing to look into: no failed test or run under Needs attention has a log to read.',
     question: 'Which failure should the dashboard read the log of?',
     header: 'Why?',
     command: '/bc-dashboard why',
   })
   if (typeof item === 'string') return item
-  if (!item.executionId) return `${item.title} has no execution log to read.`
-  const state = await explain($, settings, item.executionId)
-  if (state.phase !== 'ready') return `Couldn't read the log of ${item.executionId}: ${state.error}`
-  return [`${item.title} (execution ${item.executionId}):`, ...(state.lines ?? []).map(line => `  ${line}`)].join('\n')
+  const state = await explainItem($, settings, item)
+  if (!state) return `${item.title} has no log to read.`
+  const which = item.executionId ? `execution ${item.executionId}` : `BDI run ${item.bdiRun!.run}`
+  if (state.phase !== 'ready') return `Couldn't read the log of ${which}: ${state.error}`
+  return [`${item.title} (${which}):`, ...(state.lines ?? []).map(line => `  ${line}`)].join('\n')
 }
 
 /**
@@ -2504,7 +2561,8 @@ export const register: Register = (on, options) => {
         {heading('Needs attention')}
         {needs.length === 0 && line('healthy', 'All clear.')}
         {needs.map((n, i) => {
-          const why = n.executionId ? whys[n.executionId] : undefined
+          const logKey = logKeyOf(n)
+          const why = logKey ? whys[logKey] : undefined
           return (
             <Box flexDirection="column">
               <Box>
@@ -2517,17 +2575,18 @@ export const register: Register = (on, options) => {
                 </Box>
               </Box>
               {!why && t(`      ${n.hint}`, { color: p.muted })}
-              {why?.phase === 'loading' && t('      Reading the execution log…', { color: p.muted })}
+              {why?.phase === 'loading' && t(`      Reading the ${why.source === 'bdi' ? "run's" : 'execution'} log…`, { color: p.muted })}
               {why?.phase === 'error' && t(`      ${why.error}`, { color: p.muted })}
-              {why?.phase === 'ready' && t(`      The log (${why.severe ?? 0} severe, ${why.warnings ?? 0} warnings):`, { color: p.muted })}
+              {why?.phase === 'ready' &&
+                t(why.source === 'bdi' ? `      BDI says (${why.severe ?? 0} errors, ${why.warnings ?? 0} warnings in the log):` : `      The log (${why.severe ?? 0} severe, ${why.warnings ?? 0} warnings):`, { color: p.muted })}
               {why?.phase === 'ready' && (why.lines ?? []).map(text => t(`        ${text}`))}
-              {(n.executionId || n.rerunId !== undefined) && (
+              {(logKey || n.rerunId !== undefined) && (
                 <Box>
                   {t('      ')}
-                  {n.executionId && why?.phase !== 'ready' && why?.phase !== 'loading' && (
-                    <Button key={`why-${i}`} label="Why?" onPress={() => void explain($, settings, n.executionId!)} />
+                  {logKey && why?.phase !== 'ready' && why?.phase !== 'loading' && (
+                    <Button key={`why-${i}`} label="Why?" onPress={() => void explainItem($, settings, n)} />
                   )}
-                  {why?.phase === 'ready' && <Button key={`fix-${i}`} label="Ask Claude to fix" onPress={() => askToFix($, n.title, n.executionId!)} />}
+                  {why?.phase === 'ready' && <Button key={`fix-${i}`} label="Ask Claude to fix" onPress={() => askToFix($, n)} />}
                   {n.rerunId !== undefined && <Button key={`rerun-${i}`} label="Run again" onPress={() => void rerun($, settings, n.rerunId!)} />}
                 </Box>
               )}
