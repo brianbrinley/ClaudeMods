@@ -323,3 +323,22 @@ test('the report in Exosphere by default, or in Valence (expressive): its fonts,
   expect(deco).toContain('--exo-color-background-danger-strong:#D03B3B')
   expect(deco).toContain('.opening h1{font:400 clamp(2rem,4.4vw,3.25rem)/1.1 "Poiret One"')
 })
+
+test('the report prints: light whatever the screen shows, every session unfolded, a header and page numbers, no controls', () => {
+  const facts = { session: 'c', sessionId: 'c', date: '2026-10-14', usage: USAGE, scope: 'all' as const, folder: 'oracle' }
+  const page = reportHtml(scoped(DASHBOARD, 'all'), facts, NOW, 24 * HOUR)
+  expect(page).toContain('<button type="button" class="print" data-print')
+  const print = page.slice(page.indexOf('@media print{\n'))
+  // The light theme's tokens, made to win over a dark choice.
+  expect(print).toContain('--exo-color-font:#1f1f1f !important')
+  expect(print).toContain('details.step-group::details-content{content-visibility:visible;display:block}')
+  expect(print).toContain(".masthead nav,.theme,.print,.controls,details.data,.copy-hint,.screen-only{display:none !important}")
+  expect(print).toContain('a[href^="http"]::after{content:attr(href)')
+  expect(page).toContain('@top-left{content:"oracle · Companion sessions · 2026-10-14"')
+  expect(page).toContain('@bottom-right{content:"Page " counter(page) " of " counter(pages)')
+  // The unfolding for browsers without ::details-content, folded back after.
+  expect(page).toContain("window.addEventListener('beforeprint'")
+  // Valence prints in its Day theme.
+  const deco = reportHtml(scoped(DASHBOARD, 'all'), { ...facts, style: 'expressive' }, NOW, 24 * HOUR)
+  expect(deco).toContain('--exo-color-page:#FBF6EE !important')
+})

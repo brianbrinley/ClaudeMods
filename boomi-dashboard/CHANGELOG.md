@@ -2,6 +2,18 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.37.0
+
+- **The HTML report prints, and saves as a PDF.** A **Print or save as PDF** button sits at the top of the page, and your browser's own Print works the same. The printout:
+  - is always in the light theme (Valence's Day for the expressive style), even when the screen is dark;
+  - unfolds every session's steps;
+  - fits the Components table to the page, with long IDs wrapping;
+  - prints each Boomi link's address under it;
+  - keeps session rows, table rows, charts and steps whole across page breaks;
+  - puts the report's name and date at the top of each page, and the page number at the bottom.
+
+  The buttons, search, filters and "click to…" hints are left off. Before this, a dark screen printed pale gray text, the Components table lost its last columns, and folded sessions printed as headings only.
+
 ## 0.36.0
 
 - **A second style for the HTML report.** Set `reportStyle` to `expressive`, or add `--style expressive` to one `/bc-dashboard report html`. That report uses the repository's own Valence theme, Miami Deco:
