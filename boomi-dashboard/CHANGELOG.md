@@ -2,6 +2,17 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.38.0
+
+- **Take the components elsewhere, with every ID.** Above the HTML report's Components table:
+  - **Copy for a spreadsheet** copies tab-separated text that pastes straight into cells;
+  - **Copy as CSV** copies the same table as CSV;
+  - **Save as CSV** downloads it as a file, which Excel opens with its characters intact.
+
+  Each row has the component's name, type, folder, ID and version in Boomi; its last deploy (how it went, when, and the package ID); its last test (how it went, when, and the execution ID); its cost; and its link in Boomi.
+- **`/bc-dashboard components`** copies the same table from Claude Code. `components csv` copies it as CSV, and `components save` also writes a `.csv` file into the workspace.
+- A name that a spreadsheet would read as a formula (one starting with `=`, `+`, `-` or `@`) is pasted as text.
+
 ## 0.37.0
 
 - **The HTML report prints, and saves as a PDF.** A **Print or save as PDF** button sits at the top of the page, and your browser's own Print works the same. The printout:
