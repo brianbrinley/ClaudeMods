@@ -108,6 +108,7 @@ import {
   newLogSteps,
   PAUSED,
   rerunArgs,
+  knownName,
 } from './activity'
 import type { Attention, BudgetLine, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
@@ -694,20 +695,23 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
   )
   const done: Activity[] = []
   const added: Activity[] = []
-  let id = nextId((await read($, dashboard)).activity)
+  const before = (await read($, dashboard)).activity
+  let id = nextId(before)
   const finish = async (a: Activity, reading: Reading): Promise<Activity> => {
     // A create or pull writes the component's ID and name into its file.
     const path = a.file ?? reading.file
     const fresh = path && (a.kind === 'create' || a.kind === 'pull') ? await readComponent($, path) : {}
     const file = a.file ?? (reading.file ? componentPath(reading.file, settings.componentsDir) : undefined)
+    const componentId = reading.componentId ?? fresh.componentId ?? a.componentId
     return {
       ...a,
       ...(file ? { file } : {}),
       outcome: reading.outcome,
       detail: reading.detail,
       endedAt,
-      subject: reading.name ?? fresh.name ?? a.subject,
-      componentId: reading.componentId ?? fresh.componentId ?? a.componentId,
+      // An ID only the output gave (the command's came from the shell) takes the name it has in another step.
+      subject: reading.name ?? fresh.name ?? (a.subject === 'a component' && componentId ? knownName(before, componentId) : undefined) ?? a.subject,
+      componentId,
       type: fresh.type ?? a.type,
       version: reading.version,
       executionStatus: reading.executionStatus,

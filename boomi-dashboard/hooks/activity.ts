@@ -459,6 +459,10 @@ export const unclaimedReading = (isError: boolean): Reading =>
     ? { outcome: 'failed', detail: 'ERROR: the command failed before this script printed a result' }
     : { outcome: 'ok', detail: 'no result of its own (it ran in a command with other scripts)' }
 
+/** The name a component ID has in the latest step that named it, if any. */
+export const knownName = (activity: readonly Activity[], componentId: string): string | undefined =>
+  [...activity].reverse().find(a => a.componentId === componentId && a.subject !== 'a component' && !/\.xml$/.test(a.subject))?.subject
+
 /**
  * Steps recorded by older versions, made readable: "a component" gets the name
  * its component ID has in another step, a step that named a component but not
