@@ -2621,6 +2621,7 @@ export const register: Register = (on, options) => {
     const limitsNow = limitViews(usage.limits, now)
     const mine = await companionBudget($, settings, usage)
     const budgets = budgetLines({ ...usage, ...(mine ? { companion: mine } : {}) }, settings)
+    const measured = budgets.find(b => !b.isUnmeasured)
     // Every Text carries the pane's colors, so it reads the same on any terminal.
     const t = (text: string, style: { color?: string; bold?: boolean; bg?: string } = {}) => (
       <Text color={style.color ?? p.text} backgroundColor={style.bg ?? p.bg} bold={style.bold}>
@@ -2739,8 +2740,8 @@ export const register: Register = (on, options) => {
               {budgets.length > 0 &&
                 gauge(
                   'BUDGET',
-                  `${meter(Math.min(100, budgets[0]!.percent), 8)} ${Math.round(budgets[0]!.percent)}%`,
-                  ...budgets.map(b => `${STATUS[b.level].icon} ${b.label}: ${b.detail}`),
+                  measured ? `${meter(Math.min(100, measured.percent), 8)} ${Math.round(measured.percent)}%` : 'not measured',
+                  ...budgets.map(b => `${b.isUnmeasured ? '·' : STATUS[b.level].icon} ${b.label}: ${b.detail}`),
                 )}
             </Box>
             {sparkline(trail) && (

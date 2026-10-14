@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.39.5
+
+- **Companion's share says why it can't be measured.** With `companionShare` set on a Claude login that reports no weekly limit, the BUDGET gauge and the HTML report showed the share as ✓ healthy at 0%, "needs a Claude seat", even on a seat. It now shows as **not measured**, with no status or percent, and says this login reports no weekly limit. `companionMonthlyUsd` budgets Companion on any login.
+
 ## 0.39.4
 
 - **A refused test keeps its process's name.** When a test's process ID came from the shell and the atom refused to run it (HTTP 400, "cannot be executed on atom"), the step read "Test of a component failed". It now takes the name the process already has in this session, from the ID the script printed, and **Run again** is offered for it.

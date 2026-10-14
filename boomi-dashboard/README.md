@@ -195,7 +195,7 @@ There are three budgets. Set any of them, or none. By default they only warn. Wi
 | You want to cap | Setting | Works on | Example |
 |---|---|---|---|
 | This one session's cost | `budgetUsd` | a seat or an API key | `5` warns at $4.00 and $5.00 |
-| Companion's share of your weekly Claude limit | `companionShare` and `companionSharePeriod` | a Claude seat only | `30` and `day`: about 4.3% of the weekly limit each day |
+| Companion's share of your weekly Claude limit | `companionShare` and `companionSharePeriod` | a Claude login that reports a weekly limit; otherwise the share shows as not measured | `30` and `day`: about 4.3% of the weekly limit each day |
 | Companion's cost this calendar month, all sessions on this computer | `companionMonthlyUsd` | a seat or an API key | `50` warns at $40 and $50 |
 
 Not sure? On a Pro or Max seat, start with `companionShare` (your limit is what runs out). On an API key, start with `companionMonthlyUsd` (your bill is what grows).
