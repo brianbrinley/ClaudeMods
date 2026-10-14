@@ -175,3 +175,14 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** each works: the theme changes, a tooltip appears, the steps list shows only that product, the table re-orders, and the search narrows the list. **Fail:** say which didn't.
 - [ ] **K4. Share it.** Send the file to someone (or open it on another computer or a phone).
   **Pass:** it looks the same there, and on a phone nothing runs off the side of the screen; the tables scroll inside their cards. **Fail:** say what's off.
+
+## L. Installed Companion plugins
+
+*boomi-dashboard 0.24.0. Needs a Companion workspace (an `active-development` folder) and a session restart between steps.*
+
+- [ ] **L1. What's installed.** With bc-integration installed, start a new session in the workspace and wait for the banner's tips (20 seconds each).
+  **Pass:** one tip reads `Companion here: Integration <version>`, plus any other bc-* plugin you have on, with the same versions `claude plugin list` shows. **Fail:** no such tip, a plugin missing or extra, or a wrong version; send the tip and `claude plugin list`'s output.
+- [ ] **L2. Only the sections that apply.** Install bc-datahub (`claude plugin install bc-datahub@boomi-companion`), restart, and open the pane.
+  **Pass:** a **Data Hub** section saying `Quarantined entities show up here once Claude checks a universe's quarantine.`, and no **Agentstudio agents** or **Custom connectors** section unless those plugins are on. **Fail:** no **Data Hub** section, or sections for plugins you don't have.
+- [ ] **L3. A disabled plugin.** Run `claude plugin disable bc-integration@boomi-companion`, restart in a folder where Companion hasn't been used today, and open the pane.
+  **Pass:** no **Components this session** section, and no Why?, Run again or watch tips. Turn it back on with `claude plugin enable bc-integration@boomi-companion`. **Fail:** the section is there with its empty-state line.

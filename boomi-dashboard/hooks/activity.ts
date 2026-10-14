@@ -3,8 +3,9 @@
 // attention, the recent feed and the live environment. Plain functions:
 // nothing here touches the engine, so the tests call them directly.
 
-import type { Activity, ActivityKind, Dashboard, Ledger, Outcome, PastSession, Product, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
+import type { Activity, ActivityKind, CompanionPlugin, Dashboard, Ledger, Outcome, PastSession, Product, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
 import { PRODUCT_NAMES, deployState, isAwaitingApproval, isProductScript, productRun, productWords } from './products'
+import { installedTip } from './plugins'
 
 const SCRIPTS: Record<string, ActivityKind> = {
   'boomi-component-create.sh': 'create',
@@ -2022,25 +2023,51 @@ export const recapLine = (recap: SessionRecap, now: number): { level: Level; tex
   }
 }
 
-/** What the banner turns through at the start of a session, before Companion has done anything. */
-export const TIPS: readonly string[] = [
-  'Tip: Why? on a failed test reads its log; Ask Claude to fix drafts the request',
-  "Tip: Run again repeats a failed test without a turn of Claude's",
-  'Tip: ask Claude "what\'s left to fix?" and it answers from the dashboard',
-  'Tip: /bc-dashboard report save writes the session up for a PR or a hand-off',
-  'Tip: set budgetUsd under /config for a warning at 80% of a spend budget',
-  'Tip: Scan under Past Companion sessions shows what earlier sessions cost',
-  'Tip: /bc-dashboard watch <component> flags changes someone else makes in Boomi',
-  "Tip: BOOMI_COMPANION_LOG_ACTIVITY=1 in Companion's .env adds its activity log as a second source",
-  'Tip: the Day, Night and Terminal buttons in the pane change its colors',
+/** A new-session tip, and the Companion plugin it's about; tips without one apply everywhere. */
+type Tip = { text: string; plugin?: string }
+
+const TIP_LIST: readonly Tip[] = [
+  { text: 'Tip: Why? on a failed test reads its log; Ask Claude to fix drafts the request', plugin: 'bc-integration' },
+  { text: "Tip: Run again repeats a failed test without a turn of Claude's", plugin: 'bc-integration' },
+  { text: 'Tip: ask Claude "what\'s left to fix?" and it answers from the dashboard' },
+  { text: 'Tip: /bc-dashboard report save writes the session up for a PR or a hand-off' },
+  { text: 'Tip: set budgetUsd under /config for a warning at 80% of a spend budget' },
+  { text: 'Tip: Scan under Past Companion sessions shows what earlier sessions cost' },
+  { text: 'Tip: /bc-dashboard watch <component> flags changes someone else makes in Boomi', plugin: 'bc-integration' },
+  { text: "Tip: BOOMI_COMPANION_LOG_ACTIVITY=1 in Companion's .env adds its activity log as a second source", plugin: 'bc-integration' },
+  { text: 'Tip: the Day, Night and Terminal buttons in the pane change its colors' },
 ]
+
+/** Tips about the other Companion plugins, shown only where the plugin is installed. */
+const PRODUCT_TIPS: readonly Tip[] = [
+  { text: 'Tip: components a Marketplace recipe installs join Components this session', plugin: 'bc-marketplace' },
+  { text: "Tip: after Claude checks a universe's quarantine, the Data Hub section shows what's waiting", plugin: 'bc-datahub' },
+  { text: "Tip: a BDI flow run that fails shows under Needs attention with BDI's own error", plugin: 'bc-bdi' },
+  { text: "Tip: Agentstudio agents shows each agent's stages and its test conversations", plugin: 'bc-agentstudio' },
+  { text: 'Tip: Custom connectors shows each release: linted, validated, uploaded, made active', plugin: 'bc-connectordev' },
+]
+
+/** What the banner turns through at the start of a session, before Companion has done anything. */
+export const TIPS: readonly string[] = TIP_LIST.map(tip => tip.text)
+
+/**
+ * The tips for the Companion plugins installed: first a line naming them, then
+ * the tips that apply everywhere and those about an installed plugin. With the
+ * plugins unknown (null), the usual tips.
+ */
+export const tipsFor = (plugins: readonly CompanionPlugin[] | null | undefined): readonly string[] => {
+  if (!plugins) return TIPS
+  const has = (tip: Tip) => !tip.plugin || plugins.some(p => p.name === tip.plugin)
+  const here = installedTip(plugins)
+  return [...(here ? [here] : []), ...[...TIP_LIST, ...PRODUCT_TIPS].filter(has).map(tip => tip.text)]
+}
 
 /**
  * The line the banner shows at turn `n` of its rotation: the last session's
  * recap first, when there is one, then each tip in turn.
  */
-export const welcomeLine = (n: number, recap: SessionRecap | undefined, now: number): { level?: Level; text: string } => {
-  const lines: { level?: Level; text: string }[] = [...(recap ? [recapLine(recap, now)] : []), ...TIPS.map(text => ({ text }))]
+export const welcomeLine = (n: number, recap: SessionRecap | undefined, now: number, tips: readonly string[] = TIPS): { level?: Level; text: string } => {
+  const lines: { level?: Level; text: string }[] = [...(recap ? [recapLine(recap, now)] : []), ...tips.map(text => ({ text }))]
   return lines[((n % lines.length) + lines.length) % lines.length]!
 }
 
