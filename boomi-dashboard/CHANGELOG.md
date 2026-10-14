@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.39.6
+
+- **`/bc-dashboard config budget warn` no longer starts the Budget questions.** A group's name with a value after it (`budget warn`) went through the whole group a question at a time and dropped the value, so answers there could change settings you didn't mean to. It now saves nothing and says which setting takes the value: `Did you mean /bc-dashboard config budgetEnforce warn?`. `/bc-dashboard config budget` on its own still goes through the group.
+
 ## 0.39.5
 
 - **Companion's share says why it can't be measured.** With `companionShare` set on a Claude login that reports no weekly limit, the BUDGET gauge and the HTML report showed the share as ✓ healthy at 0%, "needs a Claude seat", even on a seat. It now shows as **not measured**, with no status or percent, and says this login reports no weekly limit. `companionMonthlyUsd` budgets Companion on any login.

@@ -116,7 +116,7 @@ import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordev
 import { componentTable, hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
 import { toCsv, toTsv } from './export'
 import type { BoomiFacts, ReportScope, ReportStyle } from './report-html'
-import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, listing, menuQuestion, parseValue, pastSpend, questionFor, show, valueOf } from './config'
+import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, groupWithValue, listing, menuQuestion, parseValue, pastSpend, questionFor, show, valueOf } from './config'
 import type { Group, PastSpend, Value } from './config'
 import { blockedDetail, companionChanges, denyMessage, enforcementNote, platformWrites, spentBudgets, spentText, wrapperScripts } from './budget-gate'
 import type { Enforce } from './budget-gate'
@@ -2065,6 +2065,7 @@ const configCommand = async ($: Engine, settings: Settings, target: string): Pro
   }
   const only = words[0] ? groupNamed(words[0]) : undefined
   if (words[0] && !only) return `No setting or group called ${words[0]}.\n\n${listing(values)}`
+  if (only && words.length > 1) return groupWithValue(only, words.slice(1).join(' '))
 
   // The walk.
   const changes = new Map<string, Value>()

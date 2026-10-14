@@ -93,6 +93,16 @@ export const groupNamed = (name: string): Group | undefined => {
   return wanted ? GROUPS.find(g => g.name.toLowerCase() === wanted || g.header.toLowerCase() === wanted || g.name.toLowerCase().startsWith(wanted)) : undefined
 }
 
+/**
+ * `/bc-dashboard config budget warn`: a group with a value would start the
+ * walk and lose the value. Says so, and which of the group's settings takes it.
+ */
+export const groupWithValue = (group: Group, text: string): string => {
+  const fits = group.fields.filter(f => f.kind !== 'text' && !('error' in parseValue(f, text))).slice(0, 3)
+  const meant = fits.length > 0 ? ` Did you mean ${fits.map(f => `/bc-dashboard config ${f.key} ${text}`).join(' or ')}?` : ''
+  return `${group.header} is a group of settings, so "${text}" wasn't saved.${meant} Run /bc-dashboard config ${group.name.toLowerCase()} on its own to go through the group a question at a time.`
+}
+
 const money = (usd: number) => `$${usd < 10 ? usd.toFixed(2) : usd.toFixed(0)}`
 
 /** A value as a person reads it: "$5.00", "off", "24 hours", "on". */
