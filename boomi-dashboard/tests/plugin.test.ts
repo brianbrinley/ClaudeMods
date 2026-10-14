@@ -1966,7 +1966,7 @@ test('/bc-dashboard report html asks which steps to cover, adds Boomi\'s view of
   expect(page).toContain('<title>Companion Sessions Report</title>')
   expect(page).toContain('<code>earlier-session-id</code>')
   expect(page).toContain('<dt>Account</dt><dd>Acme Integration</dd>')
-  expect(page).toContain('<td>process</td><td>Orders</td>')
+  expect(page).toContain('<td data-sort="process">process<div class="sub">Orders</div></td>')
   expect(page).toContain('<span class="muted">package</span> <code>pkg-42</code>')
   // Only IDs and names reach the page, never the credentials.
   for (const secret of Object.values(CREDENTIALS).filter(v => !v.startsWith('https') && v !== 'acct-1')) expect(page).not.toContain(secret)
@@ -1978,4 +1978,39 @@ test('/bc-dashboard report html asks which steps to cover, adds Boomi\'s view of
   expect(opened).toHaveLength(1)
   expect(again).toContain('/work/boomi-session-report-')
   expect(written[1]!.text).not.toContain('earlier-session-id')
+})
+
+test("an all-sessions report reads only this folder's transcripts, only for steps no scan has matched, and only once", async ($, on) => {
+  world(on, { [FILE]: ORDERS, '/home/me/.claude/projects/-work': '' })
+  mock.env(on, { HOME: '/home/me' })
+  on('tool.call', { tool: 'AskUserQuestion' }, async () => ({ deny: 'not expected' }))
+  on('http.fetch', async () => ({ value: { status: 401, ok: false, headers: {}, text: '' } }))
+  const scans: string[][] = []
+  on('process.run', async (_$, e) => {
+    if (e.argv.join(' ').includes('scan-sessions')) {
+      scans.push([...e.argv.slice(e.argv.indexOf('--root'))])
+      const session = { id: 'transcript-1', project: '/work', startedAt: new Date(NOW - 4 * 3_600_000).toISOString(), endedAt: new Date(NOW - 2 * 3_600_000).toISOString(), costUsd: 2.5, commands: [`bash scripts/boomi-component-push.sh ${FILE}`], models: {} }
+      return { value: { exitCode: 0, stdout: JSON.stringify({ sessions: [session], scanned: 1 }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    return { value: { exitCode: 3, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  const written: string[] = []
+  on('fs.write', async (_$, e) => {
+    written.push(e.text)
+    return { value: undefined }
+  })
+  // A push from before steps named their session, three hours ago.
+  const old = { id: 1, kind: 'push', outcome: 'ok', subject: 'Orders Sync', detail: "SUCCESS: Pushed component 'Orders Sync' — now version 3", startedAt: NOW - 3 * 3_600_000, file: FILE, componentId: ID, usdAt: 0.4 }
+  await startSession($, on, { 'activity:/work': { savedAt: NOW - 3 * 3_600_000, activity: [old] } })
+
+  await $.command.run(dashboard('report html all --no-open'))
+  // Only this folder's transcripts, from a day before the step on.
+  expect(scans).toEqual([['--root', '/home/me/.claude/projects/-work', '--since', String(NOW - 3 * 3_600_000 - 86_400_000)]])
+  expect(written[0]).toContain('<code>transcript-1</code>')
+  expect(written[0]).toContain('$2.50')
+
+  // The next report already knows that session: no scan.
+  await $.command.run(dashboard('report html all --no-open'))
+  expect(scans).toHaveLength(1)
+  expect(written[1]).toContain('<code>transcript-1</code>')
 })

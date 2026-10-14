@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Activity, Dashboard } from '../types'
-import { assignSessions, boomiLink, hasEarlierSteps, packageOf, reportHtml, scoped, sessionLabel, sessionSummaries, sessionsCost } from '../hooks/report-html'
+import { assignSessions, boomiLink, hasEarlierSteps, packageOf, reportHtml, scoped, sessionLabel, sessionSummaries, sessionsCost, stepsToMatch, transcriptsFolder } from '../hooks/report-html'
 import { withoutEchoes } from '../hooks/activity'
 import { platformClient } from '../hooks/platform'
 
@@ -85,9 +85,9 @@ test("an all-sessions report: sessions, the Boomi account, each component's ID a
   expect(page).toContain('<dt>Account ID</dt><dd><code>boomi_me-D1R00U</code></dd>')
   // Boomi's view of a component: type, folder, version, who changed it, its current name, a link.
   expect(page).toContain('<div class="sub">In Boomi now: Broken Oracle (demo)</div>')
-  expect(page).toContain('<td>process</td><td>Magic8Ball-RandomOracle</td>')
+  expect(page).toContain('<td data-sort="process">process<div class="sub">Magic8Ball-RandomOracle</div></td>')
   expect(page).toContain('href="https://platform.boomi.com/AtomSphere.html#build;accountId=boomi_me-D1R00U;components=cfdbd5f3-3802-4629-8abb-9bb27ab3c5e1"')
-  expect(page).toContain('2026-10-13 17:15<div class="sub">me@example.com</div>')
+  expect(page).toContain('v2<div class="sub">2026-10-13 17:15<br>me@example.com</div>')
   // Deployments and tests, with the IDs to find them by.
   expect(page).toContain('<h2>Deployments and tests <span class="count">2</span></h2>')
   expect(page).toContain('<span class="muted">package</span> <code>9ed168df-6b76-4c26-8c06-6900e25f04df</code>')
@@ -183,4 +183,15 @@ test('a deploy, test or save recorded twice within minutes is one step, the one 
     step(6, { kind: 'test', subject: 'Oracle', executionId: 'execution-2', detail: 'status COMPLETE', startedAt: NOW + 2000 }),
   ]
   expect(withoutEchoes(twins).map(a => a.id)).toEqual([2, 4, 5, 6])
+})
+
+test("the steps still to match to a transcript: unnamed, brought back, and covered by no known session in this folder", () => {
+  const unnamed = step(1, { startedAt: NOW - 3 * HOUR, isRestored: true })
+  const named = step(2, { startedAt: NOW - 3 * HOUR, isRestored: true, session: 's-1' })
+  const mine = step(3, { startedAt: NOW })
+  expect(stepsToMatch([unnamed, named, mine], []).map(a => a.id)).toEqual([1])
+  const covering = { id: 'tx', project: '/work', startedAt: new Date(NOW - 4 * HOUR).toISOString(), endedAt: new Date(NOW - 2 * HOUR).toISOString(), costUsd: 1, tokens: 0, cached: 0, models: [], runs: {}, components: [] }
+  expect(stepsToMatch([unnamed], [covering], '/work')).toEqual([])
+  expect(stepsToMatch([unnamed], [covering], '/elsewhere').map(a => a.id)).toEqual([1])
+  expect(transcriptsFolder('/home/me/.claude', '/Users/me/boomi_brian-D1R00U')).toBe('/home/me/.claude/projects/-Users-me-boomi-brian-D1R00U')
 })
