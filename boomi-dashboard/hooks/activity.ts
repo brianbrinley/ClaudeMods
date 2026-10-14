@@ -1892,15 +1892,25 @@ export const projectsDiffer = (sessions: readonly PastSession[]): boolean => new
 const folderOf = (project: string | undefined) => (project ? (project.split('/').filter(Boolean).pop() ?? project) : undefined)
 
 /**
+ * "Oct 10, 09:00": a time as month, day and 24-hour clock, put together from
+ * its parts. toLocaleString joins date and time with whatever the runtime's
+ * locale data says (", " in some ICU versions, " at " in others), so the same
+ * session would read differently from one machine to the next.
+ */
+export const shortWhen = (at: number, timeZone?: string): string => {
+  const parts = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).formatToParts(new Date(at))
+  const part = (type: string) => parts.find(p => p.type === type)?.value ?? ''
+  return `${part('month')} ${part('day')}, ${part('hour')}:${part('minute')}`
+}
+
+/**
  * A past session in two parts. The head says which session: when it started,
  * how long it ran, its cost and what it was about. The detail says what it did.
  */
 export const pastParts = (s: PastSession, view: PastView = {}): { head: string; detail: string } => {
   const at = Date.parse(s.startedAt ?? '')
   const end = Date.parse(s.endedAt ?? '')
-  const when = Number.isNaN(at)
-    ? 'unknown date'
-    : new Date(at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: view.timeZone })
+  const when = Number.isNaN(at) ? 'unknown date' : shortWhen(at, view.timeZone)
   const length = Number.isNaN(at) || Number.isNaN(end) || end <= at ? undefined : duration(end - at)
   const cost = s.costUsd === undefined ? 'no recorded cost' : formatCost(s.costUsd)
   const head = [

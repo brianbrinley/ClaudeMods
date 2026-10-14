@@ -12,6 +12,7 @@ import {
   historyTotals,
   historySummary,
   pastParts,
+  shortWhen,
   projectsDiffer,
   runWords,
   budgetOf,
@@ -1073,4 +1074,10 @@ test('connectordevReading reads what each connector script says', () => {
   expect(isAwaitingApproval('PENDING_APPROVAL')).toBe(true)
   expect(isAwaitingApproval('APPROVED')).toBe(false)
   expect(isAwaitingApproval(undefined)).toBe(false)
+})
+
+test('shortWhen reads the same on every runtime: a comma between date and time, and midnight as 00', () => {
+  expect(shortWhen(Date.parse('2026-10-10T09:00:00Z'), 'UTC')).toBe('Oct 10, 09:00')
+  expect(shortWhen(Date.parse('2026-10-10T00:05:00Z'), 'UTC')).toBe('Oct 10, 00:05')
+  expect(shortWhen(Date.parse('2026-10-10T23:59:00Z'), 'America/New_York')).toBe('Oct 10, 19:59')
 })
