@@ -97,6 +97,12 @@ A banner above the prompt shows the latest step and what needs attention, and th
 ◆ BC Dashboard Tip: Why? on a failed test reads its log; Ask Claude to fix drafts the request │ $0.00 this session   [ Open ]  [ Hide ]
 ```
 
+Where Claude Code can say which Companion plugins are on, the first tip names them, and tips about a plugin you don't have are left out:
+
+```text
+◆ BC Dashboard Companion here: Integration 1.0.83 · Data Hub 0.2.12 │ $0.00 this session   [ Open ]  [ Hide ]
+```
+
 Anything left to fix from the last session stays under **Needs attention**, and the banner counts it. Outside a Companion workspace (no component folder, activity log or earlier session there), the banner stays hidden.
 
 ## Stages and what needs attention
@@ -134,6 +140,12 @@ Boomi Companion is [six plugins](https://github.com/OfficialBoomi/boomi-companio
 | bc-bdi | Flows run, cancelled, activated, created or restored; CDC turned on or off; connections, environments, variables and dataframes changed. A run shows `◐ run started` until Claude checks it with `bdi-flow.sh status`, then how it ended: ✓ succeeded, cancelled, or ✗ failed with BDI's reason under **Needs attention** |
 | bc-agentstudio | Agents, tools and MCP servers created or updated; agents packaged and deployed; test conversations with a deployed agent. An **Agentstudio agents** section shows each agent's stages, as components have: `✓ created  ✓ packaged v2  ✓ deployed  ✓ 2 test conversations, 5 turns, all answered`. An edit after packaging shows `◐ changed since packaged` until a new package is deployed. A conversation joins its agent through the deployment it talked to; a turn that fails (an HTTP error, a stream's `event: error`, or a reply that says `success: false`) needs attention |
 | bc-connectordev | Connector projects created and checked; descriptors linted and validated; versions uploaded; groups and version changes. A **Custom connectors** section follows each connector's release, by its project folder and group: `✓ descriptor linted  ✓ validated  ✓ uploaded v2  ✓ v2 active on dev`. An upload shows `◐ v2 not active yet` until a version change makes it active, and a PUBLIC connector's change shows `◐ awaiting approval`. A lint that fails names the line and element; a descriptor validated with warnings, or rejected, needs attention |
+
+**Only the sections that apply.** Just after a session starts, the dashboard asks Claude Code which plugins are on in that folder (`claude plugin list --json`, which knows about user, project and synced installs and disabled plugins). If the CLI can't be run, it reads Claude Code's own `plugins/installed_plugins.json` and settings. Then:
+
+- **Components this session** shows only where bc-integration or bc-marketplace is on.
+- **Data Hub**, **Agentstudio agents** and **Custom connectors** show for an installed plugin even before there's anything in them, with a line saying what will appear there.
+- A section with something in it always shows, installed or not. If the list can't be read at all, every section shows, as before 0.24.0.
 
 - A step that only reads (`list`, `get`, `query`, `status`, `logs` and the like) isn't shown, as bc-integration's searches aren't.
 - A failed step (an `ERROR:` line, or the script exiting with an error) goes under **Needs attention** with its error line, until the same action succeeds. A step that finished with a `WARNING:` line, such as a connector descriptor accepted with warnings, shows as ◐ and needs attention too.

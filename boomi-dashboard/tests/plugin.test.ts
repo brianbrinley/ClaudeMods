@@ -1647,6 +1647,8 @@ const UPGRADE_CHECK = [
 const upgradeShell = (on: On, outputs: Partial<Record<'check' | 'install' | 'rollback', string>>) => {
   const calls: string[][] = []
   on('process.run', async (_$, e) => {
+    // Only the upgrade script: the plugin list read at the start isn't it.
+    if (!String(e.argv[1] ?? '').endsWith('/scripts/upgrade.sh')) return { deny: 'not the upgrade script' }
     calls.push([...e.argv])
     const sub = e.argv[2] as 'check' | 'install' | 'rollback'
     const out = outputs[sub] ?? ''
@@ -1827,4 +1829,51 @@ test('/bc-dashboard report html writes the session as one web page, escaped and 
   expect(page).toContain('--exo-color-background-brand:#072b55')
   expect(page).toContain('.ex-theme-dark{--exo-color-page:#1a1a1a')
   expect(page).toContain('family=Poppins')
+})
+
+/** `claude plugin list --json` beneath the plugin, answering with these plugins on. */
+const pluginList = (on: On, plugins: { id: string; version: string; enabled: boolean }[]) => {
+  const asked: string[][] = []
+  on('process.run', async (_$, e) => {
+    asked.push([...e.argv])
+    const stdout = e.argv.join(' ') === 'claude plugin list --json' ? JSON.stringify(plugins.map(p => ({ ...p, scope: 'user', installPath: '/x' }))) : ''
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  return asked
+}
+
+test('with only Data Hub installed, the pane shows its section and not the Integration components; the tips say so', async ($, on) => {
+  world(on, { 'active-development': '' })
+  const asked = pluginList(on, [
+    { id: 'bc-datahub@boomi-companion', version: '0.2.12', enabled: true },
+    { id: 'bc-bdi@boomi-companion', version: '0.2.5', enabled: false },
+  ])
+  await startSession($, on)
+  const before = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  // Until the list is read, nothing is hidden.
+  expect(await before.find({ text: /COMPONENTS THIS SESSION/ })).toBeDefined()
+  await before.unmount()
+
+  await clock.advance(1_000)
+  expect(asked).toContainEqual(['claude', 'plugin', 'list', '--json'])
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /COMPONENTS THIS SESSION/ })).toBeUndefined()
+  expect(await pane.find({ text: /^DATA HUB/ })).toBeDefined()
+  expect(await pane.find({ text: /Quarantined entities show up here/ })).toBeDefined()
+  expect(await pane.find({ text: /AGENTSTUDIO AGENTS/ })).toBeUndefined()
+
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await band.find({ text: 'Companion here: Data Hub 0.2.12' })).toBeDefined()
+})
+
+test("when Claude Code's plugin list can't be read, every section shows as before", async ($, on) => {
+  world(on, { 'active-development': '' })
+  mock.env(on, { HOME: '/home/me' })
+  on('process.run', async () => ({ deny: 'claude: command not found' }))
+  await startSession($, on)
+  await clock.advance(1_000)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /COMPONENTS THIS SESSION/ })).toBeDefined()
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await band.find({ text: /Companion here/ })).toBeUndefined()
 })
