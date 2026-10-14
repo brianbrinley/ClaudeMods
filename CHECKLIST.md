@@ -219,3 +219,5 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** the pane turns Night, and the reply says the menu closed before Done and the change is saved. Run `/bc-dashboard config budgetUsd lots`: it says the budget takes a number and stays as it was. **Fail:** the change is lost on Esc, or the typed value is saved.
 - [ ] **M3. Where nothing can be asked.** *(0.32.0)* Run `claude -p "/bc-dashboard config"`.
   **Pass:** it prints every setting by group with its value, and how to change one with `/bc-dashboard config <setting> <value>`. **Fail:** it hangs or prints nothing.
+- [ ] **M4. Theme and size in /config.** *(0.34.0)* Press **Night** in the pane, run `/bc-dashboard size 24`, then open `/config`.
+  **Pass:** the boomi-dashboard rows show **Pane colors** `night` and **Pane height (rows)** `24`. Set **Pane colors** back to `day` in `/config`: the pane turns Day. Restart, and the pane is still Day, 24 rows tall. **Fail:** `/config` still shows the old values, or the pane ignores a change made in `/config`.

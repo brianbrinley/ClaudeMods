@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.34.0
+
+- **The pane's theme and size are saved in `/config`.** The theme buttons, `/bc-dashboard theme` and `/bc-dashboard size` now set `paneTheme`, `paneRows` and `paneColumns`, the same settings `/config` and `/bc-dashboard config` show. Before, they were kept apart and quietly won over `/config`. A theme or size an earlier version kept moves to `/config` when your next session starts. Where `/config` won't take a change, such as a setting your organization locks, the dashboard keeps it as before.
+
 ## 0.33.0
 
 - **Less navy at the top of the report.** The band keeps the title, the summary and the budget. The sessions now open the page below it, on a card of their own.

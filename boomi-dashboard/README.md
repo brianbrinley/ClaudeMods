@@ -71,7 +71,7 @@ By hand, the same thing is `git -C ~/ClaudeMods pull --ff-only`, then `claude pl
 
 `/bc-dashboard` opens the pane; Esc closes it. Where no pane can be shown, including Claude Code on the web, it prints the same thing as text.
 
-**Its size:** drag the pane's edge, and Claude Code keeps the size you choose. To set it from the start, use `/bc-dashboard size <rows> [columns]` (kept for later sessions; `size` alone goes back to the default), or the `paneRows` and `paneColumns` settings. Rows are its height above the prompt, and columns its width when docked beside a fullscreen transcript.
+**Its size:** drag the pane's edge, and Claude Code keeps the size you choose. To set it from the start, use `/bc-dashboard size <rows> [columns]` (`size` alone goes back to the default). It saves the `paneRows` and `paneColumns` settings, which you can also set in `/config` or `/bc-dashboard config pane`. Rows are its height above the prompt, and columns its width when docked beside a fullscreen transcript.
 
 <img alt="The dashboard pane in the Day theme: title band, gauges for tokens, spend and context beside an 8-bit flamingo, then Needs attention with a failed test's log lines, Components this session, Claude's latest steps and Past Companion sessions" src="assets/pane-day.png" width="420"> <img alt="The same pane in the Night theme" src="assets/pane-night.png" width="420">
 
@@ -82,7 +82,7 @@ By hand, the same thing is `git -C ~/ClaudeMods pull --ff-only`, then `claude pl
 - **Guardrails:** with [boomi-runtime](../boomi-runtime/README.md) loaded, the runtime's state and smoke test.
 - **Past Companion sessions:** what earlier sessions on this machine did and cost. **More** pages through them.
 - **Watched components:** components you asked to watch, and who last changed them in Boomi.
-- **Themes:** **Day**, **Night** or **Terminal** (your terminal's colors), from the buttons or `/bc-dashboard theme night`. The choice is kept.
+- **Themes:** **Day**, **Night** or **Terminal** (your terminal's colors), from the buttons or `/bc-dashboard theme night`. The choice is saved as the `paneTheme` setting, so `/config` shows it too.
 
 A banner above the prompt shows the latest step and what needs attention, and the status line and toasts carry the same news. In a new session, before Companion does anything, the status line says so (`New session · last one 14h ago, nothing left to fix · $0.00 this session`) rather than repeating the last session's step:
 
@@ -306,7 +306,7 @@ With a connection it loads Exosphere's fonts from Google Fonts; offline it falls
 | `/bc-dashboard rerun [n]` | | Runs a failed test again; without a number, asks which. |
 | `/bc-dashboard close <n\|all>` / `reopen` | | Closes items, or brings them back. |
 | `/bc-dashboard earlier` | | Shows this folder's steps from before the last 24 hours too. |
-| `/bc-dashboard size <rows> [columns]` | | The pane's size, kept for later sessions; `size` alone goes back to the default. |
+| `/bc-dashboard size <rows> [columns]` | | The pane's size, saved as `paneRows` and `paneColumns`; `size` alone goes back to the default. |
 | `/bc-dashboard seen` | | Moves watched changes out of **Needs attention**. |
 | `/bc-dashboard watch <id\|file>` / `unwatch <id>` | `watch` | Watches a component, or stops. |
 | `/bc-dashboard report [save\|html [session\|all] [--no-open]]` | `report` | The session report; `html` saves it as a web page to share and opens it, for this session or all of this folder's. |
@@ -329,7 +329,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 
 | Setting | Default | |
 |---|---|---|
-| `paneTheme` | `day` | The pane's colors until you pick a theme. |
+| `paneTheme` | `day` | The pane's colors. The theme buttons and `/bc-dashboard theme` set it too. |
 | `paneRows` | `0` | The pane's height above the prompt, in rows; `0` leaves it to Claude Code. A size you drag it to wins. |
 | `paneColumns` | `0` | The pane's width when docked, in columns; `0` leaves it to Claude Code. |
 | `flamingo` | `true` | The 8-bit flamingo, standing on one leg in a thin line of seafoam water. Every 15 seconds or so it glances back over its shoulder or blinks; now and then it shifts to the other leg or turns around; and once in a while a neighbour peeks in to say hello. |
