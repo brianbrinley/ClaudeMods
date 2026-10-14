@@ -873,9 +873,8 @@ ${
   <div class="bar">
     <a class="wordmark" href="#top">Boomi Companion</a>
     <nav aria-label="Sections">${nav}</nav>
-    <div class="theme" role="group" aria-label="Theme">
-      <button type="button" data-theme-pick="light" aria-pressed="false">Light</button>
-      <button type="button" data-theme-pick="dark" aria-pressed="false">Dark</button>
+    <div class="theme">
+      <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to the dark theme" title="Dark theme"><svg class="moon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg><svg class="sun" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg></button>
     </div>
     <button type="button" class="print" data-print title="Print the report, or save it as a PDF from the print dialog">Print or save as PDF</button>
   </div>
@@ -973,7 +972,7 @@ ${X} .wordmark{font:400 1.25rem/1 "Poiret One",system-ui,sans-serif;color:var(--
 ${X} .opening h1{font:400 clamp(2rem,4.4vw,3.25rem)/1.1 "Poiret One",system-ui,sans-serif;letter-spacing:.02em}
 ${X} h2,${X} h3,${X} thead th,${X} .label,${X} .budgets h2{font-family:"Josefin Sans",system-ui,sans-serif}
 ${X} main>section>h2,${X} .ledger-title{font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:1rem}
-${X} .theme button,${X} button.print{color:var(--exo-color-font);border-color:var(--exo-color-border)}${X} .theme button[aria-pressed="true"]{background:var(--exo-color-font);border-color:var(--exo-color-font);color:var(--exo-color-page)}
+${X} button.print,${X} .theme-toggle{color:var(--exo-color-font);border-color:var(--exo-color-border)}
 ${X} .ledger{border:3px double var(--valence-line)}
 ${X} .l-when strong{color:var(--valence-primary)}
 `
@@ -1058,8 +1057,8 @@ thead button{all:unset;cursor:pointer;font-weight:600;font-size:.813rem;color:va
 thead button:hover{color:var(--exo-color-font-link);text-decoration:underline}
 thead button[data-dir="asc"]::after{content:" ▲"}thead button[data-dir="desc"]::after{content:" ▼"}
 button{font:inherit}
-.theme button,button.print{background:transparent;color:var(--exo-color-font-inverse);border:1px solid var(--exo-color-font-inverse);border-radius:var(--exo-radius-x-large,1.5625rem);padding:.25rem .875rem;cursor:pointer;font-weight:600}button.print{white-space:nowrap}@media (max-width:640px){button.print{display:none}}
-.theme button[aria-pressed="true"]{background:var(--exo-color-font-inverse);color:var(--exo-color-background-brand)}
+button.print{background:transparent;color:inherit;border:1px solid color-mix(in srgb,currentColor 40%,transparent);border-radius:999px;padding:.3rem .875rem;cursor:pointer;font:400 .813rem/1.4 var(--exo-font-family)}button.print:hover{border-color:currentColor}button.print{white-space:nowrap}@media (max-width:640px){button.print{display:none}}
+.theme-toggle{width:2.25rem;height:2.25rem;display:inline-flex;align-items:center;justify-content:center;padding:0;background:transparent;color:inherit;border:1px solid color-mix(in srgb,currentColor 40%,transparent);border-radius:999px;cursor:pointer}.theme-toggle:hover{border-color:currentColor}.theme-toggle svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}.theme-toggle .sun,.ex-theme-dark .theme-toggle .moon{display:none}.ex-theme-dark .theme-toggle .sun{display:block}
 .filters button{background:var(--exo-color-background);color:var(--exo-color-font);border:1px solid var(--exo-color-border);border-radius:1.5625rem;padding:.25rem .875rem;cursor:pointer;font-weight:600}
 .filters button[aria-pressed="true"]{background:var(--exo-color-background-selected);border-color:var(--exo-color-background-selected);color:var(--exo-color-font-inverse)}
 :focus-visible{outline:2px solid var(--exo-color-background-selected);outline-offset:2px}
@@ -1174,11 +1173,11 @@ const SCRIPT = `
 (function(){
   var root=document.documentElement;
   function pick(t){root.classList.remove('ex-theme-light','ex-theme-dark');root.classList.add('ex-theme-'+t);
-    document.querySelectorAll('[data-theme-pick]').forEach(function(b){b.setAttribute('aria-pressed',String(b.getAttribute('data-theme-pick')===t))});
+    var toggle=document.querySelector('[data-theme-toggle]');if(toggle){var next=t==='dark'?'light':'dark';toggle.setAttribute('aria-label','Switch to the '+next+' theme');toggle.title=next==='dark'?'Dark theme':'Light theme'}
     try{localStorage.setItem('bc-report-theme',t)}catch(e){}}
   var saved=null;try{saved=localStorage.getItem('bc-report-theme')}catch(e){}
   pick(saved||(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'));
-  document.querySelectorAll('[data-theme-pick]').forEach(function(b){b.addEventListener('click',function(){pick(b.getAttribute('data-theme-pick'))})});
+  var toggler=document.querySelector('[data-theme-toggle]');if(toggler)toggler.addEventListener('click',function(){pick(root.classList.contains('ex-theme-dark')?'light':'dark')});
   var days=document.body.hasAttribute('data-days');
   document.querySelectorAll('time[datetime]').forEach(function(t){var d=new Date(t.getAttribute('datetime'));if(!isNaN(d))t.textContent=days?d.toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})});
   document.querySelectorAll('table.sortable').forEach(function(table){

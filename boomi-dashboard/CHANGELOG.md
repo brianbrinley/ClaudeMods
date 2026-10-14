@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.39.1
+
+- **A quieter theme switch in the HTML report.** The bold **Light** and **Dark** buttons are replaced by one round icon button, as on the docs site. It shows a moon to switch to dark and a sun to switch back, and its label says which way it switches. Your choice is still kept. **Print or save as PDF** is lighter to match.
+
 ## 0.39.0
 
 - **Budget enforcement, opt in: a spent budget can now really stop Companion.** A new setting, `budgetEnforce`, takes one of three values:

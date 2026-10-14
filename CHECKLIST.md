@@ -175,7 +175,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** `Saved the report as a web page: …/boomi-session-report-<time>.html`, and the file exists. **Fail:** an error.
 - [ ] **K2. Open it.** Open the file in Chrome, Safari or Edge.
   **Pass:** a navy Boomi Companion bar, the tiles, **Needs attention**, the charts and the tables, matching what `/bc-dashboard text` says. **Fail:** a blank or unstyled page, or numbers that don't match; send a screenshot.
-- [ ] **K3. Use it.** Switch **Dark** and **Light**, hover a chart bar, click a product in **Outcomes by product**, sort **Components** by **Cost**, and search the steps.
+- [ ] **K3. Use it.** Press the moon button to switch to dark and the sun to switch back, hover a chart bar, click a product in **Outcomes by product**, sort **Components** by **Cost**, and search the steps.
   **Pass:** each works: the theme changes, a tooltip appears, the steps list shows only that product, the table re-orders, and the search narrows the list. **Fail:** say which didn't.
 - [ ] **K4. Share it.** Send the file to someone (or open it on another computer or a phone).
   **Pass:** it looks the same there, and on a phone nothing runs off the side of the screen; the tables scroll inside their cards. **Fail:** say what's off.
@@ -201,12 +201,14 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** a stage that didn't happen shows a dash, and hovering says "Not deployed in these sessions" (or saved, or tested). The test without a wait says "execution ID not available", with the reason on hover. The budget panel says "No budget set", with how to set one beneath it. **Fail:** an empty cell, a note with no reason on hover, or a dash where the step did happen.
 - [ ] **K15. Less navy, and charts per session.** *(0.33.0)* In a folder with two or more Companion sessions, run `/bc-dashboard report html all`.
   **Pass:** the navy band holds only the title, the summary and the budget. The sessions come next, on a light card. **Charts** has **Cost by session** and **Outcomes by session**, a bar per session, and clicking one opens that session's steps. **Fail:** the sessions still inside the navy band, no charts, or a click that goes nowhere.
-- [ ] **K16. Report style.** *(0.36.0)* Run `/bc-dashboard report html all --style expressive`, switch **Light** and **Dark**, then run it again without `--style`.
+- [ ] **K16. Report style.** *(0.36.0)* Run `/bc-dashboard report html all --style expressive`, switch to dark and back with the moon and sun button, then run it again without `--style`.
   **Pass:** the first page is Sand (Midnight Navy in Dark), with the title in Poiret One, a gold double rule under the top, and Flamingo dates on the sessions. Status icons keep their labels, and both theme buttons stay readable. The second page is the usual Exosphere report. **Fail:** a mix of the two styles, unreadable buttons, or `--style` ignored.
-- [ ] **K17. Print to PDF.** *(0.37.0)* With the report open in **Dark**, press **Print or save as PDF** and save a PDF. Then try your browser's own Print from the menu.
+- [ ] **K17. Print to PDF.** *(0.37.0)* With the report switched to dark (the moon button), press **Print or save as PDF** and save a PDF. Then try your browser's own Print from the menu.
   **Pass:** the PDF is light, with dark text on white. Every session's steps are there, and the Components table shows all five columns through **Cost**. Each **Open in Boomi** has its address under it. Each page has the report's name and date at the top and `Page n of m` at the bottom, and no buttons or search box are printed. Back on screen, the sessions are folded as before. **Fail:** pale or dark pages, missing columns, sessions printed as headings only, or rows cut across pages.
 - [ ] **K18. Components to a spreadsheet.** *(0.38.0)* In the report, press **Copy for a spreadsheet**, then paste into the first cell of a new Excel or Google Sheets sheet. Press **Save as CSV** and open the file in Excel. In Claude Code, run `/bc-dashboard components` and paste again.
   **Pass:** one row per component, with every column in its own cell: name, type, folder, component ID, version, deploy, package ID, test, execution ID, cost and link. The note beside the buttons says what was copied, the CSV opens with its characters intact, and the command's paste matches. **Fail:** everything in one column, IDs cut or reformatted (for example as numbers), or nothing copied.
+- [ ] **K19. The theme button.** *(0.39.1)* In the report, press the round moon button at the top right, then reload the page.
+  **Pass:** the page turns dark, the button shows a sun, and the page stays dark after the reload. Pressing the sun turns it light again. A screen reader announces "Switch to the dark theme" (or light). **Fail:** no change, the wrong icon, or the choice is lost on reload.
 
 ## L. Installed Companion plugins
 
