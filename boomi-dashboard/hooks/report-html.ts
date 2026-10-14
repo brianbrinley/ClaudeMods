@@ -8,7 +8,6 @@
 import type { Activity, Dashboard, PastSession, Product } from '../types'
 import type { ComponentDetails } from './platform'
 import {
-  STATUS,
   agentStages,
   agents,
   attention,
@@ -42,13 +41,25 @@ export const esc = (text: string): string =>
 const LABEL: Record<Level, string> = { healthy: 'Healthy', warning: 'Warning', serious: 'Blocked', critical: 'Failed' }
 const LEVELS: Level[] = ['healthy', 'warning', 'serious', 'critical']
 
+/**
+ * The status icons, drawn on a 16px grid in one stroke: a check, a half-filled
+ * circle, a warning triangle and a cross. Always beside a label, never alone.
+ */
+const ICON_PATHS: Record<Level, string> = {
+  healthy: '<circle cx="8" cy="8" r="6.25"/><path d="M5.3 8.2l1.9 1.9 3.5-3.8"/>',
+  warning: '<circle cx="8" cy="8" r="6.25"/><path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" class="solid"/>',
+  serious: '<path d="M8 2.1l6.2 11H1.8z"/><path d="M8 6.4v3M8 11.2v.05"/>',
+  critical: '<circle cx="8" cy="8" r="6.25"/><path d="M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2"/>',
+}
+export const icon = (level: Level) => `<svg class="i" viewBox="0 0 16 16" aria-hidden="true" focusable="false">${ICON_PATHS[level]}</svg>`
+
 /** A status: icon and label together, never color alone. */
 const status = (level: Level, text: string) =>
-  `<span class="status status-${level}"><span class="icon" aria-hidden="true">${STATUS[level].icon}</span><span class="sr">${LABEL[level]}: </span>${esc(text)}</span>`
+  `<span class="status status-${level}">${icon(level)}<span class="sr">${LABEL[level]}: </span>${esc(text)}</span>`
 
 /** A component's or agent's stages as Exosphere badges. */
 const badges = (list: readonly Stage[]) =>
-  list.map(s => `<span class="badge badge-${s.level}"><span class="icon" aria-hidden="true">${STATUS[s.level].icon}</span><span class="sr">${LABEL[s.level]}: </span>${esc(s.text)}</span>`).join(' ')
+  list.map(s => `<span class="badge badge-${s.level}">${icon(s.level)}<span class="sr">${LABEL[s.level]}: </span>${esc(s.text)}</span>`).join(' ')
 
 /** A cell that sorts by a number, not its text. */
 const num = (value: number | undefined, shown: string | undefined) => `<td class="n" data-sort="${value ?? -1}">${esc(shown ?? '')}</td>`
@@ -56,7 +67,7 @@ const num = (value: number | undefined, shown: string | undefined) => `<td class
 const table = (id: string, caption: string, head: string[], rows: string[], cls = '') =>
   rows.length === 0
     ? ''
-    : `<section id="${id}" class="card"><h2>${esc(caption)} <span class="count">${rows.length}</span></h2>
+    : `<section id="${id}"><h2>${esc(caption)} <span class="count">${rows.length}</span></h2>
 <div class="scroll"><table class="sortable${cls ? ` ${cls}` : ''}"><thead><tr>${head.map((h, i) => `<th scope="col"><button type="button" data-col="${i}">${esc(h)}</button></th>`).join('')}</tr></thead>
 <tbody>${rows.join('\n')}</tbody></table></div></section>`
 
@@ -72,8 +83,8 @@ const dataTable = (head: string[], rows: (string | number)[][]) =>
     .map(r => `<tr>${r.map((c, i) => (i === 0 ? `<th scope="row">${esc(String(c))}</th>` : `<td class="n">${esc(String(c))}</td>`)).join('')}</tr>`)
     .join('')}</tbody></table></details>`
 
-const legend = (items: { cls: string; label: string; icon?: string }[]) =>
-  `<ul class="legend">${items.map(i => `<li><span class="swatch ${i.cls}" aria-hidden="true"></span>${i.icon ? `<span class="icon ${i.cls}-ink" aria-hidden="true">${i.icon}</span>` : ''}${esc(i.label)}</li>`).join('')}</ul>`
+const legend = (items: { cls: string; label: string; level?: Level }[]) =>
+  `<ul class="legend">${items.map(i => `<li><span class="swatch ${i.cls}" aria-hidden="true"></span>${i.level ? `<span class="${i.cls}-ink">${icon(i.level)}</span>` : ''}${esc(i.label)}</li>`).join('')}</ul>`
 
 /** A bar's or column's top: square at the baseline, a 4px rounded data end. */
 const hbar = (x: number, y: number, w: number, h: number, r = 4) => {
@@ -127,8 +138,8 @@ const stepsOverTime = (steps: readonly Activity[], isAll = false): string => {
   const ticks = cols
     .map((c, i) => (i % Math.ceil(n / 6) === 0 ? `<text x="${(left + i * colW + colW / 2).toFixed(1)}" y="${H - 6}" class="axis" text-anchor="middle">${label(c.at)}</text>` : ''))
     .join('')
-  return `<figure class="card chart"><figcaption><h3>${isAll ? 'Steps over time' : 'Steps over the session'}</h3><span class="sub">per ${Math.round(size / 60_000)} minutes, UTC</span></figcaption>
-${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], icon: STATUS[l].icon })))}
+  return `<figure class="chart"><figcaption><h3>${isAll ? 'Steps over time' : 'Steps over the session'}</h3><span class="sub">per ${Math.round(size / 60_000)} minutes, UTC</span></figcaption>
+${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], level: l })))}
 <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Steps over the session, stacked by outcome">
 <line x1="${left}" y1="${y(0)}" x2="${W - 8}" y2="${y(0)}" class="baseline"/><text x="${left - 6}" y="${y(max) + 4}" class="axis" text-anchor="end">${max}</text>
 ${marks}${ticks}</svg>
@@ -166,8 +177,8 @@ const outcomesByProduct = (steps: readonly Activity[]): string => {
 <text x="0" y="${i * rowH + 19}" class="label">${esc(productName(r.key))}</text>${segs.join('')}<text x="${(x + 4).toFixed(1)}" y="${i * rowH + 19}" class="value">${total}</text></g>`
     })
     .join('')
-  return `<figure class="card chart"><figcaption><h3>Outcomes by product</h3><span class="sub">click a product to list its steps</span></figcaption>
-${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], icon: STATUS[l].icon })))}
+  return `<figure class="chart"><figcaption><h3>Outcomes by product</h3><span class="sub">click a product to list its steps</span></figcaption>
+${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], level: l })))}
 <svg viewBox="0 0 560 ${rows.length * rowH}" role="img" aria-label="Steps per product, stacked by outcome">${marks}</svg>
 ${dataTable(['Product', ...LEVELS.map(l => LABEL[l])], rows.map(r => [productName(r.key), ...LEVELS.map(l => r.counts[l])]))}</figure>`
 }
@@ -192,7 +203,7 @@ const spendByProduct = (activity: readonly Activity[], all: ReturnType<typeof sp
 <text x="0" y="${i * rowH + 19}" class="label">${esc(productName(r.key))}</text><path d="${hbar(left, i * rowH + 6, w, 18)}" class="cat-${slot(r.key)}"/><text x="${(left + w + 6).toFixed(1)}" y="${i * rowH + 19}" class="value">${esc(shown)}</text></g>`
     })
     .join('')
-  return `<figure class="card chart"><figcaption><h3>Spend by product</h3><span class="sub">${byUsd ? 'cost' : 'tokens'} Claude spent getting to each product's steps</span></figcaption>
+  return `<figure class="chart"><figcaption><h3>Spend by product</h3><span class="sub">${byUsd ? 'cost' : 'tokens'} Claude spent getting to each product's steps</span></figcaption>
 <svg viewBox="0 0 560 ${measured.length * rowH}" role="img" aria-label="Spend by product">${marks}</svg>
 ${dataTable(['Product', byUsd ? 'Cost' : 'Tokens'], measured.map(r => [productName(r.key), byUsd ? (formatCost(r.usd) ?? '$0') : formatTokens(r.tokens ?? 0)]))}</figure>`
 }
@@ -216,7 +227,7 @@ const costOverTime = (activity: readonly Activity[], endUsd: number | undefined,
       return `<g class="hit" tabindex="0" data-tip="${esc(tip)}"><circle cx="${x(p.at).toFixed(1)}" cy="${y(p.usd).toFixed(1)}" r="12" class="target"/><circle cx="${x(p.at).toFixed(1)}" cy="${y(p.usd).toFixed(1)}" r="4" class="dot"/></g>`
     })
     .join('')
-  return `<figure class="card chart"><figcaption><h3>Cost over the session</h3><span class="sub">what the session had cost at each step</span></figcaption>
+  return `<figure class="chart"><figcaption><h3>Cost over the session</h3><span class="sub">what the session had cost at each step</span></figcaption>
 <svg viewBox="0 0 560 160" role="img" aria-label="Cost over the session">
 <line x1="${left}" y1="140" x2="552" y2="140" class="baseline"/><line x1="${left}" y1="20" x2="552" y2="20" class="grid"/>
 <text x="${left - 6}" y="144" class="axis" text-anchor="end">$0</text><text x="${left - 6}" y="24" class="axis" text-anchor="end">${esc(formatCost(top) ?? '')}</text>
@@ -246,7 +257,7 @@ const pipeline = (dashboard: Dashboard, isAll = false): string => {
 <text x="0" y="${i * rowH + 19}" class="label">${esc(s.name)}</text><path d="${hbar(left, i * rowH + 6, s.n === 0 ? 2 : w, 18)}" class="seq"/><text x="${(left + (s.n === 0 ? 2 : w) + 6).toFixed(1)}" y="${i * rowH + 19}" class="value">${s.n}</text></g>`
     })
     .join('')
-  return `<figure class="card chart"><figcaption><h3>Component pipeline</h3><span class="sub">how far ${isAll ? 'these sessions\'' : 'this session\'s'} components got</span></figcaption>
+  return `<figure class="chart"><figcaption><h3>Component pipeline</h3><span class="sub">how far ${isAll ? 'these sessions\'' : 'this session\'s'} components got</span></figcaption>
 <svg viewBox="0 0 560 ${steps.length * rowH}" role="img" aria-label="Component pipeline">${marks}</svg>
 ${dataTable(['Stage', 'Components'], steps.map(s => [s.name, s.n]))}</figure>`
 }
@@ -330,6 +341,9 @@ export const assignSessions = (activity: readonly Activity[], current: string | 
   }
   return out
 }
+
+/** An earlier session no step named and no transcript claimed: `earlier-<n>`. */
+const isUnnamed = (id: string) => /^earlier-\d+$/.test(id)
 
 /** A session's ID as a person reads it: whole, or which unnamed earlier one it is. */
 export const sessionLabel = (id: string): string => {
@@ -437,49 +451,52 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   const sessionIds = assignSessions(dashboard.activity, facts.sessionId, facts.pastSessions, facts.cwd)
   const sessions = isAll ? sessionSummaries(dashboard.activity, facts.sessionId, u.usd, facts.pastSessions, facts.cwd) : []
   const boomi = facts.boomi
-  const shortSession = (id: string) => (id.startsWith('earlier-') ? `earlier ${id.slice(8)}` : id.slice(0, 8))
+  const shortSession = (id: string) => (isUnnamed(id) ? `earlier ${id.slice(8)}` : id.slice(0, 8))
   const sessionOf = (a: Activity) => sessionIds.get(a.id) ?? 'this'
   const when = (t: number) => new Date(t).toISOString().replace('T', ' ').slice(0, 16)
 
-  // The hero: what this is about (the repository, else the Boomi account, else the folder), then its facts as chips.
+  // The opening: what this is about (the repository, else the Boomi account, else the folder), then what happened, in sentences.
   const title = facts.repo ? facts.repo.replace(/^https?:\/\/(www\.)?github\.com\//, '') : (boomi?.accountName ?? facts.folder ?? 'Companion session')
-  const span = steps.length > 0 ? `${shortWhen(steps[0]!.startedAt, 'UTC')} → ${shortWhen(steps[steps.length - 1]!.startedAt, 'UTC')} UTC` : undefined
-  const chips = (
-    isAll
-      ? [
-          ['Sessions', String(sessions.length)],
-          span && ['When', span],
-          facts.folder && facts.folder !== title && ['Folder', facts.folder],
-        ]
-      : [
-          ['Session', facts.session.slice(0, 8), facts.session],
-          ['Date', facts.date],
-          u.startedAt !== undefined && ['Running', duration(now - u.startedAt)],
-          u.model && ['Model', u.model],
-        ]
-  ).filter(Boolean) as string[][]
-  const chipList = chips
-    .map(([label, value, full]) => `<li${full ? ` title="${esc(full)}"` : ''}><span class="chip-label">${esc(label!)}</span> ${esc(value!)}</li>`)
-    .join('')
-
-  const tile = (label: string, value: string, note?: string, level?: Level) =>
-    `<div class="card tile"><div class="label">${esc(label)}</div><div class="value">${level ? status(level, value) : esc(value)}</div>${note ? `<div class="note">${esc(note)}</div>` : ''}</div>`
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+  const day = (t: number) => shortWhen(t, 'UTC').replace(/, \d\d:\d\d$/, '')
+  const strong = (text: string) => `<strong>${esc(text)}</strong>`
   const budgetPct = u.budgetUsd && u.usd !== undefined ? Math.round((u.usd / u.budgetUsd) * 100) : undefined
   const total = sessionsCost(sessions)
-  const costNote = [
-    total.isAtLeast ? 'at least: some sessions are counted to their last Companion step' : undefined,
-    total.missing > 0 ? `${total.missing} session${total.missing === 1 ? '' : 's'} with no cost recorded` : undefined,
-  ].filter(Boolean).join('; ')
-  const tiles = [
-    isAll
-      ? tile('Cost', total.usd === undefined ? '—' : `${total.isAtLeast ? '≥ ' : ''}${formatCost(total.usd) ?? '$0'}`, costNote || 'across the sessions, from Claude Code\'s own figures')
-      : tile('Cost', formatCost(u.usd) ?? '—', u.budgetUsd ? `${budgetPct}% of the ${formatCost(u.budgetUsd)} budget` : undefined, budgetPct === undefined ? undefined : budgetPct >= 100 ? 'critical' : budgetPct >= 80 ? 'warning' : undefined),
-    isAll
-      ? tile('Sessions', String(sessions.length), sessions.length > 0 ? `the latest ${when(sessions[0]!.lastAt)} UTC` : undefined)
-      : tile('Tokens', u.tokens !== undefined ? formatTokens(u.tokens) : '—', u.cached ? `and ${formatTokens(u.cached)} cache reads` : undefined),
-    tile('Components', String(rows.length), `${steps.length} step${steps.length === 1 ? '' : 's'}${failed ? `, ${failed} failed or blocked` : ''}`),
-    tile('Needs attention', String(needs.length), closed ? `${closed} closed` : needs.length === 0 ? 'all clear' : undefined, needs.length === 0 ? 'healthy' : needs.some(n => n.level === 'critical') ? 'critical' : 'warning'),
-  ].join('')
+  const did = rows.length > 0
+    ? `worked on ${strong(plural(rows.length, 'component'))} in ${plural(steps.length, 'step')}`
+    : `took ${strong(plural(steps.length, 'Companion step'))}`
+  const trouble = failed > 0 ? `, ${failed} of which failed or ${failed === 1 ? 'was' : 'were'} blocked` : ''
+  const lede: string[] = []
+  if (isAll) {
+    const first = steps[0]?.startedAt
+    const last = steps[steps.length - 1]?.startedAt
+    const range = first === undefined || last === undefined ? '' : day(first) === day(last!) ? ` on ${day(first)}` : ` between ${day(first)} and ${day(last!)}`
+    lede.push(`${sessions.length === 1 ? 'One session' : `${sessions.length} sessions`} in ${strong(facts.folder ?? 'this folder')}${range} ${did}${trouble}.`)
+    lede.push(
+      total.usd === undefined
+        ? 'Their cost wasn’t recorded.'
+        : `They cost ${strong(`${total.isAtLeast ? 'at least ' : ''}${formatCost(total.usd) ?? '$0'}`)}${total.isAtLeast ? ', counting some sessions only up to their last Companion step' : ''}${total.missing > 0 ? `, with ${plural(total.missing, 'session')} not recorded` : ''}.`,
+    )
+  } else {
+    lede.push(`This session${u.startedAt === undefined ? '' : ` has run for ${esc(duration(now - u.startedAt))} and`} ${did}${trouble}.`)
+    if (u.usd !== undefined) {
+      const budget = u.budgetUsd ? `, ${budgetPct}% of the ${formatCost(u.budgetUsd)} budget` : ''
+      const tokens = u.tokens !== undefined ? ` (${formatTokens(u.tokens)} tokens${u.cached ? `, ${formatTokens(u.cached)} cache reads` : ''})` : ''
+      const level: Level | undefined = budgetPct === undefined ? undefined : budgetPct >= 100 ? 'critical' : budgetPct >= 80 ? 'warning' : undefined
+      lede.push(`It has cost ${strong(formatCost(u.usd) ?? '$0')} so far${level ? ` ${status(level, budget.slice(2))}` : budget}${tokens}.`)
+    }
+  }
+  lede.push(
+    needs.length === 0
+      ? `${status('healthy', 'Nothing needs attention')}${closed ? ` (${closed} closed)` : ''}.`
+      : `${status(needs.some(n => n.level === 'critical') ? 'critical' : 'warning', needs.length === 1 ? `1 thing needs attention: ${needs[0]!.title}` : `${needs.length} things need attention`)}.`,
+  )
+  const dateline = [
+    isAll ? 'All sessions' : `Session <code title="${esc(facts.session)}">${esc(facts.session.slice(0, 8))}</code>`,
+    esc(facts.date),
+    u.model && !isAll ? esc(u.model) : undefined,
+    facts.version ? `boomi-dashboard ${esc(facts.version)}` : undefined,
+  ].filter(Boolean).join(' · ')
 
   const attentionList =
     needs.length === 0
@@ -505,17 +522,18 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     .map(a => {
       const id = a.kind === 'test' ? a.executionId : (packageOf(a.detail) ?? a.deploymentId)
       const what = a.kind === 'test' ? (a.executionId ? 'execution' : '') : a.kind === 'deploy' ? 'package' : 'deployment'
-      return `<tr><td data-sort="${a.startedAt}"><time datetime="${new Date(a.startedAt).toISOString()}">${esc(when(a.startedAt))} UTC</time></td><th scope="row">${status(levelOf(a), describe(a))}</th><td>${id ? `<span class="muted">${what}</span> <code>${esc(id)}</code>` : ''}</td>${a.kind === 'test' ? `<td>${esc(a.executionStatus ?? '')}</td>` : '<td></td>'}${isAll ? `<td><code>${esc(shortSession(sessionOf(a)))}</code></td>` : ''}</tr>`
+      return `<tr><td data-sort="${a.startedAt}"><time datetime="${new Date(a.startedAt).toISOString()}">${esc(when(a.startedAt))} UTC</time></td><th scope="row">${status(levelOf(a), describe(a))}</th><td>${id ? `<span class="muted">${what}</span> <code>${esc(id)}</code>` : ''}</td>${a.kind === 'test' ? `<td>${esc(a.executionStatus ?? '')}</td>` : '<td></td>'}${isAll ? `<td>${isUnnamed(sessionOf(a)) ? esc(shortSession(sessionOf(a))) : `<code>${esc(shortSession(sessionOf(a)))}</code>`}</td>` : ''}</tr>`
     })
 
   const sessionRows = sessions.map(s => {
     const cost = s.usd === undefined ? 'not recorded' : `${s.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(s.usd) ?? '$0'}`
     const label = sessionLabel(s.id)
-    return `<tr><th scope="row"><code>${esc(label)}</code>${s.isCurrent ? ' <span class="tag tag-1">this session</span>' : ''}</th><td data-sort="${s.firstAt}">${esc(when(s.firstAt))} UTC</td><td data-sort="${s.lastAt}">${esc(when(s.lastAt))} UTC</td>${num(s.steps, String(s.steps))}${num(s.failed, String(s.failed))}${num(s.components, String(s.components))}${num(s.usd, cost)}</tr>`
+    const named = isUnnamed(s.id) ? esc(label) : `<code>${esc(label)}</code>`
+    return `<tr><th scope="row">${named}${s.isCurrent ? ' <span class="tag tag-1">this session</span>' : ''}</th><td data-sort="${s.firstAt}">${esc(when(s.firstAt))} UTC</td><td data-sort="${s.lastAt}">${esc(when(s.lastAt))} UTC</td>${num(s.steps, String(s.steps))}${num(s.failed, String(s.failed))}${num(s.components, String(s.components))}${num(s.usd, cost)}</tr>`
   })
 
   const account = boomi && (boomi.accountId || boomi.environmentId)
-    ? `<section id="account" class="card"><h2>Boomi account</h2><dl class="facts">${[
+    ? `<section id="account"><h2>Boomi account</h2><dl class="facts">${[
         boomi.accountName && `<dt>Account</dt><dd>${esc(boomi.accountName)}</dd>`,
         boomi.accountId && `<dt>Account ID</dt><dd><code>${esc(boomi.accountId)}</code></dd>`,
         boomi.environmentId && `<dt>Environment ID</dt><dd><code>${esc(boomi.environmentId)}</code></dd>`,
@@ -552,7 +570,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
         a.file && `<dt>File</dt><dd><code>${esc(a.file)}</code></dd>`,
         took && `<dt>Took</dt><dd>${esc(took)}</dd>`,
         `<dt>Seen in</dt><dd>${a.source === 'log' ? "Companion's activity log" : "Claude's tool call"}</dd>`,
-        isAll && `<dt>Session</dt><dd><code>${esc(sessionLabel(sessionOf(a)))}</code></dd>`,
+        isAll && `<dt>Session</dt><dd>${isUnnamed(sessionOf(a)) ? esc(sessionLabel(sessionOf(a))) : `<code>${esc(sessionOf(a))}</code>`}</dd>`,
       ]
         .filter(Boolean)
         .join('')
@@ -568,6 +586,16 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     ...(u.modelSplits ?? []).map(line => `<li class="sub">${esc(line)}</li>`),
   ].join('')
 
+  const sectionsShown: [string, string][] = [
+    ['attention', 'Attention'],
+    ...(isAll ? ([['sessions', 'Sessions']] as [string, string][]) : []),
+    ['components', 'Components'],
+    ...(releaseRows.length > 0 ? ([['releases', 'Deploys & tests']] as [string, string][]) : []),
+    ['charts', 'Charts'],
+    ['steps', 'Steps'],
+  ]
+  const nav = sectionsShown.map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join('')
+
   const charts = [stepsOverTime(steps, isAll), outcomesByProduct(steps), isAll ? '' : costOverTime(dashboard.activity, u.usd, now), spendByProduct(dashboard.activity, all), pipeline(dashboard, isAll)].filter(Boolean)
 
   return `<!doctype html>
@@ -582,33 +610,31 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
 <style>${STYLE}</style>
 </head>
 <body${isAll ? ' data-days' : ''}>
-<header class="hero">
-  <div class="hero-inner">
-    <div class="hero-top">
-      <p class="eyebrow"><span class="mark" aria-hidden="true">◆</span> Boomi Companion <span class="sep" aria-hidden="true">·</span> ${isAll ? 'All sessions' : 'Session report'}</p>
-      <div class="theme" role="group" aria-label="Theme">
-        <button type="button" data-theme-pick="light" aria-pressed="false">Light</button>
-        <button type="button" data-theme-pick="dark" aria-pressed="false">Dark</button>
-      </div>
+<header class="masthead">
+  <div class="bar">
+    <a class="wordmark" href="#top">Boomi Companion</a>
+    <nav aria-label="Sections">${nav}</nav>
+    <div class="theme" role="group" aria-label="Theme">
+      <button type="button" data-theme-pick="light" aria-pressed="false">Light</button>
+      <button type="button" data-theme-pick="dark" aria-pressed="false">Dark</button>
     </div>
-    <h1>${esc(title)}</h1>
-    <ul class="chips">${chipList}</ul>
   </div>
-  <div class="spectrum" aria-hidden="true"><span class="s1"></span><span class="s2"></span><span class="s3"></span><span class="s4"></span><span class="s5"></span><span class="s6"></span></div>
 </header>
-<main>
-<section class="tiles" aria-label="At a glance">${tiles}</section>
+<main id="top">
+<h1>${esc(title)}</h1>
+<p class="lede">${lede.join(' ')}</p>
+<p class="dateline">${dateline}</p>
+<section id="attention"><h2>Needs attention</h2>${attentionList}</section>
 ${account}
-<section id="attention" class="card"><h2>Needs attention</h2>${attentionList}</section>
-${charts.length > 0 ? `<section id="charts" aria-label="Charts"><div class="charts">${charts.join('\n')}</div></section>` : ''}
 ${isAll ? table('sessions', 'Sessions', ['Session', 'Started', 'Last step', 'Steps', 'Failed or blocked', 'Components', 'Cost'], sessionRows) : ''}
-${componentRows.length === 0 ? `<section id="components" class="card"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Type', 'Folder', 'Component ID', 'Version', 'Changed in Boomi', 'Where it stands', 'Tokens', 'Cost'], componentRows, 'wide')}
+${componentRows.length === 0 ? `<section id="components"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Type', 'Folder', 'Component ID', 'Version', 'Changed in Boomi', 'Where it stands', 'Tokens', 'Cost'], componentRows, 'wide')}
 ${table('releases', 'Deployments and tests', ['When', 'Step', 'ID in Boomi', 'Status', ...(isAll ? ['Session'] : [])], releaseRows)}
 ${table('connectors', 'Custom connectors', ['Connector', 'Group', 'Where it stands', 'Tokens', 'Cost'], connectorRows)}
 ${table('agents', 'Agentstudio agents', ['Agent', 'Where it stands', 'Tokens', 'Cost'], agentRows)}
-${quarantine.length === 0 ? '' : `<section id="quarantine" class="card"><h2>Data Hub quarantine</h2><ul class="plain">${quarantine.map(q => `<li>${status(q.level, q.text)}</li>`).join('')}</ul></section>`}
-${spendFacts ? `<section id="usage" class="card"><h2>Usage</h2><ul class="plain">${spendFacts}</ul></section>` : ''}
-<section id="steps" class="card"><h2>Claude's steps <span class="count">${steps.length}</span></h2>
+${quarantine.length === 0 ? '' : `<section id="quarantine"><h2>Data Hub quarantine</h2><ul class="plain">${quarantine.map(q => `<li>${status(q.level, q.text)}</li>`).join('')}</ul></section>`}
+${spendFacts ? `<section id="usage"><h2>Usage</h2><ul class="plain">${spendFacts}</ul></section>` : ''}
+${charts.length > 0 ? `<section id="charts"><h2>Charts</h2><div class="charts">${charts.join('\n')}</div></section>` : ''}
+<section id="steps"><h2>Claude's steps <span class="count">${steps.length}</span></h2>
 ${
   steps.length === 0
     ? '<p class="muted">No Companion steps this session.</p>'
@@ -653,24 +679,29 @@ const STYLE = `
 *{box-sizing:border-box}
 html{background:var(--exo-color-body)}
 body{margin:0;background:var(--exo-color-body);color:var(--exo-color-font);font:400 .875rem/1.5 var(--exo-font-family)}
-.hero{background:var(--exo-color-background-brand);color:var(--exo-color-font-inverse);position:relative;overflow:hidden}
-.hero::after{content:"";position:absolute;right:-6rem;top:-8rem;width:26rem;height:26rem;border-radius:50%;background:radial-gradient(closest-side,var(--cat-1),transparent);opacity:.35;pointer-events:none}
-.hero-inner{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:var(--exo-spacing-large) var(--exo-spacing-large) var(--exo-spacing-x-large)}
-.hero-top{display:flex;justify-content:space-between;align-items:center;gap:var(--exo-spacing-standard);flex-wrap:wrap}
-.eyebrow{margin:0;font:600 .75rem/1.5 var(--exo-font-family);letter-spacing:.12em;text-transform:uppercase;opacity:.9}.eyebrow .mark{color:var(--cat-6)}.eyebrow .sep{opacity:.6;margin:0 .25em}
-.hero h1{font:400 clamp(1.75rem,4vw,2.75rem)/1.15 var(--exo-font-brand);margin:var(--exo-spacing-standard) 0 var(--exo-spacing-standard);overflow-wrap:anywhere}
-.chips{display:flex;flex-wrap:wrap;gap:.5rem;list-style:none;margin:0;padding:0}
-.chips li{border:1px solid color-mix(in srgb,var(--exo-color-font-inverse) 35%,transparent);background:color-mix(in srgb,var(--exo-color-font-inverse) 8%,transparent);border-radius:1.5625rem;padding:.2rem .75rem;font-size:.813rem;font-variant-numeric:tabular-nums;white-space:nowrap}
-.chip-label{opacity:.75;margin-right:.25em}
-.spectrum{display:flex;height:4px}.spectrum span{flex:1}.spectrum .s1{background:var(--cat-1)}.spectrum .s2{background:var(--cat-2)}.spectrum .s3{background:var(--cat-3)}.spectrum .s4{background:var(--cat-4)}.spectrum .s5{background:var(--cat-5)}.spectrum .s6{background:var(--cat-6)}
+.masthead{background:var(--exo-color-background-brand);color:var(--exo-color-font-inverse)}
+.bar{max-width:1180px;margin:0 auto;padding:.625rem var(--exo-spacing-large);display:flex;align-items:center;gap:var(--exo-spacing-large)}
+.wordmark{font:600 1.0625rem/1 var(--exo-font-brand);color:inherit;text-decoration:none;white-space:nowrap}
+.masthead nav{display:flex;gap:1.25rem;flex:1;overflow-x:auto;scrollbar-width:none}
+.masthead nav a{color:inherit;text-decoration:none;font-size:.875rem;opacity:.82;white-space:nowrap;padding:.25rem 0;border-bottom:1px solid transparent}
+.masthead nav a:hover{opacity:1;border-bottom-color:currentColor}
+main>h1{font:600 clamp(1.75rem,3.6vw,2.5rem)/1.15 var(--exo-font-brand);letter-spacing:-.01em;margin:2.25rem 0 .75rem;overflow-wrap:anywhere;text-wrap:balance}
+.lede{font-size:1.0625rem;line-height:1.6;max-width:70ch;margin:0 0 .5rem}.lede strong{font-weight:600}.lede .status{white-space:normal}
+.dateline{font-size:.813rem;color:var(--exo-color-font-secondary);margin:0}.dateline code{font-size:.75rem}
 main{max-width:1180px;overflow-wrap:break-word;margin:0 auto;padding:var(--exo-spacing-large)}
 h1,h2,h3{font-family:var(--exo-font-brand);font-weight:400;line-height:1.25;margin:0}
 h1{font-size:1.75rem}h2{font-size:1.25rem;margin-bottom:var(--exo-spacing-small)}h3{font-size:1rem}
 .muted,.note,.hint,.aside,.sub,footer,.count{color:var(--exo-color-font-secondary)}
-.card{background:var(--exo-color-background);border:1px solid var(--exo-color-border-secondary);border-radius:var(--exo-radius-standard);box-shadow:0 0 .3125rem 0 var(--exo-color-shadow-moderate);padding:var(--exo-spacing-standard) var(--exo-spacing-large);margin-bottom:var(--exo-spacing-standard)}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:var(--exo-spacing-standard);margin-bottom:var(--exo-spacing-standard)}
-.tile{margin:0}.tile .label{font-weight:600;color:var(--exo-color-font-secondary)}.tile .value{font:400 2rem/1.25 var(--exo-font-brand);font-variant-numeric:tabular-nums;margin:.25rem 0}
-.status .icon{white-space:nowrap}.status .icon,.badge .icon{font-weight:700;margin-right:.35em}
+main>section{margin-top:2.75rem;padding-top:1.25rem;border-top:1px solid var(--exo-color-border-secondary)}
+main>section>h2{margin-bottom:1rem}
+.chart{margin:0}
+svg.i{display:inline-block;width:1.05em;height:1.05em;vertical-align:-.17em;margin-right:.35em;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}.i .solid{fill:currentColor;stroke:none}
+.status-healthy .i,.badge-healthy .i{color:var(--exo-color-background-success-strong)}.status-warning .i,.badge-warning .i{color:var(--exo-color-background-warning-strong)}.status-serious .i,.badge-serious .i{color:var(--exo-color-background-highlight)}.status-critical .i,.badge-critical .i{color:var(--exo-color-background-danger-strong)}
+::selection{background:var(--exo-color-background-selected);color:var(--exo-color-font-inverse)}
+html{scrollbar-color:var(--exo-color-border) transparent;accent-color:var(--exo-color-background-selected)}
+a{text-underline-offset:.2em;text-decoration-thickness:1px}
+table,.lede,.legend{font-variant-numeric:tabular-nums}
+input::placeholder{color:var(--exo-color-font-secondary)}
 .status-healthy .icon{color:var(--exo-color-background-success-strong)}.status-warning .icon{color:var(--exo-color-background-warning-strong)}.status-serious .icon{color:var(--exo-color-background-highlight)}.status-critical .icon{color:var(--exo-color-background-danger-strong)}
 .badge{display:inline-block;border-radius:var(--exo-radius-standard);padding:0 .5rem;margin:0 .35rem .3rem 0;font-size:.813rem;line-height:1.6rem;border:1px solid transparent}
 .badge-healthy{background:var(--exo-color-background-success)}.badge-healthy .icon{color:var(--exo-color-background-success-strong)}
@@ -679,8 +710,8 @@ h1{font-size:1.75rem}h2{font-size:1.25rem;margin-bottom:var(--exo-spacing-small)
 .badge-critical{background:var(--exo-color-background-danger-weak)}.badge-critical .icon{color:var(--exo-color-background-danger-strong)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 ol.attention{list-style:none;padding:0;margin:0}
-.alert{border-left:4px solid var(--exo-color-border);background:var(--exo-color-background-secondary);border-radius:var(--exo-radius-standard);padding:.5rem .75rem;margin-bottom:.5rem}
-.alert-warning{border-left-color:var(--exo-color-background-warning-strong);background:var(--exo-color-background-warning)}.alert-critical{border-left-color:var(--exo-color-background-danger-strong);background:var(--exo-color-background-danger-weak)}.alert-serious{border-left-color:var(--exo-color-background-highlight)}
+.alert{background:var(--exo-color-background-secondary);border-radius:var(--exo-radius-standard);padding:.5rem .75rem;margin-bottom:.5rem}
+.alert-warning{background:var(--exo-color-background-warning)}.alert-critical{background:var(--exo-color-background-danger-weak)}.alert-serious{box-shadow:inset 0 0 0 1px var(--exo-color-background-highlight)}
 .charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:var(--exo-spacing-standard);margin-bottom:var(--exo-spacing-standard)}
 .chart{margin:0}figcaption{display:flex;flex-wrap:wrap;align-items:baseline;gap:.5rem;margin-bottom:.5rem}
 svg{display:block;width:100%;height:auto;overflow:visible}
@@ -697,7 +728,7 @@ svg .hit:hover .target,svg .hit:focus-visible .target{fill:var(--exo-color-font)
 .legend{display:flex;flex-wrap:wrap;gap:.25rem 1rem;list-style:none;padding:0;margin:0 0 .5rem;font-size:.813rem}
 .legend li{display:flex;align-items:center;gap:.3rem}.legend .swatch{width:.75rem;height:.75rem;border-radius:2px;display:inline-block}.legend .icon{font-weight:700}
 details.data{margin-top:.5rem;font-size:.813rem;overflow-x:auto}details.data summary{cursor:pointer;color:var(--exo-color-font-link);font-weight:600}
-.scroll{overflow-x:auto;position:relative}.card{position:relative}.scroll table{min-width:560px}.scroll table.wide{min-width:1040px}thead th{white-space:nowrap}
+.scroll{overflow-x:auto;position:relative}.scroll table{min-width:560px}.scroll table.wide{min-width:1040px}thead th{white-space:nowrap}
 td.id code{overflow-wrap:anywhere}td .sub,th .sub{font-weight:400;font-size:.813rem;color:var(--exo-color-font-secondary)}
 a{color:var(--exo-color-font-link)}dl.facts{margin:0}
 table{width:100%;border-collapse:collapse}
@@ -719,15 +750,15 @@ ol.steps{list-style:none;padding:0;margin:0}
 ol.steps li{border-bottom:1px solid var(--exo-color-border-secondary)}
 ol.steps summary{cursor:pointer;padding:.5rem .25rem}
 ol.steps time{font-variant-numeric:tabular-nums;color:var(--exo-color-font-secondary);margin-right:.5em}
-.tag{font-size:.75rem;font-weight:600;border-radius:var(--exo-radius-standard);padding:0 .45rem;margin-left:.4em;border:1px solid var(--exo-color-border);border-left-width:4px}
-.tag-1{border-left-color:var(--cat-1)}.tag-2{border-left-color:var(--cat-2)}.tag-3{border-left-color:var(--cat-3)}.tag-4{border-left-color:var(--cat-4)}.tag-5{border-left-color:var(--cat-5)}.tag-6{border-left-color:var(--cat-6)}
+.tag{display:inline-flex;align-items:center;gap:.35em;font-size:.75rem;font-weight:600;border-radius:1rem;padding:0 .55rem;margin-left:.4em;border:1px solid var(--exo-color-border-secondary);color:var(--exo-color-font-secondary)}.tag::before{content:"";width:.5rem;height:.5rem;border-radius:2px;background:var(--tag,var(--exo-color-border))}
+.tag-1{--tag:var(--cat-1)}.tag-2{--tag:var(--cat-2)}.tag-3{--tag:var(--cat-3)}.tag-4{--tag:var(--cat-4)}.tag-5{--tag:var(--cat-5)}.tag-6{--tag:var(--cat-6)}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:.125rem .75rem;margin:.125rem 0 .75rem 1.75rem}dt{color:var(--exo-color-font-secondary)}dd{margin:0;overflow-wrap:anywhere}
 code{font:.813rem var(--exo-font-monospace)}
 ul.plain{list-style:none;padding:0;margin:0}ul.plain li{margin:.25rem 0}ul.plain li.sub{margin-left:1.4em;color:var(--exo-color-font-secondary)}
 .tooltip{position:fixed;z-index:10;pointer-events:none;max-width:320px;background:var(--exo-color-font);color:var(--exo-color-background);border-radius:var(--exo-radius-standard);padding:.35rem .6rem;font-size:.813rem;box-shadow:0 0 1rem 0 var(--exo-color-shadow-moderate)}
 footer{max-width:1180px;margin:0 auto;padding:var(--exo-spacing-standard) var(--exo-spacing-large) var(--exo-spacing-x-large);font-size:.813rem}
-@media (max-width:640px){main,footer,.hero-inner{padding-left:1rem;padding-right:1rem}.chips li{white-space:normal}.card{padding:.75rem 1rem}.search input{min-width:0;width:100%}.tile .value{font-size:1.5rem}}
-@media print{.theme,.controls,details.data{display:none}.card{box-shadow:none}}
+@media (max-width:640px){main,footer,.bar{padding-left:1rem;padding-right:1rem}.bar{flex-wrap:wrap;row-gap:.25rem}.masthead nav{order:3;flex-basis:100%;gap:1rem}.search input{min-width:0;width:100%}}
+@media print{.theme,.controls,details.data,.masthead nav{display:none}}
 @media (forced-colors:active){.badge,.alert{border:1px solid CanvasText}}
 `
 

@@ -1814,7 +1814,8 @@ test('/bc-dashboard report html writes the session as one web page, escaped and 
   expect(page).toContain('<title>Companion Session Report</title>')
   expect(page).toContain('content="boomi-dashboard 9.9.9"')
   // Each status has its icon and its label, never color alone.
-  expect(page).toContain('<span class="badge badge-healthy"><span class="icon" aria-hidden="true">✓</span><span class="sr">Healthy: </span>saved v4</span>')
+  expect(page).toContain('<span class="badge badge-healthy"><svg class="i" viewBox="0 0 16 16" aria-hidden="true" focusable="false">')
+  expect(page).toContain('<span class="sr">Healthy: </span>saved v4</span>')
   expect(page).toContain('<span class="sr">Failed: </span>BDI: couldn&#39;t run flow flow-1')
   expect(page).toContain('<h3>Outcomes by product</h3>')
   expect(page).toContain('data-pick="product:BDI"')
