@@ -15,7 +15,27 @@ const CHANGING: { script: RegExp; when?: RegExp; what: string }[] = [
   { script: /boomi-extensions\.sh/, when: /boomi-extensions\.sh['"]?\s+set\b/, what: "set the environment's extensions" },
   { script: /boomi-wss-test\.sh/, what: 'call a deployed web service (it runs the process)' },
   { script: /event-streams-setup\.sh/, when: /event-streams-setup\.sh['"]?\s+create[-\w]*/, what: 'create an Event Streams topic, subscription or token' },
+  { script: /event-streams-setup\.sh/, when: /event-streams-setup\.sh['"]?\s+provision-connection\b/, what: 'create an Event Streams connection component' },
+  { script: /event-streams-setup\.sh/, when: /event-streams-setup\.sh['"]?\s+rest-produce\b/, what: 'send a message to an Event Streams topic' },
 ]
+
+/**
+ * The other plugins' steps that change nothing in Boomi, though the dashboard
+ * shows them: checks and scaffolding on this machine, downloads, a pull into
+ * a working file, and a cancel (which stops a run, so a spent budget never
+ * holds it back). Read from the plugins' own scripts (bc-connectordev 0.0.50,
+ * bc-marketplace 0.2.10, bc-datahub 0.2.12, bc-bdi 0.2.5).
+ */
+const NOT_A_CHANGE = new Set([
+  'connectordev-descriptor-lint',
+  'connectordev-doctor',
+  'connectordev-init',
+  'connectordev-version validate',
+  'boomi-marketplace-supporting-materials',
+  'datahub-model pull',
+  'datahub-source pull',
+  'bdi-flow cancel',
+])
 
 const KIND_WORDS: Record<string, string> = {
   create: 'create a component in Boomi',
@@ -37,10 +57,11 @@ export const companionChanges = (command: string): string[] => {
   for (const run of scriptRuns(command)) {
     const what = run.file ?? run.processId ?? run.componentId ?? run.deploymentId ?? run.target
     if (run.kind in KIND_WORDS) out.push(`${KIND_WORDS[run.kind]}${what ? ` (${what})` : ''}`)
+    else if (run.kind === 'other' && run.product && (NOT_A_CHANGE.has(run.script ?? '') || NOT_A_CHANGE.has(`${run.script} ${run.verb}`))) continue
     else if (run.kind === 'other' && run.product) out.push(`${run.product} ${run.verb ?? 'change'}${run.target ? ` (${run.target})` : ''}`)
     else if (run.kind === 'other' && run.script) {
-      const changing = CHANGING.find(c => c.script.test(`boomi-${run.script}.sh`) || c.script.test(`${run.script}.sh`))
-      if (changing && (!changing.when || changing.when.test(command))) out.push(changing.what)
+      const changing = CHANGING.find(c => (c.script.test(`boomi-${run.script}.sh`) || c.script.test(`${run.script}.sh`)) && (!c.when || c.when.test(command)))
+      if (changing) out.push(changing.what)
     }
   }
   return out

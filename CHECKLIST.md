@@ -250,3 +250,5 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** both work. **Fail:** either is refused.
 - [ ] **N7. A subagent is held too.** With `block` on, ask Claude to have a subagent deploy a process.
   **Pass:** the subagent's deploy is refused the same way. **Fail:** it runs.
+- [ ] **N8. Cancelling isn't held back.** *(0.39.2)* With `block` on and a BDI flow running, ask Claude to cancel the run.
+  **Pass:** the cancel goes through. **Fail:** it's refused as a budget block.

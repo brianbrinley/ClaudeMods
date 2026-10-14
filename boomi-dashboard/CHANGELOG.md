@@ -2,6 +2,13 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.39.2
+
+- **Budget enforcement checked against every Companion plugin.** I went through every script and subcommand in the current releases of all six plugins (bc-integration 1.0.83, bc-marketplace 0.2.10, bc-datahub 0.2.12, bc-bdi 0.2.5, bc-agentstudio 0.1.42 and bc-connectordev 0.0.50): 185 in all.
+  - **Now stopped:** Event Streams' `provision-connection` (it creates a connection component) and `rest-produce` (it sends a message to a topic).
+  - **No longer stopped,** since they change nothing in Boomi: a connector's descriptor lint, doctor, init and `version validate`; a Marketplace bundle's supporting materials; Data Hub's `model pull` and `source pull` into a working file; and `bdi-flow cancel`, which only stops a run.
+  - A new test pins all 185 (whether each is a step, and whether a spent budget stops it), so a Companion release that changes them fails a test instead of slipping through.
+
 ## 0.39.1
 
 - **A quieter theme switch in the HTML report.** The bold **Light** and **Dark** buttons are replaced by one round icon button, as on the docs site. It shows a moon to switch to dark and a sun to switch back, and its label says which way it switches. Your choice is still kept. **Print or save as PDF** is lighter to match.
