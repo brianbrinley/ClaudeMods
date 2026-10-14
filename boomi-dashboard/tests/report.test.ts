@@ -305,3 +305,21 @@ test('a step that named a component but not its ID takes the one ID that name ha
   // Two components share the name: no guessing.
   expect(fixed[4]!.componentId).toBeUndefined()
 })
+
+test('the report in Exosphere by default, or in Valence (expressive): its fonts, its Day and Night tokens, status colors fixed', () => {
+  const facts = { session: 'c', sessionId: 'c', date: '2026-10-14', usage: USAGE, scope: 'session' as const }
+  const plain = reportHtml(scoped(DASHBOARD, 'session'), facts, NOW, 24 * HOUR)
+  expect(plain).toContain('<html lang="en">')
+  expect(plain).toContain('family=Poppins')
+  expect(plain).not.toContain('data-style')
+  const deco = reportHtml(scoped(DASHBOARD, 'session'), { ...facts, style: 'expressive' }, NOW, 24 * HOUR)
+  expect(deco).toContain('<html lang="en" data-style="expressive">')
+  expect(deco).toContain('family=Poiret+One&family=Josefin+Sans')
+  expect(deco).not.toContain('family=Poppins')
+  // Sand and Midnight Navy, from brand/tokens.json; Valence's fixed status colors.
+  expect(deco).toContain('--exo-color-page:#FBF6EE')
+  expect(deco).toContain('--exo-color-page:#161A2E')
+  expect(deco).toContain('--exo-color-background-success-strong:#0CA30C')
+  expect(deco).toContain('--exo-color-background-danger-strong:#D03B3B')
+  expect(deco).toContain('.opening h1{font:400 clamp(2rem,4.4vw,3.25rem)/1.1 "Poiret One"')
+})

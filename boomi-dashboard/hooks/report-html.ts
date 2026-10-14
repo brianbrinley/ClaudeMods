@@ -559,7 +559,12 @@ export type HtmlFacts = ReportFacts & {
   budgets?: BudgetLine[]
   /** The per-session spend budget (budgetUsd), to hold each session against in an all-sessions report. */
   sessionBudgetUsd?: number
+  /** Exosphere (the default, for Boomi people) or expressive: the repository's own Valence theme. */
+  style?: ReportStyle
 }
+
+/** How the report looks: Boomi's Exosphere, or Valence (Miami Deco), the repository's own theme. */
+export type ReportStyle = 'exosphere' | 'expressive'
 
 /** The session report as one HTML page, styles and scripts inside it. */
 export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, windowMs: number): string => {
@@ -790,15 +795,19 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   const atLeastNote = total.isAtLeast ? '<p class="note">“At least”: a session from before the dashboard recorded session IDs, that no transcript on this machine covers, is counted up to its last Companion step.</p>' : ''
 
   return `<!doctype html>
-<html lang="en">
+<html lang="en"${facts.style === 'expressive' ? ' data-style="expressive"' : ''}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="boomi-dashboard${facts.version ? ` ${esc(facts.version)}` : ''}">
 <title>${isAll ? 'Companion Sessions Report' : 'Companion Session Report'}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Noto+Sans:wght@400;600;700&family=Fira+Mono&display=swap">
-<style>${STYLE}</style>
+${
+  facts.style === 'expressive'
+    ? '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poiret+One&family=Josefin+Sans:wght@400;600;700&display=swap">'
+    : '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Noto+Sans:wght@400;600;700&family=Fira+Mono&display=swap">'
+}
+<style>${STYLE}${facts.style === 'expressive' ? VALENCE_STYLE : ''}</style>
 </head>
 <body${isAll ? ' data-days' : ''}>
 <header class="masthead">
@@ -871,6 +880,43 @@ ${spendFacts ? `<section id="usage"><h2>Usage</h2><ul class="plain">${spendFacts
  * Exosphere ramp steps validated for color vision and contrast, one slot per
  * product, and the status fills only for status.
  */
+/**
+ * Valence, Miami Deco: brand/tokens.json's Day and Night themes laid over the
+ * report's tokens, for reportStyle expressive. Poiret One for the title and
+ * wordmark only, Josefin Sans for headings and labels, the system's sans for
+ * text and data. Status keeps Valence's fixed status colors, with its icon and
+ * label as always. The signature accent, Flamingo, marks the sessions only.
+ * The navy band gives way to the page's own Sand (Midnight Navy at night),
+ * closed by a Deco Gold double rule.
+ */
+const valenceTokens = (t: { page: string; surface: string; text: string; muted: string; primary: string; secondary: string; line: string; inverse: string; cats: string[] }) =>
+  `--exo-color-page:${t.page};--exo-color-body:${t.page};--exo-color-background:${t.surface};--exo-color-background-secondary:${t.page};--exo-color-background-brand:${t.page};` +
+  `--exo-color-font:${t.text};--exo-color-font-secondary:${t.muted};--exo-color-font-inverse:${t.inverse};--exo-color-font-link:${t.secondary};` +
+  `--exo-color-border:${t.line};--exo-color-border-secondary:color-mix(in srgb,${t.line} 28%,transparent);--exo-color-background-selected:${t.primary};` +
+  `--exo-color-background-success:color-mix(in srgb,#0CA30C 16%,transparent);--exo-color-background-success-strong:#0CA30C;` +
+  `--exo-color-background-warning:color-mix(in srgb,#FAB219 18%,transparent);--exo-color-background-warning-strong:#FAB219;` +
+  `--exo-color-background-danger-weak:color-mix(in srgb,#D03B3B 14%,transparent);--exo-color-background-danger-strong:#D03B3B;--exo-color-background-highlight:#EC835A;` +
+  t.cats.map((c, i) => `--cat-${i + 1}:${c};`).join('') +
+  `--seq:${t.secondary};--band-bg:${t.page};--valence-primary:${t.primary};--valence-line:${t.line}`
+const DAY = valenceTokens({ page: '#FBF6EE', surface: '#FFFFFF', text: '#0B0B0B', muted: '#52514E', primary: '#C2185B', secondary: '#0F766E', line: '#9A7B3F', inverse: '#FFFFFF', cats: ['#C2185B', '#0F766E', '#9A7B3F', '#F7A8C4', '#9FDED6', '#52514E'] })
+const NIGHT = valenceTokens({ page: '#161A2E', surface: '#1F2440', text: '#FFFFFF', muted: '#C9CBE0', primary: '#F48FB1', secondary: '#5EEAD4', line: '#D4B46A', inverse: '#161A2E', cats: ['#F48FB1', '#5EEAD4', '#D4B46A', '#FBE7A1', '#C9CBE0', '#99F6E4'] })
+const X = 'html[data-style=expressive]'
+const VALENCE_STYLE = `
+${X},${X} .band,${X}.ex-theme-light,${X}.ex-theme-light .band{${DAY};color-scheme:light}
+${X}.ex-theme-dark,${X}.ex-theme-dark .band{${NIGHT};color-scheme:dark}
+@media (prefers-color-scheme:dark){${X}:not(.ex-theme-light),${X}:not(.ex-theme-light) .band{${NIGHT};color-scheme:dark}}
+${X}{--exo-font-family:system-ui,-apple-system,"Segoe UI",sans-serif;--exo-font-brand:"Josefin Sans",system-ui,sans-serif;--exo-font-monospace:ui-monospace,"SF Mono",Menlo,monospace}
+${X} .band{color:var(--exo-color-font);border-bottom:3px double var(--valence-line)}
+${X} .masthead{color:var(--exo-color-font);border-bottom:1px solid var(--exo-color-border-secondary)}
+${X} .wordmark{font:400 1.25rem/1 "Poiret One",system-ui,sans-serif;color:var(--valence-primary);letter-spacing:.04em}
+${X} .opening h1{font:400 clamp(2rem,4.4vw,3.25rem)/1.1 "Poiret One",system-ui,sans-serif;letter-spacing:.02em}
+${X} h2,${X} h3,${X} thead th,${X} .label,${X} .budgets h2{font-family:"Josefin Sans",system-ui,sans-serif}
+${X} main>section>h2,${X} .ledger-title{font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:1rem}
+${X} .theme button{color:var(--exo-color-font);border-color:var(--exo-color-border)}${X} .theme button[aria-pressed="true"]{background:var(--exo-color-font);border-color:var(--exo-color-font);color:var(--exo-color-page)}
+${X} .ledger{border:3px double var(--valence-line)}
+${X} .l-when strong{color:var(--valence-primary)}
+`
+
 const STYLE = `
 :root,.ex-theme-light{--exo-color-page:#ffffff;--exo-color-body:#f5f5f5;--exo-color-background:#ffffff;--exo-color-background-secondary:#f5f5f5;--exo-color-background-brand:#072b55;--exo-color-font:#1f1f1f;--exo-color-font-secondary:#707070;--exo-color-font-inverse:#ffffff;--exo-color-font-link:#006cd6;--exo-color-border:#cccccc;--exo-color-border-secondary:#e5e5e5;--exo-color-background-selected:#006cd6;
 --exo-color-background-success:#cff3e8;--exo-color-background-success-strong:#009058;--exo-color-background-warning:#fcedbd;--exo-color-background-warning-strong:#cf761b;--exo-color-background-danger-weak:#ffedf0;--exo-color-background-danger-strong:#c71739;--exo-color-background-highlight:#ff7c66;--exo-color-shadow-moderate:rgba(0,0,0,.08);

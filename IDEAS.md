@@ -9,6 +9,7 @@ Ideas for mods we could build next, starting with Boomi and integration work. Th
 - Dashboard follow-ups: **Run again** for a failed test, a spend budget (`budgetUsd`), and the next step (deploy, then test) suggested in the prompt box.
 - Guardrails at a glance: the dashboard's **Guardrails** section shows the runtime's state, and what boomi-standards blocked once that mod is back.
 - Companion's activity log as a second source, and a new-session banner with the last session's recap and tips.
+- A report style switch: `reportStyle` (`exosphere` or `expressive`) for the dashboard's HTML report.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
 
@@ -181,7 +182,6 @@ Smaller additions to the [boomi-dashboard](boomi-dashboard/README.md) mod that b
 
 - **Process runs in Boomi, again:** up to 0.10.0 the dashboard polled the runs on the runtimes attached to `BOOMI_ENVIRONMENT_ID` and showed this session's components' runs (tests, listener calls, schedules), toasting new failures. It was set aside in 0.11.0 to come back to later. The plain functions (`recentRuns`, `sessionRuns`, `runsOf`, `newFailures`) and the Platform API client's `environmentAtoms` and `recentRuns` are still in the mod with their tests; what's needed is the polling, the pane section and the text and report sections again.
 - **Promotion diff and mock endpoints** would each show up as a section in the pane once they exist.
-- **A report style switch:** a `reportStyle` setting (`exosphere` or `expressive`) for `/bc-dashboard report html`. `exosphere` stays the default for anything sent to Boomi people. `expressive` would stretch past Exosphere with a display face for the title and headline numbers and one signature accent, used for the timeline only. Compare both on real data before deciding whether CLAUDE.md's Exosphere rule for Boomi-facing output should change.
 
 ## Add an idea or claim one
 

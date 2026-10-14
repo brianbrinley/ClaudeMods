@@ -291,10 +291,12 @@ Boomi Companion sessions on this machine, last 90 days:
 
 It follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system: its Exo III color tokens, light and dark (Light and Dark buttons at the top, or your system's setting), Poppins headings and Noto Sans text, its cards, badges and alerts. Every status shows its icon and its label, never color alone.
 
+**Another style:** set `reportStyle` to `expressive` (in `/config` or `/bc-dashboard config data`), or add `--style expressive` to one report. That report uses this repository's own Valence theme, Miami Deco: Sand by day and Midnight Navy by night, Poiret One for the title, Josefin Sans headings, Deco Gold rules, and Flamingo marking the sessions. Status keeps Valence's fixed colors, with its icon and label. Keep `exosphere`, the default, for anything Boomi people will read.
+
 - **Charts** appear only when they add something: outcomes and spend by product when the work spans two products or more, cost over the session in a one-session report, and in an all-sessions report with two sessions or more, each session's cost and how its steps went (click a session to open its steps). Each has hover details and a **Show the data** table, and products keep the same color in every chart.
 - **Tables** of custom connectors and Agentstudio agents, sorted by clicking a column.
 
-With a connection it loads Exosphere's fonts from Google Fonts; offline it falls back to your system's fonts.
+With a connection it loads its fonts from Google Fonts; offline it falls back to your system's fonts.
 
 ## Commands and tools
 
@@ -348,6 +350,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `updateCheck` | `true` | At the start of a session, say when a newer dashboard is on GitHub (never installs). |
 | `updateCheckHours` | `24` | Hours between update checks; `0` turns them off. |
 | `reportOpen` | `true` | Open `/bc-dashboard report html`'s page in your browser once it's saved. |
+| `reportStyle` | `exosphere` | How the HTML report looks: `exosphere` (Boomi's design system) or `expressive` (Valence, Miami Deco). `--style` picks one for a single report. |
 | `suggestions` | `true` | Suggest the next step after a turn. |
 | `historyDays` | `90` | How far back **Past Companion sessions** reads. |
 
