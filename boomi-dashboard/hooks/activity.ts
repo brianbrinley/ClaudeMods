@@ -459,14 +459,22 @@ export const unclaimedReading = (isError: boolean): Reading =>
 
 /**
  * Steps recorded by older versions, made readable: "a component" gets the name
- * its component ID has in another step, and a test that took another script's
- * SUCCESS line (before 0.26.0) says it had no result of its own.
+ * its component ID has in another step, a step that named a component but not
+ * its ID takes the one ID that name has elsewhere, and a test that took
+ * another script's SUCCESS line (before 0.26.0) says it had no result of its own.
  */
 export const repaired = (activity: readonly Activity[]): Activity[] => {
   const names = new Map<string, string>()
-  for (const a of activity) if (a.componentId && a.subject !== 'a component' && !/\.xml$/.test(a.subject)) names.set(a.componentId, a.subject)
+  const ids = new Map<string, Set<string>>()
+  for (const a of activity) {
+    if (!a.componentId || a.subject === 'a component' || /\.xml$/.test(a.subject)) continue
+    names.set(a.componentId, a.subject)
+    ids.set(a.subject, (ids.get(a.subject) ?? new Set()).add(a.componentId))
+  }
   return activity.map(a => {
     let b = a
+    const only = ids.get(b.subject)
+    if (b.kind !== 'other' && !b.componentId && !b.file && only?.size === 1) b = { ...b, componentId: [...only][0] }
     if (b.subject === 'a component' && b.componentId && names.has(b.componentId)) b = { ...b, subject: names.get(b.componentId)! }
     if (b.kind === 'test' && !b.executionStatus && /^SUCCESS:/.test(b.detail)) b = { ...b, detail: 'no result of its own (it ran in a command with other scripts)' }
     return b

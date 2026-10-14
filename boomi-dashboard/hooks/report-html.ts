@@ -55,6 +55,20 @@ const ICON_PATHS: Record<Level, string> = {
 }
 export const icon = (level: Level) => `<svg class="i" viewBox="0 0 16 16" aria-hidden="true" focusable="false">${ICON_PATHS[level]}</svg>`
 
+/** A drawn "i" in a circle: information, not a status, so it takes no status color. */
+const INFO_ICON = '<svg class="i" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.25"/><path d="M8 7.2v4M8 4.9v.05"/></svg>'
+
+/**
+ * What the report shows where something is missing, always with the reason
+ * (on hover, and read out by a screen reader):
+ * - `notDone`: it didn't happen, nothing to fix: "—".
+ * - `unavailable`: it happened, or should be there, but we couldn't find it out.
+ * - `notSet`: it needs setting up, and the reason says how.
+ */
+export const notDone = (why: string) => `<span class="nd" title="${esc(why)}">—<span class="sr"> ${esc(why)}</span></span>`
+export const unavailable = (what: string, why: string) => `<span class="na" title="${esc(why)}">${INFO_ICON}${esc(what)}<span class="sr">: ${esc(why)}</span></span>`
+export const notSet = (what: string, how: string) => `<span class="na na-set" title="${esc(how)}">${INFO_ICON}${esc(what)}</span> <span class="na-how">${how}</span>`
+
 /** A status: icon and label together, never color alone. */
 const status = (level: Level, text: string) =>
   `<span class="status status-${level}">${icon(level)}<span class="sr">${LABEL[level]}: </span>${esc(text)}</span>`
@@ -421,7 +435,8 @@ export const workSentence = (list: readonly Activity[]): string => {
       const notes = [t.failed.get(v) ? `${t.failed.get(v)} failed` : '', t.blocked.get(v) ? `${t.blocked.get(v)} blocked` : ''].filter(Boolean).join(', ')
       return notes ? `${v} (${notes})` : v
     })
-    return `<strong>${esc(thing)}</strong>: ${esc(verbs.join(', '))}`
+    const name = thing === 'another component' ? `<strong>another component</strong> ${unavailable('name not available', "Companion's output didn't name it.")}` : `<strong>${esc(thing)}</strong>`
+    return `${name}: ${esc(verbs.join(', '))}`
   })
   const choreText = chores > 0 ? `${parts.length > 0 ? 'and ' : ''}${chores} housekeeping step${chores === 1 ? '' : 's'}` : ''
   return [...parts, ...troubles.map(t => esc(t)), choreText].filter(Boolean).join(' · ') || 'Nothing recorded'
@@ -453,7 +468,7 @@ export const sessionLedger = (steps: readonly Activity[], sessionOf: (a: Activit
         `<span class="l-when"><strong>${esc(date(r.first))}</strong><span>${esc(`${clock(r.first)}–${clock(r.last)} UTC${span >= 60_000 ? ` · ${duration(span)}` : ''}`)}</span><span class="l-id">${esc(label(r.id) + after)}</span></span>` +
         `<span class="l-what">${workSentence(r.list)}</span>` +
         `<span class="l-how">${how}<span class="l-steps">${esc(`${r.list.length} step${r.list.length === 1 ? '' : 's'}`)}</span></span>` +
-        `<span class="l-cost">${costs.get(r.id) ?? '<span class="muted">not recorded</span>'}</span></a></li>`,
+        `<span class="l-cost">${costs.get(r.id) ?? unavailable('Cost not available', isUnnamed(r.id) ? 'No transcript on this machine covers this session, and its steps carry no cost.' : "Claude Code's transcript for this session doesn't record a cost.")}</span></a></li>`,
     )
   })
   return `<div class="ledger-wrap"><h2 class="ledger-title">${rows.length === 1 ? 'The session' : 'The sessions'}</h2><ol class="ledger">${parts.join('')}</ol></div>`
@@ -547,8 +562,8 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
 
   // Components as swimlanes: saved, deployed, tested, each in its own column, in the dashboard's own words.
   const laneRank: Record<Level, number> = { critical: 0, serious: 1, warning: 2, healthy: 3 }
-  const lane = (list: readonly Stage[], step: Activity | undefined, sub: string | undefined) => {
-    if (list.length === 0) return '<td class="lane" data-sort="-1"><span class="muted">—</span></td>'
+  const lane = (list: readonly Stage[], step: Activity | undefined, sub: string | undefined, none: string) => {
+    if (list.length === 0) return `<td class="lane" data-sort="-1">${notDone(none)}</td>`
     const worst = list.reduce((w, s) => (laneRank[s.level] < laneRank[w.level] ? s : w), list[0]!)
     const when = step && step.outcome !== 'running' ? shortClock(step.endedAt ?? step.startedAt) : undefined
     return `<td class="lane" data-sort="${laneRank[worst.level]}">${list.map(s => status(s.level, s.text)).join('<br>')}${[when, sub].filter(Boolean).length ? `<div class="sub">${[when && esc(when), sub].filter(Boolean).join(' · ')}</div>` : ''}</td>`
@@ -566,25 +581,37 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     const testList = list.filter(isTestStage)
     const saveList = list.filter(s => !isDeployStage(s) && !isTestStage(s))
     const type = friendlyType(d?.type ?? row.type) ?? d?.type ?? row.type
-    const about = [type, d?.folderName].filter(Boolean).map(t => esc(t!)).join(' · ')
+    // Boomi's view: what it has, or why it isn't here.
+    const boomiMissing = !row.componentId || d
+      ? ''
+      : !boomi?.accountId
+        ? ''
+        : boomi.note
+          ? unavailable('Boomi details not available', boomi.note)
+          : unavailable('not found in Boomi', 'Boomi has no current version of this component: it may have been deleted, or it belongs to another account.')
+    const about = [type ? esc(type) : unavailable('type not available', "Neither the component's XML nor Boomi said what type it is."), d?.folderName && esc(d.folderName)].filter(Boolean).join(' · ')
     const renamed = d?.name && d.name !== row.name ? `<div class="sub">In Boomi now: ${esc(d.name)}</div>` : ''
     const link = row.componentId && boomi?.accountId ? ` <a href="${esc(boomiLink(boomi.accountId, row.componentId))}" target="_blank" rel="noopener">Open in Boomi</a>` : ''
-    const id = row.componentId ? `<div class="sub">${idCode(row.componentId)}${link}</div>` : '<div class="sub">not created in Boomi</div>'
+    const id = row.componentId ? `<div class="sub">${idCode(row.componentId)}${link}</div>${boomiMissing ? `<div class="sub">${boomiMissing}</div>` : ''}` : `<div class="sub">${notDone('Not created in Boomi in these sessions')} not created in Boomi</div>`
     const inBoomi = d?.version ? `in Boomi v${esc(d.version)}${d.modifiedBy ? ` by ${esc(d.modifiedBy)}` : ''}` : undefined
     const pkg = row.deployed ? packageOf(row.deployed.detail) : undefined
     const exec = row.tested?.executionId
-    return `<tr><th scope="row" data-sort="${esc(row.name)}">${esc(row.name)}${about ? `<div class="sub">${about}</div>` : ''}${renamed}${row.recipe ? `<div class="sub">from recipe ${esc(row.recipe)}</div>` : ''}${id}</th>${lane(saveList, row.saved ?? row.edited, inBoomi)}${lane(deployList, row.deployed, pkg ? `package ${idCode(pkg)}` : undefined)}${lane(testList, row.tested, exec ? idCode(exec) : undefined)}${num(spent.usd, formatCost(spent.usd))}</tr>`
+    const pkgText = pkg ? `package ${idCode(pkg)}` : row.deployed?.kind === 'deploy' && row.deployed.outcome === 'ok' ? unavailable('package ID not available', "The deploy's output didn't name its package.") : undefined
+    const execText = exec ? idCode(exec) : row.tested && row.tested.outcome !== 'blocked' && row.tested.executionStatus === undefined ? unavailable('execution ID not available', 'The test was submitted without waiting, so its execution ID never came back.') : undefined
+    return `<tr><th scope="row" data-sort="${esc(row.name)}">${esc(row.name)}${about ? `<div class="sub">${about}</div>` : ''}${renamed}${row.recipe ? `<div class="sub">from recipe ${esc(row.recipe)}</div>` : ''}${id}</th>${lane(saveList, row.saved ?? row.edited, inBoomi, 'Not saved in these sessions')}${lane(deployList, row.deployed, pkgText, 'Not deployed in these sessions')}${lane(testList, row.tested, execText, 'Not tested in these sessions')}${num(spent.usd, formatCost(spent.usd))}</tr>`
   })
   const pipelineLine = rows.length > 0 ? `${savedOk} saved · ${deployedOk} deployed · ${passing} passing` : ''
 
   const account = boomi && (boomi.accountId || boomi.environmentId)
     ? `<p class="account-line" id="account"><span class="label">Boomi account</span> ${[
-        boomi.accountName && `<strong>${esc(boomi.accountName)}</strong>`,
+        boomi.accountName ? `<strong>${esc(boomi.accountName)}</strong>` : unavailable('name not available', boomi.note ?? "Boomi didn't return the account's name: the API user may lack Account read access."),
         boomi.accountId && idCode(boomi.accountId),
-        boomi.environmentId && `environment ${idCode(boomi.environmentId)}`,
+        boomi.environmentId ? `environment ${idCode(boomi.environmentId)}` : notSet('no environment', 'Add <code>BOOMI_ENVIRONMENT_ID</code> to Companion&#39;s <code>.env</code> to show it.'),
         boomi.apiHost && esc(boomi.apiHost),
-      ].filter(Boolean).join(' · ')}${boomi.note ? ` <span class="muted">${esc(boomi.note)}</span>` : ''}</p>`
-    : ''
+      ].filter(Boolean).join(' · ')}${boomi.note && boomi.accountName ? ` ${unavailable('some details not available', boomi.note)}` : ''}</p>`
+    : boomi
+      ? `<p class="account-line" id="account"><span class="label">Boomi account</span> ${notSet('Not set up', `Add the Platform API credentials to Companion&#39;s <code>.env</code> (or the environment) to show the account and each component as Boomi has it.${boomi.note ? ` ${esc(boomi.note)}` : ''}`)}</p>`
+      : ''
   const connectorRows = connectors(dashboard.activity).map(row => {
     const spent = spendOf(row.ids, all)
     return `<tr><th scope="row">${esc(row.name)}</th><td>${esc(row.group ?? '')}</td><td>${badges(connectorStages(row))}</td>${num(spent.tokens, spent.tokens ? formatTokens(spent.tokens) : '')}${num(spent.usd, formatCost(spent.usd))}</tr>`
@@ -622,7 +649,8 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     // A failure says what went wrong without being opened.
     const why = level === 'critical' || level === 'serious' ? `<div class="why">${esc(a.detail)}${a.executionId ? ` · execution ${idCode(a.executionId)}` : ''}</div>` : ''
     const isChore = !isWork(a)
-    return `<li id="step-${a.id}"${isChore ? ' class="chore"' : ''} data-level="${level}" data-product="${esc(product)}"${isRelease(a) ? ' data-kind="release"' : ''} data-at="${a.startedAt}"><details><summary><time datetime="${new Date(a.startedAt).toISOString()}">${esc(at)}</time> ${status(level, describe(a))} <span class="tag tag-${slot(productKey(a))}">${esc(product)}</span>${aside ? ` <span class="aside">${esc(aside)}</span>` : ''}${why}</summary><dl>${detail}</dl></details></li>`
+    const unnamed = a.subject === 'a component' ? ` ${unavailable('name not available', "Companion's output didn't name this component, and no other step gives its ID.")}` : ''
+    return `<li id="step-${a.id}"${isChore ? ' class="chore"' : ''} data-level="${level}" data-product="${esc(product)}"${isRelease(a) ? ' data-kind="release"' : ''} data-at="${a.startedAt}"><details><summary><time datetime="${new Date(a.startedAt).toISOString()}">${esc(at)}</time> ${status(level, describe(a))}${unnamed} <span class="tag tag-${slot(productKey(a))}">${esc(product)}</span>${aside ? ` <span class="aside">${esc(aside)}</span>` : ''}${why}</summary><dl>${detail}</dl></details></li>`
   }
   // The steps by session, newest first (the page's Oldest first turns both around); one report's session needs no heading.
   const groups = new Map<string, Activity[]>()
@@ -662,7 +690,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   const budgetBlock = `<aside class="budgets" id="budget" aria-label="Budgets"><h2>Budget</h2>${
     budgetRows.length > 0
       ? `<ul class="plain">${budgetRows.join('')}</ul>`
-      : '<p class="note">No budget set. Set <code>budgetUsd</code> for each session, or <code>companionMonthlyUsd</code> for the month, under <code>/config</code> to see spending against it.</p>'
+      : `<p class="note">${notSet('No budget set', 'Set <code>budgetUsd</code> for each session, or <code>companionMonthlyUsd</code> for the month, under <code>/config</code> to see spending against it.')}</p>`
   }${perSession.length > 0 ? `<p class="note">${over.length === 0 ? status('healthy', `Every session stayed under the ${formatCost(facts.sessionBudgetUsd!)} session budget`) : status('critical', `${over.length} of ${perSession.length} sessions reached the ${formatCost(facts.sessionBudgetUsd!)} session budget`)}.</p>` : ''}</aside>`
   if (over.length > 0) lede.splice(lede.length - 1, 0, `${plural(over.length, 'session')} reached the ${strong(formatCost(facts.sessionBudgetUsd!) ?? '$0')} session budget.`)
 
@@ -876,7 +904,7 @@ footer .maker{width:.75rem;height:1rem;vertical-align:-.2rem;margin-right:.5rem;
 .meter-bar{height:.5rem;border-radius:.25rem;background:var(--exo-color-background);margin:.35rem 0 .25rem;overflow:hidden;box-shadow:inset 0 0 0 1px var(--exo-color-border-secondary)}
 .meter-bar span{display:block;height:100%;border-radius:.25rem;background:var(--exo-color-background-success-strong)}
 .meter-warning .meter-bar span{background:var(--exo-color-background-warning-strong)}.meter-critical .meter-bar span{background:var(--exo-color-background-danger-strong)}
-.note{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.35rem 0}
+.note{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.35rem 0}.note .na-how{display:block;margin-top:.2rem}
 .account-line{font-size:.875rem;margin:1.25rem 0 0;color:var(--exo-color-font-secondary)}.account-line strong{color:var(--exo-color-font);font-weight:600}.account-line .label{font-weight:600;margin-right:.35rem}
 table.lanes td.lane{min-width:11rem}table.lanes tbody th{min-width:16rem}table.lanes td.lane .status{display:inline-block;margin:.05rem 0}
 code.copy{cursor:copy}td a,th a,.sub a{white-space:nowrap}code.copy.copied{outline:1px solid var(--exo-color-background-success-strong);outline-offset:1px;border-radius:2px}
@@ -894,6 +922,8 @@ svg.maker{display:inline-block}
 .l-how{display:flex;flex-wrap:wrap;gap:.15rem .75rem;font-size:.875rem;font-variant-numeric:tabular-nums}.l-steps{flex-basis:100%;font-size:.75rem;color:var(--exo-color-font-secondary)}
 .l-cost{text-align:right;font-size:.938rem;font-variant-numeric:tabular-nums}.l-budget{font-size:.75rem;color:var(--exo-color-font-secondary)}
 @media (max-width:900px){.ledger-link{grid-template-columns:minmax(0,1fr) auto}.l-what{grid-column:1/-1}.l-how{grid-column:1}.l-cost{grid-row:1;grid-column:2}}
+.na{color:var(--exo-color-font-secondary);font-size:.813rem;font-weight:400;white-space:nowrap;cursor:help;border-bottom:1px dotted var(--exo-color-border)}.na .i{color:var(--exo-color-font-secondary);margin-right:.25em}.na-set{cursor:default}.na-how{font-size:.813rem;color:var(--exo-color-font-secondary)}
+.nd{color:var(--exo-color-font-secondary);cursor:help}
 ol.steps{list-style:none;padding:0;margin:0}
 .step-group+.step-group{margin-top:1rem}details.step-group>summary.group-head{cursor:pointer;list-style-position:outside}details.step-group:not([open])>summary.group-head{border-bottom-color:var(--exo-color-border-secondary)}li.chore summary{color:var(--exo-color-font-secondary)}.group-head{font:600 .95rem/1.4 var(--exo-font-family);margin:0 0 .25rem;padding-bottom:.4rem;border-bottom:1px solid var(--exo-color-border)}.group-head .aside{font-weight:400;font-size:.813rem;margin-left:.35em}
 .order{margin-left:auto}
