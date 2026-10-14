@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.38.0",
+  "version": "0.39.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -102,6 +102,23 @@
       "type": "number",
       "title": "Companion's monthly amount (USD)",
       "description": "A monthly amount for Boomi Companion sessions, counted as Claude Code's own cost figures (on a seat, what the same use would cost on the API); warns at 80% and when it's reached; 0 turns it off",
+      "default": 0
+    },
+    "budgetEnforce": {
+      "type": "string",
+      "title": "When a budget is spent",
+      "description": "What happens once any budget you set (budgetUsd, companionShare, companionMonthlyUsd) reaches 100% plus budgetGrace: warn (only warn, as before), confirm (ask you before each Companion change: create, push, deploy, undeploy, test, and the other plugins' changes) or block (refuse those changes). Reads are never stopped",
+      "options": [
+        "warn",
+        "confirm",
+        "block"
+      ],
+      "default": "warn"
+    },
+    "budgetGrace": {
+      "type": "number",
+      "title": "Budget grace (%)",
+      "description": "How far past a budget, in percent, before confirm or block starts: 10 means at 110%. 0 starts at 100%. A change already running always finishes",
       "default": 0
     },
     "suggestions": {

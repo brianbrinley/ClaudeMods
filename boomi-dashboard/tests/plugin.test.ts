@@ -2053,13 +2053,14 @@ test('/bc-dashboard config walks the budget with figures from past sessions, and
     'Keep off',
     '30%',
     'Month',
+    'Keep warn',
     'Done',
   ])
   const answer = await $.command.run(dashboard('config'))
-  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget 1/4', 'Budget 2/4', 'Budget 3/4', 'Budget 4/4', 'Settings'])
+  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget 1/6', 'Budget 2/6', 'Budget 3/6', 'Budget 4/6', 'Budget 5/6', 'Settings'])
   expect(asked[1]!.options.map(o => o.label)).toEqual(['Keep off', '$2.50 (twice a typical session)', '$3.50 (your costliest session)', 'Back to the menu'])
   expect(asked[1]!.question).toContain('cost $1.25 typically, $3.50 at most')
-  expect(asked[5]!.question).toContain('3 changes so far, saved when you pick Done.')
+  expect(asked[6]!.question).toContain('3 changes so far, saved when you pick Done.')
   expect(sets).toEqual([
     ['boomi-dashboard.budgetUsd', 2.5],
     ['boomi-dashboard.companionShare', 30],
@@ -2075,7 +2076,7 @@ test('/bc-dashboard config skips the share period with no share, goes back to th
   const answer = await $.command.run(dashboard('config budget'))
   expect(asked[0]!.options.map(o => o.label)).toEqual(['Keep $5.00', '$2.50 (twice a typical session)', 'Off', 'Back to the menu'])
   expect(asked[1]!.question).toMatch(/^"lots" didn't work: Session budget takes a number \(0 for off\)\. Session budget:/)
-  expect(asked[2]!.header).toBe('Budget 2/4')
+  expect(asked[2]!.header).toBe('Budget 2/6')
   expect(sets).toEqual([['boomi-dashboard.budgetUsd', 7]])
   expect(answer.text).toBe('Saved to /config:\n  Session budget: $5.00 → $7.00')
 })
@@ -2296,4 +2297,117 @@ test('/bc-dashboard components copies every component with its IDs, for a spread
   expect(csv).toContain(`Saved them as ${path}.`)
   expect(written[path]!.startsWith('﻿Component,Type,Folder,Component ID')).toBe(true)
   expect(copies[1]).toContain('\r\nOrders Sync,process,,')
+})
+
+// --- Budget enforcement -------------------------------------------------------------
+
+/** A session whose $1.25 is past a $1 session budget; Bash records what really ran. */
+const spentWorld = (on: On, answers: (string | undefined)[] = [], files: Record<string, string> = {}) => {
+  const toasts = world(on, { [FILE]: ORDERS, ...files })
+  mock.store(on)
+  const ran: string[] = []
+  on('tool.call', { tool: 'Bash' }, async (_$, e) => {
+    ran.push(String(e.command))
+    return { result: { stdout: "SUCCESS: Deployed 'Orders Sync' (package: p-1)", stderr: '', interrupted: false } }
+  })
+  const asked: Question[] = []
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    const q = e.questions[0] as unknown as Question
+    asked.push(q)
+    const picked = answers.shift()
+    return picked === undefined ? { deny: 'dismissed' } : { result: { questions: [q], answers: { [q.question]: picked } } as never }
+  })
+  return { ran, asked, toasts }
+}
+
+const DEPLOY = `bash scripts/boomi-deploy.sh ${FILE}`
+const API = 'https://api.boomi.com/api/rest/v1/acct-1'
+
+test('warn, the default: a spent budget stops nothing', { options: { budgetUsd: 1 } }, async ($, on) => {
+  const { ran, asked } = spentWorld(on)
+  const done = await $.tool.call({ tool: 'Bash', command: DEPLOY })
+  expect(done.deny).toBeUndefined()
+  expect(ran).toEqual([DEPLOY])
+  expect(asked).toEqual([])
+  expect((await $.command.run(dashboard('text'))).text).toContain('Deployed Orders Sync')
+})
+
+test('block: a Companion change is refused with what is spent, recorded as blocked by budget; reads still run', { options: { budgetUsd: 1, budgetEnforce: 'block' } }, async ($, on) => {
+  const { ran, asked, toasts } = spentWorld(on)
+  const refused = await $.tool.call({ tool: 'Bash', command: DEPLOY })
+  expect(refused.deny).toMatch(/^boomi-dashboard: refused: Boomi Companion's budget is spent: the session budget \(\$1\.25 of \$1\.00, 125%\)\./)
+  expect(refused.deny).toContain('Do not work around this')
+  expect(ran).toEqual([])
+  expect(asked).toEqual([])
+  const text = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(text).toContain('Blocked by budget: deploy of Orders Sync')
+  expect(text).toContain('blocked by budget: the session budget ($1.25 of $1.00, 125%)')
+  // The banner says changes are paused, and one toast said so as it started.
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await band.find({ text: /⛔ budget reached, Companion changes paused/ })).toBeDefined()
+  expect(toasts.filter(t => t.startsWith('⛔ Budget reached'))).toHaveLength(1)
+  // Reads, and the Platform API's queries, run.
+  for (const read of [`bash scripts/boomi-execution-query.sh --execution-id e-1 --logs`, `curl -s -X POST ${API}/ComponentMetadata/query -d @q.json`, 'ls active-development']) {
+    expect((await $.tool.call({ tool: 'Bash', command: read })).deny).toBeUndefined()
+  }
+  expect(ran).toHaveLength(3)
+  // A change straight to the Platform API is refused too.
+  const direct = await $.tool.call({ tool: 'Bash', command: `curl -s -X POST ${API}/ExecutionRequest -d @run.json` })
+  expect(direct.deny).toContain('Not run: POST /api/rest/v1/acct-1/ExecutionRequest.')
+  expect(ran).toHaveLength(3)
+})
+
+test('block: a local script that wraps a Companion change is read and refused', { options: { budgetUsd: 1, budgetEnforce: 'block' } }, async ($, on) => {
+  const { ran } = spentWorld(on, [], { 'run-all.sh': `#!/bin/bash\n${DEPLOY}\n` })
+  const refused = await $.tool.call({ tool: 'Bash', command: 'bash run-all.sh' })
+  expect(refused.deny).toContain(`Not run: deploy (${FILE}), inside run-all.sh.`)
+  expect(ran).toEqual([])
+})
+
+test('the grace: a budget 25% over with a 30% grace stops nothing yet', { options: { budgetUsd: 1, budgetEnforce: 'block', budgetGrace: 30 } }, async ($, on) => {
+  const { ran } = spentWorld(on)
+  expect((await $.tool.call({ tool: 'Bash', command: DEPLOY })).deny).toBeUndefined()
+  expect(ran).toEqual([DEPLOY])
+  expect((await $.command.run(dashboard('text'))).text).toContain('Deployed Orders Sync')
+})
+
+test('confirm: asks before each change; allowing one runs it and keeps an override for the reports', { options: { budgetUsd: 1, budgetEnforce: 'confirm' } }, async ($, on) => {
+  const { ran, asked } = spentWorld(on, ['Allow this one', 'Stop', undefined])
+  expect((await $.tool.call({ tool: 'Bash', command: DEPLOY })).deny).toBeUndefined()
+  expect(asked[0]!.question).toBe(`Boomi Companion's budget is spent: the session budget ($1.25 of $1.00, 125%). Claude wants to deploy (${FILE}). Let it?`)
+  expect(asked[0]!.options.map(o => o.label)).toEqual(['Allow this one', 'Allow for the rest of this session', 'Raise the budget', 'Stop'])
+  expect(ran).toEqual([DEPLOY])
+  // Stop, and a dismissed question, refuse.
+  expect((await $.tool.call({ tool: 'Bash', command: DEPLOY })).deny).toMatch(/^boomi-dashboard: the user chose to stop this:/)
+  expect((await $.tool.call({ tool: 'Bash', command: DEPLOY })).deny).toMatch(/^boomi-dashboard: refused:/)
+  expect(ran).toEqual([DEPLOY])
+  // The override is in the Markdown report.
+  const report = (await $.command.run(dashboard('report'))).text ?? ''
+  expect(report).toContain('## Budget overrides')
+  expect(report).toMatch(/UTC: allowed once: deploy \(active-development\/processes\/Orders\.xml\), with the session budget \(\$1\.25 of \$1\.00, 125%\) spent/)
+})
+
+test('confirm: allowing the rest of the session stops asking, and the banner no longer says paused', { options: { budgetUsd: 1, budgetEnforce: 'confirm' } }, async ($, on) => {
+  const { ran, asked } = spentWorld(on, ['Allow for the rest of this session'])
+  await $.tool.call({ tool: 'Bash', command: DEPLOY })
+  await $.tool.call({ tool: 'Bash', command: DEPLOY })
+  expect(asked).toHaveLength(1)
+  expect(ran).toEqual([DEPLOY, DEPLOY])
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await band.find({ text: /Companion changes paused/ })).toBeUndefined()
+})
+
+test("Claude hears of a spent budget with the person's prompt, once, and again when it changes", { options: { budgetUsd: 1, budgetEnforce: 'block' } }, async ($, on) => {
+  world(on)
+  mock.store(on)
+  const contexts: (readonly string[] | undefined)[] = []
+  on('prompt.submit', async (_$, e) => {
+    contexts.push(e.context)
+    return { text: e.text }
+  })
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: { kind: 'composer' } } as never)
+  await $.prompt.submit({ text: 'and test it', wait: false, origin: { kind: 'composer' } } as never)
+  expect(contexts[0]?.join('\n')).toContain("boomi-dashboard: Boomi Companion's budget is spent (the session budget ($1.25 of $1.00, 125%)). Companion changes")
+  expect(contexts[1] ?? []).toEqual([])
+  expect((await $.command.run(dashboard('text'))).text).toBeDefined()
 })

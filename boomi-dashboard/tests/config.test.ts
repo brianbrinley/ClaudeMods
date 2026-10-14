@@ -9,8 +9,8 @@ const BUDGET = GROUPS[0]!
 const field = (key: string) => fieldNamed(key)!
 const ENV = ['', 'env'].join('.')
 
-// plugin.json's userConfig fields, as of 0.36.0: a new one goes into a group too.
-const MANIFEST_KEYS = ['activityLog', 'banner', 'budgetUsd', 'companionMonthlyUsd', 'companionShare', 'companionSharePeriod', 'componentsDir', 'envFile', 'flamingo', 'historyDays', 'paneColumns', 'paneRows', 'paneTheme', 'pollSeconds', 'recentHours', 'reportOpen', 'reportStyle', 'suggestions', 'toasts', 'updateCheck', 'updateCheckHours']
+// plugin.json's userConfig fields, as of 0.39.0: a new one goes into a group too.
+const MANIFEST_KEYS = ['activityLog', 'banner', 'budgetEnforce', 'budgetGrace', 'budgetUsd', 'companionMonthlyUsd', 'companionShare', 'companionSharePeriod', 'componentsDir', 'envFile', 'flamingo', 'historyDays', 'paneColumns', 'paneRows', 'paneTheme', 'pollSeconds', 'recentHours', 'reportOpen', 'reportStyle', 'suggestions', 'toasts', 'updateCheck', 'updateCheckHours']
 
 test('every userConfig field is in one group, and every group fits the menu', () => {
   const keys = GROUPS.flatMap(g => g.fields.map(f => f.key))

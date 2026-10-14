@@ -364,3 +364,16 @@ test("every component as a table to take elsewhere: IDs, Boomi's version and fol
   const tricky = reportHtml({ ...DASHBOARD, activity: [step(1, { kind: 'create', subject: '</script><b>x', componentId: 'c-9' })] }, { session: 'c', sessionId: 'c', date: '2026-10-14', usage: USAGE }, NOW, 24 * HOUR)
   expect(JSON.parse(tricky.match(/id="component-export">([^<]*)<\/script>/)![1]!).tsv).toContain('</script><b>x')
 })
+
+test('budget overrides the person granted are listed for the audit trail, and steps refused by the budget say so', () => {
+  const page = reportHtml(scoped({ ...DASHBOARD, activity: [
+    step(1, { kind: 'deploy', subject: 'Orders', outcome: 'blocked', detail: 'blocked by budget: the session budget ($5.20 of $5.00, 104%)', isBudgetBlocked: true }),
+    step(2, { kind: 'other', subject: 'Budget override', outcome: 'ok', detail: 'allowed once: deploy (Orders.xml), with the session budget ($5.20 of $5.00, 104%) spent', isBudgetOverride: true }),
+  ] }, 'session'), { session: 'c', sessionId: 'c', date: '2026-10-14', usage: USAGE, scope: 'session' }, NOW, 24 * HOUR)
+  expect(page).toContain('<a href="#overrides">Overrides</a>')
+  expect(page).toContain('<h2>Budget overrides <span class="count">1</span>')
+  expect(page).toContain('allowed once: deploy (Orders.xml), with the session budget ($5.20 of $5.00, 104%) spent</li>')
+  expect(page).toContain('Blocked by budget: deploy of Orders')
+  // An override isn't housekeeping: it shows in the session's sentence.
+  expect(workSentence([step(2, { kind: 'other', subject: 'Budget override', outcome: 'ok', detail: 'x', isBudgetOverride: true })])).toBe('<strong>Budget</strong>: override allowed')
+})

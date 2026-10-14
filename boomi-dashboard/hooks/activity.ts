@@ -618,6 +618,8 @@ const SCRIPT_WORDS: Record<string, string> = {
 
 /** One activity as a sentence: "Saved Orders Sync to Boomi (v4)". */
 export const describe = (a: Activity): string => {
+  if (a.isBudgetOverride) return `Budget override: ${a.detail}`
+  if (a.isBudgetBlocked) return describe({ ...a, isBudgetBlocked: undefined }).replace(/^Blocked: /, 'Blocked by budget: ')
   if (a.product === 'bdi' && a.verb === 'run' && a.runId && a.outcome !== 'running') {
     const flow = `BDI: flow ${a.subject}`
     if (a.runStatus === 'succeeded') return `${flow} ran and succeeded`
@@ -1333,6 +1335,7 @@ export const headline = (activity: readonly Activity[]): Activity | undefined =>
  */
 export const statusLine = (dashboard: Dashboard, now: number, windowMs: number, usage: Usage = {}, recap?: SessionRecap): string => {
   const parts: string[] = []
+  if (usage.isPaused) parts.push(PAUSED)
   const isNew = !dashboard.activity.some(a => !a.isRestored)
   const latest = isNew ? undefined : headline(dashboard.activity)
   const needs = attention(dashboard, now, windowMs)
@@ -1403,7 +1406,12 @@ export type Usage = {
   now?: number
   /** Where Companion stands against the person's own budget: its share of the weekly limit, its month. */
   companion?: { week?: BudgetView; month?: BudgetView }
+  /** Set while a spent budget pauses Companion changes (budgetEnforce confirm or block). */
+  isPaused?: boolean
 }
+
+/** What the status line and banner say while a spent budget pauses Companion changes. */
+export const PAUSED = '⛔ budget reached, Companion changes paused'
 
 /** How long something has run: 45s, 12m, 1h 12m. */
 export const duration = (ms: number): string => {
@@ -1880,6 +1888,12 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
   if (needs.length === 0) lines.push('Nothing open.')
   for (const n of needs) lines.push(`- ${STATUS[n.level].icon} ${n.title}`)
   if (closed > 0) lines.push(`- ☑ ${closed} closed as expected or handled`)
+
+  const overrides = dashboard.activity.filter(a => a.isBudgetOverride)
+  if (overrides.length > 0) {
+    lines.push('', '## Budget overrides', '', 'Companion changes allowed past a spent budget, as the user chose:', '')
+    for (const a of overrides) lines.push(`- ${new Date(a.startedAt).toISOString().slice(0, 16).replace('T', ' ')} UTC: ${a.detail}`)
+  }
 
   lines.push('', '## Spend', '')
   if (u.usd !== undefined) lines.push(`- Cost: ${formatCost(u.usd)}`)

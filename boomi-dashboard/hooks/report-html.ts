@@ -516,7 +516,7 @@ const VERBS: Partial<Record<Activity['kind'], string>> = {
 }
 
 /** Housekeeping: a connection check, a listing, a read of results. It went fine and changed nothing. */
-const isChoreStep = (a: Activity) => a.kind === 'other' && !a.product && levelOf(a) === 'healthy'
+const isChoreStep = (a: Activity) => a.kind === 'other' && !a.product && !a.isBudgetOverride && levelOf(a) === 'healthy'
 
 /**
  * What a session did, in words: each thing it worked on and what happened to
@@ -532,12 +532,12 @@ export const workSentence = (list: readonly Activity[]): string => {
       chores++
       continue
     }
-    if (a.kind === 'other' && !a.product) {
-      troubles.push(`${a.script ?? 'a script'} ${a.outcome === 'ok' ? 'warned' : a.outcome}`)
+    if (a.kind === 'other' && !a.product && !a.isBudgetOverride) {
+      troubles.push(a.isBudgetBlocked ? 'a Boomi change blocked by budget' : `${a.script ?? 'a script'} ${a.outcome === 'ok' ? 'warned' : a.outcome}`)
       continue
     }
-    const thing = a.subject === 'a component' ? 'another component' : a.subject
-    const verb = a.product ? (a.verb ? `${a.verb}${/e$/.test(a.verb) ? 'd' : 'ed'}` : 'ran') : (VERBS[a.kind] ?? a.kind)
+    const thing = a.isBudgetOverride ? 'Budget' : a.subject === 'a component' ? 'another component' : a.subject
+    const verb = a.isBudgetOverride ? 'override allowed' : a.product ? (a.verb ? `${a.verb}${/e$/.test(a.verb) ? 'd' : 'ed'}` : 'ran') : (VERBS[a.kind] ?? a.kind)
     const t = things.get(thing) ?? { verbs: [] as string[], failed: new Map<string, number>(), blocked: new Map<string, number>() }
     if (!t.verbs.includes(verb)) t.verbs.push(verb)
     if (a.outcome === 'failed') t.failed.set(verb, (t.failed.get(verb) ?? 0) + 1)
@@ -719,6 +719,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     const execText = exec ? idCode(exec) : row.tested && row.tested.outcome !== 'blocked' && row.tested.executionStatus === undefined ? unavailable('execution ID not available', 'The test was submitted without waiting, so its execution ID never came back.') : undefined
     return `<tr><th scope="row" data-sort="${esc(row.name)}">${esc(row.name)}${about ? `<div class="sub">${about}</div>` : ''}${renamed}${row.recipe ? `<div class="sub">from recipe ${esc(row.recipe)}</div>` : ''}${id}</th>${lane(saveList, row.saved ?? row.edited, inBoomi, 'Not saved in these sessions')}${lane(deployList, row.deployed, pkgText, 'Not deployed in these sessions')}${lane(testList, row.tested, execText, 'Not tested in these sessions')}${num(spent.usd, formatCost(spent.usd))}</tr>`
   })
+  const overrides = steps.filter(a => a.isBudgetOverride)
   const pipelineLine = rows.length > 0 ? `${savedOk} saved · ${deployedOk} deployed · ${passing} passing` : ''
   // The components as text to take elsewhere: tab-separated to paste into a spreadsheet, CSV to copy or save.
   const exported = componentTable(dashboard.activity, boomi)
@@ -844,6 +845,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   const sectionsShown: [string, string][] = [
     ['timeline', isAll ? 'Sessions' : 'Timeline'],
     ...(needs.length > 0 ? ([['attention', 'Attention']] as [string, string][]) : []),
+    ...(overrides.length > 0 ? ([['overrides', 'Overrides']] as [string, string][]) : []),
     ['components', 'Components'],
     ...(charts.length > 0 ? ([['charts', 'Charts']] as [string, string][]) : []),
     ['steps', 'Steps'],
@@ -895,6 +897,7 @@ ${
 ${strip ? `<section id="timeline" class="first">${strip}</section>` : ''}
 ${account}
 ${needs.length > 0 ? `<section id="attention"><h2>Needs attention</h2>${attentionList}</section>` : ''}
+${overrides.length > 0 ? `<section id="overrides"><h2>Budget overrides <span class="count">${overrides.length}</span> <span class="aside">Companion changes allowed past a spent budget, as you chose</span></h2><ul class="plain overrides">${overrides.map(a => `<li><time datetime="${new Date(a.startedAt).toISOString()}">${esc(new Date(a.startedAt).toISOString().slice(0, 16).replace('T', ' '))} UTC</time> ${esc(a.detail)}</li>`).join('')}</ul></section>` : ''}
 ${componentRows.length === 0 ? `<section id="components"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Saved', 'Deployed', 'Tested', 'Cost'], componentRows, 'lanes', pipelineLine, exportTools)}
 ${table('connectors', 'Custom connectors', ['Connector', 'Group', 'Where it stands', 'Tokens', 'Cost'], connectorRows)}
 ${table('agents', 'Agentstudio agents', ['Agent', 'Where it stands', 'Tokens', 'Cost'], agentRows)}
@@ -1088,6 +1091,7 @@ footer .maker{width:.75rem;height:1rem;vertical-align:-.2rem;margin-right:.5rem;
 .account-line{font-size:.875rem;margin:1.25rem 0 0;color:var(--exo-color-font-secondary)}.account-line strong{color:var(--exo-color-font);font-weight:600}.account-line .label{font-weight:600;margin-right:.35rem}
 table.lanes td.lane{min-width:11rem}table.lanes tbody th{min-width:16rem}table.lanes td.lane .status{display:inline-block;margin:.05rem 0}
 .export{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .5rem;margin:0 0 .75rem}.export-label{font-size:.813rem;color:var(--exo-color-font-secondary);margin-right:.25rem}.export button{background:var(--exo-color-background);color:var(--exo-color-font);border:1px solid var(--exo-color-border);border-radius:var(--exo-radius-x-large,1.5625rem);padding:.25rem .875rem;font:600 .813rem/1.4 var(--exo-font-family);cursor:pointer}.export button:hover{border-color:var(--exo-color-background-selected)}.export-done{font-size:.813rem;color:var(--exo-color-font-secondary)}
+.overrides li{padding:.35rem 0;border-bottom:1px solid var(--exo-color-border-secondary)}.overrides time{color:var(--exo-color-font-secondary);margin-right:.5rem;font-variant-numeric:tabular-nums}
 code.copy{cursor:copy}td a,th a,.sub a{white-space:nowrap}code.copy.copied{outline:1px solid var(--exo-color-background-success-strong);outline-offset:1px;border-radius:2px}
 .why{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.15rem 0 0 1.4rem}
 svg.maker{display:inline-block}
