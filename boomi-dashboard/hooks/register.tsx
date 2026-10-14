@@ -107,7 +107,7 @@ import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { reportHtml } from './report-html'
 import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
-import { RESTART, checkText, compareVersions, isCheckDue, parseUpgrade, planText } from './upgrade'
+import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import type { Credentials } from './platform'
@@ -142,6 +142,9 @@ const isCompanionFolder = atom({ plugin: 'boomi-dashboard', key: 'isCompanionFol
 
 /** The Boomi Companion plugins on in this session, read once at its start; null until then, or when Claude Code's list can't be read. */
 const companionPlugins = atom({ plugin: 'boomi-dashboard', key: 'companionPlugins' } as const, null as CompanionPlugin[] | null)
+
+/** A newer dashboard version on GitHub, for the pane's footer: toasted once, then mentioned quietly until installed. */
+const updateAvailable = atom({ plugin: 'boomi-dashboard', key: 'updateAvailable' } as const, null as string | null)
 
 /** What each failed execution's log says, by execution ID, once someone asks Why?. */
 const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const, {} as Record<string, DiagnosisState>)
@@ -242,6 +245,8 @@ const SCRIPTS_KEY = 'scriptsDir'
 const THEME_KEY = 'theme'
 const HISTORY_KEY = 'history'
 const UPGRADE_KEY = 'upgradeCheckedAt'
+/** The newest version an update check found, and the newest already toasted (UpdateSeen). */
+const UPDATE_SEEN_KEY = 'updateSeen'
 
 /** How often the flamingo's frame moves on while Claude works. */
 const FLAMINGO_TICK_MS = 500
@@ -1647,9 +1652,17 @@ const nudgeUpgrade = async ($: Engine, settings: Settings) => {
   const check = await runUpgrade($, ['check'], 60_000).catch(() => undefined)
   if (!check || check.error || !check.latest || !check.installed) return
   await $.store.set(UPGRADE_KEY, now).catch(() => undefined)
-  if (compareVersions(check.latest, check.installed) > 0) {
-    $.ui.toast(`bc-dashboard ${check.latest} is available (you have ${check.installed}): run /bc-dashboard upgrade`)
-  }
+  const notice = updateNotice(asUpdateSeen(await $.store.get(UPDATE_SEEN_KEY).catch(() => undefined)), check.installed, check.latest)
+  await $.store.set(UPDATE_SEEN_KEY, notice.seen ?? null).catch(() => undefined)
+  await update($, updateAvailable, () => notice.seen?.latest ?? null)
+  if (notice.isToasting) $.ui.toast(`bc-dashboard ${check.latest} is available (you have ${check.installed}): run /bc-dashboard upgrade`)
+}
+
+/** At the start, the newer version an earlier check found, for the footer, without fetching again. */
+const restoreUpdate = async ($: Engine) => {
+  const seen = asUpdateSeen(await $.store.get(UPDATE_SEEN_KEY).catch(() => undefined))
+  const pending = pendingUpdate(seen, await ownVersion($))
+  await update($, updateAvailable, () => pending ?? null)
 }
 
 // --- Drawing -------------------------------------------------------------------
@@ -1812,6 +1825,7 @@ export const register: Register = (on, options) => {
     await readActivityLog($, settings)
     $.clock.every(LOG_CHECK_MS, () => readActivityLog($, settings))
     // Whether a newer dashboard is on GitHub, at most once a day; it never installs.
+    if (settings.isCheckingUpdates) await restoreUpdate($).catch(() => undefined)
     $.clock.after(15_000, () => nudgeUpgrade($, settings).catch(() => undefined))
     // A monthly Companion amount counts earlier sessions' costs: read them once, soon after the start.
     if (settings.companionMonthlyUsd > 0) {
@@ -2008,6 +2022,7 @@ export const register: Register = (on, options) => {
     const agentRows = agents(current.activity)
     const connectorRows = connectors(current.activity)
     const plugins = await read($, companionPlugins)
+    const newer = await read($, updateAvailable)
     const stepsLimit = await read($, stepsShown)
     const steps = current.activity.filter(a => !a.recipe).reverse()
     const feed = steps.slice(0, stepsLimit)
@@ -2372,7 +2387,12 @@ export const register: Register = (on, options) => {
         {current.watched.length > 0 && current.platform.phase !== 'ok' && current.platform.checkedAt !== undefined && line('warning', current.platform.message)}
         {current.watched.map(w => line(watchedLevel(w), watchedText(w)))}
 
-        <Box marginTop={1}>
+        {newer && (
+          <Box marginTop={1}>
+            {t(`↑ bc-dashboard ${newer} is available: /bc-dashboard upgrade`, { color: p.muted })}
+          </Box>
+        )}
+        <Box marginTop={newer ? 0 : 1}>
           <Text color={p.muted} backgroundColor={p.bg} dimColor>
             {`session ${footer.session}`}
             {footer.repo ? ' · ' : ''}

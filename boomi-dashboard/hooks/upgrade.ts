@@ -144,5 +144,29 @@ export const planText = (r: UpgradeReport): string | undefined => {
 export const isCheckDue = (last: number | undefined, now: number, hours: number): boolean =>
   hours > 0 && (last === undefined || now - last >= hours * 3_600_000)
 
+/** The newest version a check found, and the newest one already toasted. */
+export type UpdateSeen = { latest: string; announced: string }
+
+/**
+ * What a check that found `latest` means: toast only a version newer than any
+ * already toasted, and keep it for the pane's quiet reminder. Nothing kept when
+ * the installed version is current.
+ */
+export const updateNotice = (seen: UpdateSeen | undefined, installed: string, latest: string): { isToasting: boolean; seen?: UpdateSeen } => {
+  if (compareVersions(latest, installed) <= 0) return { isToasting: false }
+  const isToasting = !seen || compareVersions(latest, seen.announced) > 0
+  return { isToasting, seen: { latest, announced: isToasting || !seen ? latest : seen.announced } }
+}
+
+/** The newer version the pane mentions, until the installed one catches up. */
+export const pendingUpdate = (seen: UpdateSeen | undefined, installed: string | undefined): string | undefined =>
+  seen && installed && compareVersions(seen.latest, installed) > 0 ? seen.latest : undefined
+
+/** Reads what the store kept, ignoring anything that isn't an UpdateSeen. */
+export const asUpdateSeen = (value: unknown): UpdateSeen | undefined => {
+  const v = value as Partial<UpdateSeen> | undefined
+  return v && typeof v.latest === 'string' && typeof v.announced === 'string' ? { latest: v.latest, announced: v.announced } : undefined
+}
+
 /** What to do for the new version to load: the mod runs from the checkout Claude Code read at start. */
 export const RESTART = 'Restart Claude Code (exit, then start it again) for the new version to load: the running session keeps the code it started with. The dashboard can’t reload itself safely.'

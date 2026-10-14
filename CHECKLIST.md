@@ -162,6 +162,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** `✓ Rolled back to Y`, and the old version loads. Running `/bc-dashboard upgrade` again returns to the new one. **Fail:** an error, or the version doesn't change.
 - [ ] **J5. Nudge.** With the checkout behind again, set `updateCheckHours` to `1` and start a new session; wait 20 seconds.
   **Pass:** one toast, `bc-dashboard X is available …`, and none in a second session within the hour. With the network off, nothing at all. **Fail:** no toast, one every session, or an error.
+- [ ] **J6. Once per version.** *(0.25.0)* After J5's toast, set `updateCheckHours` to `0.01`, start another new session, wait 20 seconds and open the pane.
+  **Pass:** no second toast, and the pane's footer shows `↑ bc-dashboard X.Y.Z is available: /bc-dashboard upgrade`. After `/bc-dashboard upgrade` and a restart, that line is gone. **Fail:** the same version toasts again, or the footer line is missing or stays after upgrading.
 
 ## K. Report as a web page
 

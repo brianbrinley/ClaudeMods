@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { changelogBetween, checkText, compareVersions, isCheckDue, mask, parseUpgrade, planText } from '../hooks/upgrade'
+import { asUpdateSeen, changelogBetween, checkText, compareVersions, isCheckDue, mask, parseUpgrade, pendingUpdate, planText, updateNotice } from '../hooks/upgrade'
 
 const CHECK = [
   'ROOT: /home/me/ClaudeMods',
@@ -82,4 +82,23 @@ test('isCheckDue waits the interval between checks, and never checks when off', 
   expect(isCheckDue(0, day - 1, 24)).toBe(false)
   expect(isCheckDue(0, day, 24)).toBe(true)
   expect(isCheckDue(0, day * 9, 0)).toBe(false)
+})
+
+test('updateNotice toasts each newer version once, keeps it for the footer, and forgets it once installed', () => {
+  const first = updateNotice(undefined, '0.24.0', '0.25.0')
+  expect(first).toEqual({ isToasting: true, seen: { latest: '0.25.0', announced: '0.25.0' } })
+  // The next day's check finds the same version: no second toast, still kept.
+  const again = updateNotice(first.seen, '0.24.0', '0.25.0')
+  expect(again).toEqual({ isToasting: false, seen: { latest: '0.25.0', announced: '0.25.0' } })
+  // A newer one is news again.
+  expect(updateNotice(again.seen, '0.24.0', '0.26.0').isToasting).toBe(true)
+  // Up to date: nothing to say or keep.
+  expect(updateNotice(again.seen, '0.25.0', '0.25.0')).toEqual({ isToasting: false })
+
+  expect(pendingUpdate(again.seen, '0.24.0')).toBe('0.25.0')
+  expect(pendingUpdate(again.seen, '0.25.0')).toBeUndefined()
+  expect(pendingUpdate(undefined, '0.24.0')).toBeUndefined()
+  expect(asUpdateSeen({ latest: '0.25.0', announced: '0.25.0' })).toEqual({ latest: '0.25.0', announced: '0.25.0' })
+  expect(asUpdateSeen(null)).toBeUndefined()
+  expect(asUpdateSeen({ latest: 1 })).toBeUndefined()
 })
