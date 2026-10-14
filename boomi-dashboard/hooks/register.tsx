@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
-import type { Activity, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
+import type { Activity, CompanionPlugin, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -77,6 +77,7 @@ import {
   choiceList,
   recapOf,
   welcomeLine,
+  tipsFor,
   quarantineLines,
   agents,
   agentStages,
@@ -105,6 +106,7 @@ import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from '.
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { reportHtml } from './report-html'
+import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
 import { RESTART, checkText, compareVersions, isCheckDue, parseUpgrade, planText } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
@@ -137,6 +139,9 @@ const recap = atom({ plugin: 'boomi-dashboard', key: 'recap' } as const, null as
 
 /** Whether the session runs in a Companion workspace: the banner only greets there. */
 const isCompanionFolder = atom({ plugin: 'boomi-dashboard', key: 'isCompanionFolder' } as const, false)
+
+/** The Boomi Companion plugins on in this session, read once at its start; null until then, or when Claude Code's list can't be read. */
+const companionPlugins = atom({ plugin: 'boomi-dashboard', key: 'companionPlugins' } as const, null as CompanionPlugin[] | null)
 
 /** What each failed execution's log says, by execution ID, once someone asks Why?. */
 const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const, {} as Record<string, DiagnosisState>)
@@ -1000,6 +1005,39 @@ const seen = async ($: Engine): Promise<string> => {
   return `Marked as seen: ${changed} watched change${changed === 1 ? '' : 's'}. They leave Needs attention.`
 }
 
+// --- Which Companion plugins are installed ----------------------------------------
+
+/**
+ * The Companion plugins on in this session: what `claude plugin list --json`
+ * says for the session's folder, else Claude Code's own files under its config
+ * folder. Null when neither can be read, so nothing is hidden on a guess.
+ */
+const findPlugins = async ($: Engine): Promise<CompanionPlugin[] | null> => {
+  const cwd = await $.session.cwd()
+  const listed = await $.process.run(['claude', 'plugin', 'list', '--json'], { cwd, timeoutMs: 20_000 }).catch(() => undefined)
+  const fromList = listed?.exitCode === 0 ? pluginsFromList(listed.stdout) : undefined
+  if (fromList) return fromList
+  const home = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)) || `${(await $.env.get('HOME').catch(() => undefined)) ?? ''}/.claude`
+  const text = (path: string) => $.fs.read(path).then(String).catch(() => undefined)
+  const installed = await text(`${home}/plugins/installed_plugins.json`)
+  const synced: string[] = []
+  const syncedRoot = `${home}/plugins/synced`
+  for (const bucket of await $.fs.list(syncedRoot).catch(() => [])) {
+    for (const plugin of await $.fs.list(`${syncedRoot}/${bucket.name}`).catch(() => [])) {
+      const manifest = await text(`${syncedRoot}/${bucket.name}/${plugin.name}/.claude-plugin/plugin.json`)
+      if (manifest) synced.push(manifest)
+    }
+  }
+  if (installed === undefined && synced.length === 0) return null
+  const settings = await Promise.all([`${cwd}/.claude/settings.local.json`, `${cwd}/.claude/settings.json`, `${home}/settings.json`].map(text))
+  return pluginsFromFiles(installed, settings, synced, cwd)
+}
+
+const notePlugins = async ($: Engine) => {
+  const found = await findPlugins($).catch(() => null)
+  await update($, companionPlugins, () => found)
+}
+
 // --- Why a run failed ------------------------------------------------------------
 
 /** Notes where Companion's scripts are, from a command that ran one by its path. */
@@ -1610,7 +1648,7 @@ const nudgeUpgrade = async ($: Engine, settings: Settings) => {
   if (!check || check.error || !check.latest || !check.installed) return
   await $.store.set(UPGRADE_KEY, now).catch(() => undefined)
   if (compareVersions(check.latest, check.installed) > 0) {
-    await $.ui.toast(`bc-dashboard ${check.latest} is available (you have ${check.installed}): run /bc-dashboard upgrade`).catch(() => undefined)
+    $.ui.toast(`bc-dashboard ${check.latest} is available (you have ${check.installed}): run /bc-dashboard upgrade`)
   }
 }
 
@@ -1769,6 +1807,8 @@ export const register: Register = (on, options) => {
     $.clock.every(TIP_MS, async () => {
       if (!(await read($, dashboard)).activity.some(a => !a.isRestored)) await update($, tip, n => n + 1)
     })
+    // Which Companion plugins are here: the pane's sections and the tips follow them. Read once, just after the start.
+    $.clock.after(1_000, () => notePlugins($))
     await readActivityLog($, settings)
     $.clock.every(LOG_CHECK_MS, () => readActivityLog($, settings))
     // Whether a newer dashboard is on GitHub, at most once a day; it never installs.
@@ -1890,7 +1930,7 @@ export const register: Register = (on, options) => {
     const isNew = !current.activity.some(a => !a.isRestored)
     const latest = isNew ? undefined : headline(current.activity)
     const needs = attention(current, now, settings.windowMs)
-    const welcome = isNew && (await read($, isCompanionFolder)) ? welcomeLine(await read($, tip), (await read($, recap)) ?? undefined, now) : undefined
+    const welcome = isNew && (await read($, isCompanionFolder)) ? welcomeLine(await read($, tip), (await read($, recap)) ?? undefined, now, tipsFor(await read($, companionPlugins))) : undefined
     if (!latest && !welcome && needs.length === 0) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const count = components(current.activity).length
@@ -1967,6 +2007,7 @@ export const register: Register = (on, options) => {
     const rows = components(current.activity)
     const agentRows = agents(current.activity)
     const connectorRows = connectors(current.activity)
+    const plugins = await read($, companionPlugins)
     const stepsLimit = await read($, stepsShown)
     const steps = current.activity.filter(a => !a.recipe).reverse()
     const feed = steps.slice(0, stepsLimit)
@@ -2171,8 +2212,8 @@ export const register: Register = (on, options) => {
           </Box>
         )}
 
-        {heading('Components this session')}
-        {rows.length === 0 && t('Components show up here as Claude edits, saves, deploys and tests them.', { color: p.muted })}
+        {(rows.length > 0 || hasComponents(plugins)) && heading('Components this session')}
+        {rows.length === 0 && hasComponents(plugins) && t('Components show up here as Claude edits, saves, deploys and tests them.', { color: p.muted })}
         {(current.restored || current.earlier?.length) ? (
           <Box>
             {current.restored ? note(`Includes ${restoredNote(current.restored, settings.windowMs, current.earlier?.length === 0)}.  `) : undefined}
@@ -2206,11 +2247,13 @@ export const register: Register = (on, options) => {
         })}
         {rows.length > 8 && t(`…and ${rows.length - 8} more: /bc-dashboard lists them all.`, { color: p.muted })}
 
-        {connectorRows.length > 0 && heading('Custom connectors')}
+        {(connectorRows.length > 0 || (plugins && isInstalled(plugins, 'bc-connectordev'))) && heading('Custom connectors')}
+        {connectorRows.length === 0 && plugins && isInstalled(plugins, 'bc-connectordev') && note('Connectors show up here as Claude lints, validates, uploads and releases them.')}
         {connectorRows.slice(0, 6).map(row => stageRow(row.name, row.ids, connectorStages(row)))}
         {connectorRows.length > 6 && t(`…and ${connectorRows.length - 6} more: /bc-dashboard lists them all.`, { color: p.muted })}
 
-        {agentRows.length > 0 && heading('Agentstudio agents')}
+        {(agentRows.length > 0 || (plugins && isInstalled(plugins, 'bc-agentstudio'))) && heading('Agentstudio agents')}
+        {agentRows.length === 0 && plugins && isInstalled(plugins, 'bc-agentstudio') && note('Agents show up here as Claude creates, packages, deploys and talks to them.')}
         {agentRows.slice(0, 6).map(row => stageRow(row.name, row.ids, agentStages(row)))}
         {agentRows.length > 6 && t(`…and ${agentRows.length - 6} more: /bc-dashboard lists them all.`, { color: p.muted })}
 
@@ -2230,7 +2273,8 @@ export const register: Register = (on, options) => {
           </Box>
         )}
 
-        {quarantineLines(current, now).length > 0 && heading('Data Hub')}
+        {(quarantineLines(current, now).length > 0 || (plugins && isInstalled(plugins, 'bc-datahub'))) && heading('Data Hub')}
+        {quarantineLines(current, now).length === 0 && plugins && isInstalled(plugins, 'bc-datahub') && note("Quarantined entities show up here once Claude checks a universe's quarantine.")}
         {quarantineLines(current, now).map(q => line(q.level, q.text))}
 
         {guards.length > 0 && heading('Guardrails')}

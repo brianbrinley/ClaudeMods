@@ -55,7 +55,7 @@ quadrantChart
 | Rank | Idea | Business value | Effort | Status |
 |---|---|---|---|---|
 | Next | [Boomi standards: bring it back](#boomi-standards-bring-it-back) | High | Small | Built, set aside; to restore soon |
-| Next | [The dashboard across all of Boomi Companion](#the-dashboard-across-all-of-boomi-companion) | High | Small first, medium in all | Steps 1-6 built (0.13.0-0.21.0); step 7 next |
+| Next | [The dashboard across all of Boomi Companion](#the-dashboard-across-all-of-boomi-companion) | High | Small first, medium in all | Steps 1-7 built (0.13.0-0.24.0); **Why?** on a failed BDI run still to do |
 | 1 | [Execution debugger](#execution-debugger) | High | Small to medium | Log reading built into the dashboard; per-step documents next |
 | 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Secure-storage token tried and removed; API-user guide kept |
 | 3 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
@@ -165,7 +165,7 @@ quadrantChart
 4. **Data Hub stewardship (medium; built in 0.19.0, following Claude's own deploy status checks and quarantine queries).** A model deploy shows its status until it settles. A **Data Hub** section shows quarantined entities per universe that Claude touched, from `datahub-quarantine.sh query`, so new quarantines are news. Golden-record end-dates and restores are listed in the report, since they change master data.
 5. **Agentstudio agents (small to medium; built in 0.20.0, from Claude's own create, package, deploy and session runs).** Each agent's stages, as components have now: created, updated, packaged, deployed. `session-*` runs count as test conversations, with how many and how they ended.
 6. **Connector releases (small; built in 0.21.0, from Claude's own lint, validate, upload and version-change runs).** A connector's stages: descriptor linted (with its warnings), version validated, uploaded, version changed. A lint or validate warning goes under **Needs attention**.
-7. **Know which plugins are installed (small, alongside 1).** Read Claude Code's plugin cache for `bc-*` plugins, so the pane shows only the sections that apply, and the new-session tips mention what's there.
+7. **Know which plugins are installed (small; built in 0.24.0, from `claude plugin list --json`, else Claude Code's plugin files).** The pane shows only the sections that apply, and the new-session tips mention what's there.
 
 **Open questions:**
 - Data Hub, BDI and connectordev print the API's own JSON on success, and their responses aren't documented in the plugins. Each needs real output captured into tests before its wording is trusted, as bc-integration's v1.0.83 lines were.
