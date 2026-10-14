@@ -170,6 +170,74 @@ const spendByProduct = (activity: readonly Activity[], all: ReturnType<typeof sp
 ${dataTable(['Product', byUsd ? 'Cost' : 'Tokens'], measured.map(r => [productName(r.key), byUsd ? (formatCost(r.usd) ?? '$0') : formatTokens(r.tokens ?? 0)]))}</figure>`
 }
 
+/** A session's name on a chart: its day and start time. */
+const sessionTick = (at: number) => `${new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} · ${new Date(at).toISOString().slice(11, 16)}`
+
+/**
+ * Each session in its own row, oldest first: what it cost (a paler bar for a
+ * cost counted only up to its last Companion step), and how its steps went,
+ * stacked by outcome. A click opens that session's steps. Needs two sessions.
+ */
+const sessionCharts = (summaries: readonly SessionSummary[], steps: readonly Activity[], sessionOf: (a: Activity) => string): string[] => {
+  if (summaries.length < 2) return []
+  const rows = [...summaries].sort((a, b) => a.firstAt - b.firstAt)
+  const rowH = 30
+  const left = 112
+  const pick = (id: string, inner: string) => `<a class="session-pick" href="#${sessionAnchor(id)}">${inner}</a>`
+  const charts: string[] = []
+
+  const costed = rows.filter(s => s.usd !== undefined)
+  if (costed.length >= 2) {
+    const max = Math.max(...costed.map(s => s.usd!)) || 1
+    const shown = (s: SessionSummary) => `${s.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(s.usd) ?? '$0'}`
+    const marks = costed
+      .map((s, i) => {
+        const w = Math.max(2, (s.usd! / max) * 330)
+        const tip = `${sessionTick(s.firstAt)} UTC: ${shown(s)}, ${s.steps} step${s.steps === 1 ? '' : 's'}`
+        return pick(s.id, `<g class="hit" data-tip="${esc(tip)}"><rect x="0" y="${i * rowH}" width="560" height="${rowH}" class="target"/>
+<text x="0" y="${i * rowH + 19}" class="label">${esc(sessionTick(s.firstAt))}</text><path d="${hbar(left, i * rowH + 6, w, 18)}" class="cat-1${s.usdIs === 'atLeast' ? ' at-least' : ''}"/><text x="${(left + w + 6).toFixed(1)}" y="${i * rowH + 19}" class="value">${esc(shown(s))}</text></g>`)
+      })
+      .join('')
+    const hasAtLeast = costed.some(s => s.usdIs === 'atLeast')
+    charts.push(`<figure class="chart"><figcaption><h3>Cost by session</h3><span class="sub">click a session to open its steps${hasAtLeast ? '; a paler bar is counted only up to its last Companion step' : ''}</span></figcaption>
+<svg viewBox="0 0 560 ${costed.length * rowH}" role="img" aria-label="Cost by session">${marks}</svg>
+${dataTable(['Session (UTC)', 'Cost'], costed.map(s => [sessionTick(s.firstAt), shown(s)]))}</figure>`)
+  }
+
+  const counts = new Map<string, Record<Level, number>>()
+  for (const a of steps) {
+    const c = counts.get(sessionOf(a)) ?? { healthy: 0, warning: 0, serious: 0, critical: 0 }
+    c[levelOf(a)]++
+    counts.set(sessionOf(a), c)
+  }
+  const counted = rows.filter(s => counts.has(s.id))
+  if (counted.length >= 2) {
+    const total = (id: string) => LEVELS.reduce((sum, l) => sum + counts.get(id)![l], 0)
+    const max = Math.max(...counted.map(s => total(s.id)))
+    const marks = counted
+      .map((s, i) => {
+        const c = counts.get(s.id)!
+        const levels = LEVELS.filter(l => c[l] > 0)
+        let x = left
+        const segs = levels.map((l, k) => {
+          const w = Math.max(1, (c[l] / max) * 330 - (k < levels.length - 1 ? 2 : 0))
+          const d = k === levels.length - 1 ? hbar(x, i * rowH + 6, w, 18) : `M${x.toFixed(1)} ${i * rowH + 6}h${w.toFixed(1)}v18h-${w.toFixed(1)}z`
+          x += w + 2
+          return `<path d="${d}" class="fill-${l}"/>`
+        })
+        const tip = `${sessionTick(s.firstAt)} UTC: ${total(s.id)} step${total(s.id) === 1 ? '' : 's'}${levels.map(l => `, ${c[l]} ${LABEL[l].toLowerCase()}`).join('')}`
+        return pick(s.id, `<g class="hit" data-tip="${esc(tip)}"><rect x="0" y="${i * rowH}" width="560" height="${rowH}" class="target"/>
+<text x="0" y="${i * rowH + 19}" class="label">${esc(sessionTick(s.firstAt))}</text>${segs.join('')}<text x="${(x + 4).toFixed(1)}" y="${i * rowH + 19}" class="value">${total(s.id)}</text></g>`)
+      })
+      .join('')
+    charts.push(`<figure class="chart"><figcaption><h3>Outcomes by session</h3><span class="sub">each session's steps, stacked by how they went</span></figcaption>
+${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], level: l })))}
+<svg viewBox="0 0 560 ${counted.length * rowH}" role="img" aria-label="Steps per session, stacked by outcome">${marks}</svg>
+${dataTable(['Session (UTC)', ...LEVELS.map(l => LABEL[l])], counted.map(s => [sessionTick(s.firstAt), ...LEVELS.map(l => counts.get(s.id)![l])]))}</figure>`)
+  }
+  return charts
+}
+
 /** The session's cost as it grew, a point per step; hovering a point names the step. */
 const costOverTime = (activity: readonly Activity[], endUsd: number | undefined, now: number): string => {
   const points = activity.filter(a => a.usdAt !== undefined).map(a => ({ at: a.startedAt, usd: a.usdAt!, what: describe(a) }))
@@ -704,7 +772,12 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   if (!isAll && u.usd !== undefined) costs.set('this', `${esc(formatCost(u.usd) ?? '$0')}${ofBudget(u.usd)}`)
   const strip = sessionLedger(steps, a => (isAll ? sessionOf(a) : 'this'), id => (id === 'this' ? 'This session' : isUnnamed(id) ? `Earlier ${id.slice(8)}` : id === facts.sessionId ? 'This session' : `Session ${id.slice(0, 8)}`), costs)
   // A product chart only says something with two products or more.
-  const charts = [products.length > 1 ? outcomesByProduct(steps) : '', isAll ? '' : costOverTime(dashboard.activity, u.usd, now), products.length > 1 ? spendByProduct(dashboard.activity, all) : ''].filter(Boolean)
+  // In an all-sessions report, a chart per session in place of the one session's cost over time.
+  const charts = [
+    ...(isAll ? sessionCharts(sessions, steps, sessionOf) : [costOverTime(dashboard.activity, u.usd, now)]),
+    products.length > 1 ? outcomesByProduct(steps) : '',
+    products.length > 1 ? spendByProduct(dashboard.activity, all) : '',
+  ].filter(Boolean)
 
   const sectionsShown: [string, string][] = [
     ['timeline', isAll ? 'Sessions' : 'Timeline'],
@@ -749,10 +822,10 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
       </div>
       ${budgetBlock}
     </div>
-    <div id="timeline">${strip}</div>
   </div>
 </div>
 <main>
+${strip ? `<section id="timeline" class="first">${strip}</section>` : ''}
 ${account}
 ${needs.length > 0 ? `<section id="attention"><h2>Needs attention</h2>${attentionList}</section>` : ''}
 ${componentRows.length === 0 ? `<section id="components"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Saved', 'Deployed', 'Tested', 'Cost'], componentRows, 'lanes', pipelineLine)}
@@ -857,7 +930,7 @@ svg .baseline{stroke:var(--exo-color-border);stroke-width:1}svg .grid{stroke:var
 .fill-healthy{fill:var(--exo-color-background-success-strong);background:var(--exo-color-background-success-strong)}.fill-warning{fill:var(--exo-color-background-warning-strong);background:var(--exo-color-background-warning-strong)}
 .fill-serious{fill:var(--exo-color-background-highlight);background:var(--exo-color-background-highlight)}.fill-critical{fill:var(--exo-color-background-danger-strong);background:var(--exo-color-background-danger-strong)}
 .fill-healthy-ink{color:var(--exo-color-background-success-strong)}.fill-warning-ink{color:var(--exo-color-background-warning-strong)}.fill-serious-ink{color:var(--exo-color-background-highlight)}.fill-critical-ink{color:var(--exo-color-background-danger-strong)}
-.cat-1{fill:var(--cat-1)}.cat-2{fill:var(--cat-2)}.cat-3{fill:var(--cat-3)}.cat-4{fill:var(--cat-4)}.cat-5{fill:var(--cat-5)}.cat-6{fill:var(--cat-6)}.seq{fill:var(--seq)}
+.cat-1{fill:var(--cat-1)}.cat-1.at-least{fill-opacity:.45}.cat-2{fill:var(--cat-2)}.cat-3{fill:var(--cat-3)}.cat-4{fill:var(--cat-4)}.cat-5{fill:var(--cat-5)}.cat-6{fill:var(--cat-6)}.seq{fill:var(--seq)}
 svg .line{fill:none;stroke:var(--cat-1);stroke-width:2;stroke-linejoin:round}svg .area{fill:var(--cat-1);opacity:.12}
 svg .dot{fill:var(--exo-color-background);stroke:var(--cat-1);stroke-width:2}
 svg .target{fill:transparent}svg .hit{cursor:default;outline:none}svg .hit[role="button"]{cursor:pointer}
@@ -894,7 +967,7 @@ footer .maker{width:.75rem;height:1rem;vertical-align:-.2rem;margin-right:.5rem;
 --exo-color-background-success-strong:#3ecfa2;--exo-color-background-warning-strong:#ec9932;--exo-color-background-danger-strong:#ff5c6c;--exo-color-background-highlight:#ff8a75;--exo-color-background-selected:#66b6f6}
 .ex-theme-dark .band{--band-bg:#262626;--exo-color-body:#2b2b2b}
 @media (prefers-color-scheme:dark){:root:not(.ex-theme-light) .band{--band-bg:#262626;--exo-color-body:#2b2b2b}}
-.band-inner{max-width:1440px;margin:0 auto;padding:2rem var(--exo-spacing-large) 1.75rem}
+.band-inner{max-width:1440px;margin:0 auto;padding:1.75rem var(--exo-spacing-large) 1.5rem}
 .band .opening{margin-top:0;align-items:start}
 .band .legend,.band .note{color:var(--exo-color-font-secondary)}
 .band details.data summary{color:var(--exo-color-font-link)}.band details.data table{background:rgba(0,0,0,.2)}
@@ -912,11 +985,10 @@ code.copy{cursor:copy}td a,th a,.sub a{white-space:nowrap}code.copy.copied{outli
 svg.maker{display:inline-block}
 @media (max-width:900px){.budgets{padding-left:0;border-left:0;padding-top:1rem;border-top:1px solid var(--exo-color-border-secondary)}}
 @media print{.band{background:none;color:inherit}}
-.ledger-wrap{margin-top:1.75rem}
-.ledger-title{font:600 .813rem/1.4 var(--exo-font-family);color:var(--exo-color-font-secondary);margin:0 0 .5rem;letter-spacing:.02em}
-.ledger{list-style:none;margin:0;padding:0;border-top:1px solid var(--exo-color-border-secondary)}
+main>section.first{margin-top:0;padding-top:0;border-top:0}
+.ledger{list-style:none;margin:0;padding:.25rem .5rem;background:var(--exo-color-background);border:1px solid var(--exo-color-border-secondary);border-radius:var(--exo-radius-large)}.ledger-row:last-child .ledger-link{border-bottom:0}
 .ledger-link{display:grid;grid-template-columns:13rem minmax(0,1fr) 11rem 8rem;gap:.25rem 1.5rem;align-items:baseline;padding:.6rem .5rem;color:inherit;text-decoration:none;border-bottom:1px solid var(--exo-color-border-secondary);border-radius:var(--exo-radius-standard)}
-.ledger-link:hover{background:var(--exo-color-background)}.ledger-link:hover .l-id{text-decoration:underline}
+.ledger-link:hover{background:var(--exo-color-body)}.ledger-link:hover .l-id{text-decoration:underline}
 .l-when{display:flex;flex-direction:column;font-size:.875rem;line-height:1.4}.l-when span{color:var(--exo-color-font-secondary);font-size:.813rem;font-variant-numeric:tabular-nums}.l-when .l-id{font-size:.75rem}
 .l-what{font-size:.938rem;line-height:1.55}.l-what strong{font-weight:600}
 .l-how{display:flex;flex-wrap:wrap;gap:.15rem .75rem;font-size:.875rem;font-variant-numeric:tabular-nums}.l-steps{flex-basis:100%;font-size:.75rem;color:var(--exo-color-font-secondary)}
@@ -1002,7 +1074,7 @@ const SCRIPT = `
   document.addEventListener('click',function(e){var c=e.target.closest&&e.target.closest('[data-copy]');if(!c)return;e.preventDefault();
     var done=function(){c.classList.add('copied');c.title='Copied';setTimeout(function(){c.classList.remove('copied');c.title='Copy'},1200)};
     if(navigator.clipboard)navigator.clipboard.writeText(c.getAttribute('data-copy')).then(done,function(){});});
-  document.querySelectorAll('.ledger-link').forEach(function(l){l.addEventListener('click',function(){
+  document.querySelectorAll('.ledger-link,.session-pick').forEach(function(l){l.addEventListener('click',function(){
     var g=document.querySelector(l.getAttribute('href'));if(g&&g.tagName==='DETAILS')g.open=true})});
 })();
 `

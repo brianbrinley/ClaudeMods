@@ -2,6 +2,15 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.33.0
+
+- **Less navy at the top of the report.** The band keeps the title, the summary and the budget. The sessions now open the page below it, on a card of their own.
+- **Charts in the all-sessions report.** Before, an all-sessions report whose work was all Integration had none. Now it has two charts:
+  - **Cost by session:** each session's cost, with a paler bar for a cost counted only up to its last Companion step;
+  - **Outcomes by session:** each session's steps, stacked by how they went.
+
+  Click a session in either chart to open its steps. A one-session report keeps **Cost over the session**, and work across two products or more still gets the product charts.
+
 ## 0.32.0
 
 - **`/bc-dashboard config`: the settings a question at a time.** Pick **Budget**, **Pane and banner** or **Data and reports**, and the dashboard asks about each setting in that group. Each question starts with **Keep** and the current value, offers two likely changes, and has **Back to the menu**. Type any other value under **Other**.

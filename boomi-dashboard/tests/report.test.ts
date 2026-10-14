@@ -74,8 +74,16 @@ test("an all-sessions report: sessions, the Boomi account, each component's ID a
   expect(page).toContain('4 sessions in <strong>oracle</strong> between Oct 11 and Oct 14 worked on <strong>3 components</strong> in 5 steps, 1 of which failed or was blocked.')
   expect(page).toContain('They cost <strong>at least $1.17</strong>, counting some sessions only up to their last Companion step, with 1 session not recorded.')
   expect(page).toContain('<span class="sr">Failed: </span>1 thing needs attention: Test of Broken Oracle ended ERROR</span>.')
-  expect(page).toContain('<nav aria-label="Sections"><a href="#timeline">Sessions</a><a href="#attention">Attention</a><a href="#components">Components</a><a href="#steps">Steps</a></nav>')
+  expect(page).toContain('<nav aria-label="Sections"><a href="#timeline">Sessions</a><a href="#attention">Attention</a><a href="#components">Components</a><a href="#charts">Charts</a><a href="#steps">Steps</a></nav>')
   expect(page).not.toContain('class="tile')
+  // The navy band holds the title, the summary and the budget; the sessions follow on the page, first.
+  expect(page.indexOf('<section id="timeline" class="first">')).toBeGreaterThan(page.indexOf('<main>'))
+  // A chart per session: its cost (paler where counted only up to its last step), and how its steps went; a click opens its steps.
+  expect(page).toContain('<h3>Cost by session</h3>')
+  expect(page).toContain('a paler bar is counted only up to its last Companion step')
+  expect(page).toContain('class="cat-1 at-least"')
+  expect(page).toContain('<h3>Outcomes by session</h3>')
+  expect(page).toContain('<a class="session-pick" href="#s-cccccccc-3333">')
   expect(page).not.toContain('eyebrow')
   // The timeline is the session index: no Sessions table, each session's band with its cost and, with a budget, how it stood.
   expect(page).not.toContain('<h2>Sessions')
