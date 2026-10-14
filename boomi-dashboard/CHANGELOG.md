@@ -2,6 +2,12 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.27.0
+
+- The HTML report reads as a document, after a design pass with the [Impeccable](https://github.com/pbakaus/impeccable) skill's quality floor. A plain navy bar with links to each section replaces the header and chips. The title is followed by a paragraph saying what happened, in place of four number tiles. Sections are separated by rules instead of each sitting in a box.
+- Statuses use drawn icons (a check, a half circle, a warning triangle, a cross) beside their labels, in place of text symbols. Alerts are tinted, without a thick colored edge, and product tags carry a small swatch.
+- Text selection, scrollbars, links and figures in tables follow the report's colors.
+
 ## 0.26.1
 
 - Fixed: an all-sessions report showed **$0.00** and "1 session" for steps recorded before 0.26.0, which don't name their session. Each such step now goes to the Claude Code session whose transcript covers its time in this folder, with that session's exact cost. The report scans the transcripts if they haven't been scanned in the last hour. Steps no transcript covers are split where the running cost drops (a new session starts at $0) and counted "at least" to their last step. A cost that wasn't recorded shows as **—** and "not recorded", never $0.

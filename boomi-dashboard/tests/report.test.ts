@@ -67,17 +67,18 @@ test("an all-sessions report: sessions, the Boomi account, each component's ID a
     boomi: BOOMI,
   }, NOW, 24 * HOUR)
   expect(page).toContain('<title>Companion Sessions Report</title>')
-  // One hero: what it's about (the Boomi account here, with no repository), and the facts as chips.
+  // A title, then what happened in sentences: no tiles, no label above the heading.
   expect(page).toContain('<h1>Boomi_Me &lt;b&gt;</h1>')
-  expect(page).toContain('Boomi Companion <span class="sep" aria-hidden="true">·</span> All sessions</p>')
-  expect(page).toContain('<li><span class="chip-label">Sessions</span> 4</li>')
-  expect(page).toContain('<li><span class="chip-label">Folder</span> oracle</li>')
-  expect(page).not.toContain('Boomi Companion sessions</h1>')
+  expect(page).toContain('4 sessions in <strong>oracle</strong> between Oct 11 and Oct 14 worked on <strong>3 components</strong> in 5 steps, 1 of which failed or was blocked.')
+  expect(page).toContain('They cost <strong>at least $1.17</strong>, counting some sessions only up to their last Companion step, with 1 session not recorded.')
+  expect(page).toContain('<span class="sr">Failed: </span>1 thing needs attention: Test of Broken Oracle ended ERROR</span>.')
+  expect(page).toContain('<nav aria-label="Sections"><a href="#attention">Attention</a><a href="#sessions">Sessions</a>')
+  expect(page).not.toContain('class="tile')
+  expect(page).not.toContain('eyebrow')
   expect(page).toContain('<h2>Sessions <span class="count">4</span></h2>')
   expect(page).toContain('<code>cccccccc-3333</code> <span class="tag tag-1">this session</span>')
   expect(page).toContain('Earlier session 1 (no ID recorded)')
   expect(page).toContain('not recorded')
-  expect(page).toContain('≥ $1.17')
   expect(page).toContain('at least $0.30')
   // The account, escaped, and no credentials.
   expect(page).toContain('<dt>Account</dt><dd>Boomi_Me &lt;b&gt;</dd>')

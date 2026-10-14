@@ -286,7 +286,7 @@ Boomi Companion sessions on this machine, last 90 days:
 
 It follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system: its Exo III color tokens, light and dark (Light and Dark buttons at the top, or your system's setting), Poppins headings and Noto Sans text, its cards, badges and alerts. Every status shows its icon and its label, never color alone.
 
-- **At a glance:** cost against your budget, tokens (sessions, in an all-sessions report), components and steps, and what needs attention.
+- **The opening:** a title (the repository, else the Boomi account, else the folder) and a paragraph saying what happened in plain sentences: the sessions or how long this one has run, the components and steps, what failed, what it cost against your budget, and what needs attention. Links in the bar at the top go to each section.
 - **Five charts,** each with hover details and a **Show the data** table:
   - steps over the session, stacked by outcome;
   - outcomes by product (click a product to list its steps);
