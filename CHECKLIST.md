@@ -185,6 +185,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** the account's name and ID match the platform's account menu. Each component has a type, a folder, its ID and a version. **Open in Boomi** opens that component in Boomi's build page. **Fail:** a blank type or folder for a component that's in Boomi, a wrong account, or the link opening the wrong page; send the link.
 - [ ] **K8. No doubled steps.** *(0.26.0)* Have Claude create, deploy and test a process in one command, with its file named through a variable (as in `D=active-development/processes && bash … "$D/X.xml"`), then make the report.
   **Pass:** one step each for create, deploy and test, the component's type is `process`, and the test's result is its own `status …`, not the create's `SUCCESS:` line. **Fail:** a step twice, a blank type, or a test showing another script's line.
+- [ ] **K9. Old sessions' costs.** *(0.26.1)* In the folder from your 0.26.0 all-sessions report (the one that showed $0.00), run `/bc-dashboard report html all`.
+  **Pass:** the **Sessions** table lists each day's session separately, with its own ID and cost, not one "Earlier" row. Each cost is within a few cents of what **Past Companion sessions** shows for that session, and the Cost tile is their sum. The same deploy package or test execution appears once under **Deployments and tests**. **Fail:** $0.00, a single earlier session, or a doubled step; send the Sessions table.
 
 ## L. Installed Companion plugins
 

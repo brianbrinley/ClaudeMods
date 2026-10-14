@@ -2,6 +2,12 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.26.1
+
+- Fixed: an all-sessions report showed **$0.00** and "1 session" for steps recorded before 0.26.0, which don't name their session. Each such step now goes to the Claude Code session whose transcript covers its time in this folder, with that session's exact cost. The report scans the transcripts if they haven't been scanned in the last hour. Steps no transcript covers are split where the running cost drops (a new session starts at $0) and counted "at least" to their last step. A cost that wasn't recorded shows as **—** and "not recorded", never $0.
+- Fixed: steps that 0.25.0 and earlier recorded twice (the same deploy package, test execution or save line, minutes apart) now count once, in the report and in the pane's history.
+- The report's top is one hero band: what it's about (the repository, else the Boomi account, else the folder) and its facts as chips, instead of a title bar, a heading and a line that repeated each other.
+
 ## 0.26.0
 
 - `/bc-dashboard report html` asks whether to cover **this session** or **all sessions in this folder** when there's a choice. `report html session` or `report html all` skips the question. The all-sessions report has a **Sessions** table (each session's ID, time, steps, failures, components and cost) and keeps each session's cost apart.

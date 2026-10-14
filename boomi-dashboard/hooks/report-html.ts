@@ -27,7 +27,9 @@ import {
   sessionRuns,
   spendOf,
   spends,
+  shortWhen,
   stages,
+  withoutEchoes,
 } from './activity'
 import type { Level, ReportFacts, Stage } from './activity'
 import { PRODUCT_NAMES } from './products'
@@ -257,12 +259,12 @@ export type ReportScope = 'session' | 'all'
  * every step this folder kept (the window's and the earlier ones), in order.
  */
 export const scoped = (dashboard: Dashboard, scope: ReportScope): Dashboard => {
-  if (scope === 'session') return { ...dashboard, activity: dashboard.activity.filter(a => !a.isRestored && !a.isEarlier), earlier: [], restored: 0 }
+  if (scope === 'session') return { ...dashboard, activity: withoutEchoes(dashboard.activity.filter(a => !a.isRestored && !a.isEarlier)), earlier: [], restored: 0 }
   const seen = new Set<number>()
   const activity = [...(dashboard.earlier ?? []), ...dashboard.activity]
     .filter(a => (seen.has(a.id) ? false : (seen.add(a.id), true)))
     .sort((a, b) => a.startedAt - b.startedAt)
-  return { ...dashboard, activity, earlier: [] }
+  return { ...dashboard, activity: withoutEchoes(activity), earlier: [] }
 }
 
 /** Whether there's anything from earlier sessions, so asking which steps to cover means something. */
@@ -271,7 +273,10 @@ export const hasEarlierSteps = (dashboard: Dashboard): boolean =>
 
 /** One Claude Code session in an all-sessions report. */
 export type SessionSummary = {
-  /** Its Claude Code session ID, or `earlier` for steps kept before steps named their session. */
+  /**
+   * Its Claude Code session ID; or, for steps from before steps named their
+   * session that no transcript accounts for, `earlier-<n>`, in order.
+   */
   id: string
   isCurrent: boolean
   firstAt: number
@@ -279,31 +284,85 @@ export type SessionSummary = {
   steps: number
   failed: number
   components: number
-  /** Claude Code's own cost for it: this session's from its usage, an earlier one's from Past Companion sessions. */
+  /** Claude Code's own cost for it: this session's from its usage, an earlier one's from its transcript. */
   usd?: number
   /** Where usd came from: `exact`, or `atLeast` (what it had cost by its last Companion step). */
   usdIs?: 'exact' | 'atLeast'
   project?: string
 }
 
-/** The session a step belongs to: its own, else this session's when it isn't restored, else `earlier`. */
-export const sessionOfStep = (a: Activity, current: string | undefined): string => a.session ?? (a.isRestored || a.isEarlier ? 'earlier' : (current ?? 'this'))
+/** How far outside a past session's start and end a step still counts as its own. */
+const SESSION_SLACK_MS = 60_000
+
+/**
+ * The session each step belongs to, by step ID: the one it names; else this
+ * session for a step that wasn't brought back; else the past session (from
+ * Claude Code's transcripts, in this folder) whose time covers it; else an
+ * `earlier-<n>`, a new one wherever the running cost goes down, as it does
+ * when a new session starts.
+ */
+export const assignSessions = (activity: readonly Activity[], current: string | undefined, past: readonly PastSession[] = [], folder?: string): Map<number, string> => {
+  const out = new Map<number, string>()
+  const here = past.filter(p => !folder || !p.project || p.project === folder)
+  let n = 0
+  let lastUsd: number | undefined
+  for (const a of [...activity].sort((x, y) => x.startedAt - y.startedAt)) {
+    if (a.session) {
+      out.set(a.id, a.session)
+      continue
+    }
+    if (!a.isRestored && !a.isEarlier) {
+      out.set(a.id, current ?? 'this')
+      continue
+    }
+    const covering = here.find(p => {
+      const start = Date.parse(p.startedAt ?? '')
+      const end = Date.parse(p.endedAt ?? p.startedAt ?? '')
+      return !Number.isNaN(start) && !Number.isNaN(end) && a.startedAt >= start - SESSION_SLACK_MS && a.startedAt <= end + SESSION_SLACK_MS
+    })
+    if (covering) {
+      out.set(a.id, covering.id)
+      continue
+    }
+    if (n === 0 || (a.usdAt !== undefined && lastUsd !== undefined && a.usdAt < lastUsd)) n++
+    if (a.usdAt !== undefined) lastUsd = a.usdAt
+    out.set(a.id, `earlier-${n}`)
+  }
+  return out
+}
+
+/** A session's ID as a person reads it: whole, or which unnamed earlier one it is. */
+export const sessionLabel = (id: string): string => {
+  const m = id.match(/^earlier-(\d+)$/)
+  return m ? `Earlier session ${m[1]} (no ID recorded)` : id
+}
 
 /**
  * Each session the steps came from, newest first: when, how many steps and
- * failures, the components it touched, and what it cost (this session's from
- * its usage; an earlier one's from a transcript scan when there was one, else
- * at least what it had cost by its last step).
+ * failures, the components it touched, and what it cost. This session's cost
+ * is its usage; an earlier one's is Claude Code's own figure from its
+ * transcript when it was scanned, else at least what it had cost by its last
+ * Companion step. A session with no cost recorded at all has none, not $0.
  */
-export const sessionSummaries = (activity: readonly Activity[], current: string | undefined, currentUsd: number | undefined, past: readonly PastSession[] = []): SessionSummary[] => {
+export const sessionSummaries = (
+  activity: readonly Activity[],
+  current: string | undefined,
+  currentUsd: number | undefined,
+  past: readonly PastSession[] = [],
+  folder?: string,
+): SessionSummary[] => {
+  const of = assignSessions(activity, current, past, folder)
   const groups = new Map<string, Activity[]>()
-  for (const a of activity) groups.set(sessionOfStep(a, current), [...(groups.get(sessionOfStep(a, current)) ?? []), a])
+  for (const a of activity) {
+    const id = of.get(a.id)!
+    groups.set(id, [...(groups.get(id) ?? []), a])
+  }
   return [...groups.entries()]
     .map(([id, steps]): SessionSummary => {
       const isCurrent = id === current || id === 'this'
       const scanned = past.find(p => p.id === id)
-      const lastUsd = Math.max(...steps.map(a => a.usdAt ?? -1))
-      const usd = isCurrent ? currentUsd : (scanned?.costUsd ?? (lastUsd >= 0 && id !== 'earlier' ? lastUsd : undefined))
+      const known = steps.flatMap(a => (a.usdAt === undefined ? [] : [a.usdAt]))
+      const usd = isCurrent ? currentUsd : (scanned?.costUsd ?? (known.length > 0 ? Math.max(...known) : undefined))
       const usdIs = usd === undefined ? undefined : isCurrent || scanned?.costUsd !== undefined ? 'exact' : 'atLeast'
       return {
         id,
@@ -318,6 +377,16 @@ export const sessionSummaries = (activity: readonly Activity[], current: string 
       }
     })
     .sort((a, b) => b.lastAt - a.lastAt)
+}
+
+/** The sessions' cost: what's known, whether some is only a lower bound, and whether any is missing. */
+export const sessionsCost = (sessions: readonly SessionSummary[]): { usd?: number; isAtLeast: boolean; missing: number } => {
+  const known = sessions.filter(s => s.usd !== undefined)
+  return {
+    ...(known.length > 0 ? { usd: known.reduce((sum, s) => sum + s.usd!, 0) } : {}),
+    isAtLeast: known.some(s => s.usdIs === 'atLeast'),
+    missing: sessions.length - known.length,
+  }
 }
 
 /** The Boomi account the session worked in, and its components as Boomi has them now. */
@@ -345,8 +414,10 @@ export type HtmlFacts = ReportFacts & {
   scope?: ReportScope
   /** This Claude Code session's ID, whole. */
   sessionId?: string
-  /** Every session's summary, for an all-sessions report. */
-  sessions?: SessionSummary[]
+  /** Past Companion sessions from Claude Code's transcripts: their IDs, times and exact costs. */
+  pastSessions?: PastSession[]
+  /** The workspace folder's full path, to match past sessions to it; never shown. */
+  cwd?: string
   boomi?: BoomiFacts
   /** The workspace folder's name (not its path). */
   folder?: string
@@ -363,26 +434,45 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   const failed = steps.filter(a => a.outcome === 'failed' || a.outcome === 'blocked').length
   const rows = components(dashboard.activity)
   const isAll = facts.scope === 'all'
-  const sessions = isAll ? (facts.sessions ?? []) : []
+  const sessionIds = assignSessions(dashboard.activity, facts.sessionId, facts.pastSessions, facts.cwd)
+  const sessions = isAll ? sessionSummaries(dashboard.activity, facts.sessionId, u.usd, facts.pastSessions, facts.cwd) : []
   const boomi = facts.boomi
-  const shortSession = (id: string) => (id === 'earlier' ? 'earlier' : id.slice(0, 8))
-  const sessionOf = (a: Activity) => sessionOfStep(a, facts.sessionId)
+  const shortSession = (id: string) => (id.startsWith('earlier-') ? `earlier ${id.slice(8)}` : id.slice(0, 8))
+  const sessionOf = (a: Activity) => sessionIds.get(a.id) ?? 'this'
   const when = (t: number) => new Date(t).toISOString().replace('T', ' ').slice(0, 16)
 
-  const meta = (
+  // The hero: what this is about (the repository, else the Boomi account, else the folder), then its facts as chips.
+  const title = facts.repo ? facts.repo.replace(/^https?:\/\/(www\.)?github\.com\//, '') : (boomi?.accountName ?? facts.folder ?? 'Companion session')
+  const span = steps.length > 0 ? `${shortWhen(steps[0]!.startedAt, 'UTC')} → ${shortWhen(steps[steps.length - 1]!.startedAt, 'UTC')} UTC` : undefined
+  const chips = (
     isAll
-      ? [`All sessions in ${facts.folder ?? 'this folder'}`, `${sessions.length} session${sessions.length === 1 ? '' : 's'}`, steps.length > 0 ? `${when(steps[0]!.startedAt)} to ${when(steps[steps.length - 1]!.startedAt)} UTC` : undefined]
-      : [`Session ${facts.session}`, facts.date, u.startedAt === undefined ? undefined : duration(now - u.startedAt), u.model]
-  ).filter(Boolean) as string[]
+      ? [
+          ['Sessions', String(sessions.length)],
+          span && ['When', span],
+          facts.folder && facts.folder !== title && ['Folder', facts.folder],
+        ]
+      : [
+          ['Session', facts.session.slice(0, 8), facts.session],
+          ['Date', facts.date],
+          u.startedAt !== undefined && ['Running', duration(now - u.startedAt)],
+          u.model && ['Model', u.model],
+        ]
+  ).filter(Boolean) as string[][]
+  const chipList = chips
+    .map(([label, value, full]) => `<li${full ? ` title="${esc(full)}"` : ''}><span class="chip-label">${esc(label!)}</span> ${esc(value!)}</li>`)
+    .join('')
 
   const tile = (label: string, value: string, note?: string, level?: Level) =>
     `<div class="card tile"><div class="label">${esc(label)}</div><div class="value">${level ? status(level, value) : esc(value)}</div>${note ? `<div class="note">${esc(note)}</div>` : ''}</div>`
   const budgetPct = u.budgetUsd && u.usd !== undefined ? Math.round((u.usd / u.budgetUsd) * 100) : undefined
-  const allUsd = sessions.reduce((sum, s) => sum + (s.usd ?? 0), 0)
-  const atLeast = sessions.some(s => s.usdIs === 'atLeast' || s.usd === undefined)
+  const total = sessionsCost(sessions)
+  const costNote = [
+    total.isAtLeast ? 'at least: some sessions are counted to their last Companion step' : undefined,
+    total.missing > 0 ? `${total.missing} session${total.missing === 1 ? '' : 's'} with no cost recorded` : undefined,
+  ].filter(Boolean).join('; ')
   const tiles = [
     isAll
-      ? tile('Cost', formatCost(allUsd) ?? '—', atLeast ? 'at least: Scan under Past Companion sessions for exact costs' : 'across the sessions')
+      ? tile('Cost', total.usd === undefined ? '—' : `${total.isAtLeast ? '≥ ' : ''}${formatCost(total.usd) ?? '$0'}`, costNote || 'across the sessions, from Claude Code\'s own figures')
       : tile('Cost', formatCost(u.usd) ?? '—', u.budgetUsd ? `${budgetPct}% of the ${formatCost(u.budgetUsd)} budget` : undefined, budgetPct === undefined ? undefined : budgetPct >= 100 ? 'critical' : budgetPct >= 80 ? 'warning' : undefined),
     isAll
       ? tile('Sessions', String(sessions.length), sessions.length > 0 ? `the latest ${when(sessions[0]!.lastAt)} UTC` : undefined)
@@ -419,8 +509,8 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     })
 
   const sessionRows = sessions.map(s => {
-    const cost = s.usd === undefined ? '' : `${s.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(s.usd) ?? '$0'}`
-    const label = s.id === 'earlier' ? 'Earlier (before steps named their session)' : s.id
+    const cost = s.usd === undefined ? 'not recorded' : `${s.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(s.usd) ?? '$0'}`
+    const label = sessionLabel(s.id)
     return `<tr><th scope="row"><code>${esc(label)}</code>${s.isCurrent ? ' <span class="tag tag-1">this session</span>' : ''}</th><td data-sort="${s.firstAt}">${esc(when(s.firstAt))} UTC</td><td data-sort="${s.lastAt}">${esc(when(s.lastAt))} UTC</td>${num(s.steps, String(s.steps))}${num(s.failed, String(s.failed))}${num(s.components, String(s.components))}${num(s.usd, cost)}</tr>`
   })
 
@@ -462,7 +552,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
         a.file && `<dt>File</dt><dd><code>${esc(a.file)}</code></dd>`,
         took && `<dt>Took</dt><dd>${esc(took)}</dd>`,
         `<dt>Seen in</dt><dd>${a.source === 'log' ? "Companion's activity log" : "Claude's tool call"}</dd>`,
-        isAll && `<dt>Session</dt><dd><code>${esc(sessionOf(a))}</code></dd>`,
+        isAll && `<dt>Session</dt><dd><code>${esc(sessionLabel(sessionOf(a)))}</code></dd>`,
       ]
         .filter(Boolean)
         .join('')
@@ -492,16 +582,21 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
 <style>${STYLE}</style>
 </head>
 <body${isAll ? ' data-days' : ''}>
-<header class="masthead">
-  <div class="brand">Boomi Companion <span>${isAll ? 'All sessions' : 'Session report'}</span></div>
-  <div class="theme" role="group" aria-label="Theme">
-    <button type="button" data-theme-pick="light" aria-pressed="false">Light</button>
-    <button type="button" data-theme-pick="dark" aria-pressed="false">Dark</button>
+<header class="hero">
+  <div class="hero-inner">
+    <div class="hero-top">
+      <p class="eyebrow"><span class="mark" aria-hidden="true">◆</span> Boomi Companion <span class="sep" aria-hidden="true">·</span> ${isAll ? 'All sessions' : 'Session report'}</p>
+      <div class="theme" role="group" aria-label="Theme">
+        <button type="button" data-theme-pick="light" aria-pressed="false">Light</button>
+        <button type="button" data-theme-pick="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+    <h1>${esc(title)}</h1>
+    <ul class="chips">${chipList}</ul>
   </div>
+  <div class="spectrum" aria-hidden="true"><span class="s1"></span><span class="s2"></span><span class="s3"></span><span class="s4"></span><span class="s5"></span><span class="s6"></span></div>
 </header>
 <main>
-<h1>${esc(facts.repo ? facts.repo.replace(/^https?:\/\/(www\.)?github\.com\//, '') : isAll ? 'Boomi Companion sessions' : 'Boomi Companion session')}</h1>
-<p class="meta">${meta.map(esc).join(' · ')}</p>
 <section class="tiles" aria-label="At a glance">${tiles}</section>
 ${account}
 <section id="attention" class="card"><h2>Needs attention</h2>${attentionList}</section>
@@ -558,13 +653,20 @@ const STYLE = `
 *{box-sizing:border-box}
 html{background:var(--exo-color-body)}
 body{margin:0;background:var(--exo-color-body);color:var(--exo-color-font);font:400 .875rem/1.5 var(--exo-font-family)}
-.masthead{display:flex;justify-content:space-between;align-items:center;gap:var(--exo-spacing-standard);padding:var(--exo-spacing-small) var(--exo-spacing-large);background:var(--exo-color-background-brand);color:var(--exo-color-font-inverse)}
-.brand{font:400 1.25rem/1.25 var(--exo-font-brand)}.brand span{font-size:.875rem;opacity:.85;margin-left:.75rem}
+.hero{background:var(--exo-color-background-brand);color:var(--exo-color-font-inverse);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;right:-6rem;top:-8rem;width:26rem;height:26rem;border-radius:50%;background:radial-gradient(closest-side,var(--cat-1),transparent);opacity:.35;pointer-events:none}
+.hero-inner{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:var(--exo-spacing-large) var(--exo-spacing-large) var(--exo-spacing-x-large)}
+.hero-top{display:flex;justify-content:space-between;align-items:center;gap:var(--exo-spacing-standard);flex-wrap:wrap}
+.eyebrow{margin:0;font:600 .75rem/1.5 var(--exo-font-family);letter-spacing:.12em;text-transform:uppercase;opacity:.9}.eyebrow .mark{color:var(--cat-6)}.eyebrow .sep{opacity:.6;margin:0 .25em}
+.hero h1{font:400 clamp(1.75rem,4vw,2.75rem)/1.15 var(--exo-font-brand);margin:var(--exo-spacing-standard) 0 var(--exo-spacing-standard);overflow-wrap:anywhere}
+.chips{display:flex;flex-wrap:wrap;gap:.5rem;list-style:none;margin:0;padding:0}
+.chips li{border:1px solid color-mix(in srgb,var(--exo-color-font-inverse) 35%,transparent);background:color-mix(in srgb,var(--exo-color-font-inverse) 8%,transparent);border-radius:1.5625rem;padding:.2rem .75rem;font-size:.813rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.chip-label{opacity:.75;margin-right:.25em}
+.spectrum{display:flex;height:4px}.spectrum span{flex:1}.spectrum .s1{background:var(--cat-1)}.spectrum .s2{background:var(--cat-2)}.spectrum .s3{background:var(--cat-3)}.spectrum .s4{background:var(--cat-4)}.spectrum .s5{background:var(--cat-5)}.spectrum .s6{background:var(--cat-6)}
 main{max-width:1180px;overflow-wrap:break-word;margin:0 auto;padding:var(--exo-spacing-large)}
 h1,h2,h3{font-family:var(--exo-font-brand);font-weight:400;line-height:1.25;margin:0}
 h1{font-size:1.75rem}h2{font-size:1.25rem;margin-bottom:var(--exo-spacing-small)}h3{font-size:1rem}
-.meta,.muted,.note,.hint,.aside,.sub,footer,.count{color:var(--exo-color-font-secondary)}
-.meta{margin:.25rem 0 var(--exo-spacing-large)}
+.muted,.note,.hint,.aside,.sub,footer,.count{color:var(--exo-color-font-secondary)}
 .card{background:var(--exo-color-background);border:1px solid var(--exo-color-border-secondary);border-radius:var(--exo-radius-standard);box-shadow:0 0 .3125rem 0 var(--exo-color-shadow-moderate);padding:var(--exo-spacing-standard) var(--exo-spacing-large);margin-bottom:var(--exo-spacing-standard)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:var(--exo-spacing-standard);margin-bottom:var(--exo-spacing-standard)}
 .tile{margin:0}.tile .label{font-weight:600;color:var(--exo-color-font-secondary)}.tile .value{font:400 2rem/1.25 var(--exo-font-brand);font-variant-numeric:tabular-nums;margin:.25rem 0}
@@ -624,7 +726,7 @@ code{font:.813rem var(--exo-font-monospace)}
 ul.plain{list-style:none;padding:0;margin:0}ul.plain li{margin:.25rem 0}ul.plain li.sub{margin-left:1.4em;color:var(--exo-color-font-secondary)}
 .tooltip{position:fixed;z-index:10;pointer-events:none;max-width:320px;background:var(--exo-color-font);color:var(--exo-color-background);border-radius:var(--exo-radius-standard);padding:.35rem .6rem;font-size:.813rem;box-shadow:0 0 1rem 0 var(--exo-color-shadow-moderate)}
 footer{max-width:1180px;margin:0 auto;padding:var(--exo-spacing-standard) var(--exo-spacing-large) var(--exo-spacing-x-large);font-size:.813rem}
-@media (max-width:640px){.masthead,main,footer{padding-left:1rem;padding-right:1rem}.brand span{display:none}.card{padding:.75rem 1rem}.search input{min-width:0;width:100%}.tile .value{font-size:1.5rem}}
+@media (max-width:640px){main,footer,.hero-inner{padding-left:1rem;padding-right:1rem}.chips li{white-space:normal}.card{padding:.75rem 1rem}.search input{min-width:0;width:100%}.tile .value{font-size:1.5rem}}
 @media print{.theme,.controls,details.data{display:none}.card{box-shadow:none}}
 @media (forced-colors:active){.badge,.alert{border:1px solid CanvasText}}
 `

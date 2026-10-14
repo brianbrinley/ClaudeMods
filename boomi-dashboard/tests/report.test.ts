@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Activity, Dashboard } from '../types'
-import { boomiLink, hasEarlierSteps, packageOf, reportHtml, scoped, sessionSummaries } from '../hooks/report-html'
+import { assignSessions, boomiLink, hasEarlierSteps, packageOf, reportHtml, scoped, sessionLabel, sessionSummaries, sessionsCost } from '../hooks/report-html'
+import { withoutEchoes } from '../hooks/activity'
 import { platformClient } from '../hooks/platform'
 
 const NOW = Date.parse('2026-10-14T00:54:00Z')
@@ -31,7 +32,7 @@ test("each session's steps, failures, components and cost: this one's from usage
     ['cccccccc-3333', 1, 0, 1, 0.75, 'exact'],
     ['bbbbbbbb-2222', 1, 1, 1, 0.4, 'exact'],
     ['aaaaaaaa-1111', 2, 0, 1, 0.3, 'atLeast'],
-    ['earlier', 1, 0, 1, undefined, undefined],
+    ['earlier-1', 1, 0, 1, undefined, undefined],
   ])
   expect(sessions[0]!.isCurrent).toBe(true)
   expect(sessions[1]!.project).toBe('oracle')
@@ -64,13 +65,19 @@ test("an all-sessions report: sessions, the Boomi account, each component's ID a
     scope: 'all',
     folder: 'oracle',
     boomi: BOOMI,
-    sessions: sessionSummaries(all.activity, 'cccccccc-3333', 0.75),
   }, NOW, 24 * HOUR)
   expect(page).toContain('<title>Companion Sessions Report</title>')
-  expect(page).toContain('All sessions in oracle · 4 sessions')
+  // One hero: what it's about (the Boomi account here, with no repository), and the facts as chips.
+  expect(page).toContain('<h1>Boomi_Me &lt;b&gt;</h1>')
+  expect(page).toContain('Boomi Companion <span class="sep" aria-hidden="true">·</span> All sessions</p>')
+  expect(page).toContain('<li><span class="chip-label">Sessions</span> 4</li>')
+  expect(page).toContain('<li><span class="chip-label">Folder</span> oracle</li>')
+  expect(page).not.toContain('Boomi Companion sessions</h1>')
   expect(page).toContain('<h2>Sessions <span class="count">4</span></h2>')
   expect(page).toContain('<code>cccccccc-3333</code> <span class="tag tag-1">this session</span>')
-  expect(page).toContain('Earlier (before steps named their session)')
+  expect(page).toContain('Earlier session 1 (no ID recorded)')
+  expect(page).toContain('not recorded')
+  expect(page).toContain('≥ $1.17')
   expect(page).toContain('at least $0.30')
   // The account, escaped, and no credentials.
   expect(page).toContain('<dt>Account</dt><dd>Boomi_Me &lt;b&gt;</dd>')
@@ -138,4 +145,41 @@ test("the Platform API client reads an account's name and its components' curren
   const query = JSON.parse(calls[1]!.body!)
   expect(query.QueryFilter.expression.nestedExpression[0].operator).toBe('or')
   expect(await client.componentDetails([])).toEqual([])
+})
+
+test("steps from before sessions were named find theirs: a transcript's time in this folder, else a drop in the running cost", () => {
+  const old = (id: number, at: number, usdAt?: number): Activity => step(id, { startedAt: at, isRestored: true, ...(usdAt === undefined ? {} : { usdAt }) })
+  const steps = [old(1, NOW - 30 * HOUR, 0.1), old(2, NOW - 29 * HOUR, 0.5), old(3, NOW - 20 * HOUR, 0.05), old(4, NOW - 19 * HOUR, 0.2), old(5, NOW - 2 * HOUR, 0.3)]
+  // Without a scan: a new session wherever the cost goes down.
+  expect([...assignSessions(steps, 'now-id').values()]).toEqual(['earlier-1', 'earlier-1', 'earlier-2', 'earlier-2', 'earlier-2'])
+  // With one: the transcript whose time covers a step in this folder claims it, with its exact cost.
+  const past = [
+    { id: 'tx-1', project: '/work/oracle', startedAt: new Date(NOW - 31 * HOUR).toISOString(), endedAt: new Date(NOW - 28 * HOUR).toISOString(), costUsd: 1.9, tokens: 0, cached: 0, models: [], runs: {}, components: [] },
+    { id: 'tx-elsewhere', project: '/work/other', startedAt: new Date(NOW - 21 * HOUR).toISOString(), endedAt: new Date(NOW - 18 * HOUR).toISOString(), costUsd: 9, tokens: 0, cached: 0, models: [], runs: {}, components: [] },
+  ]
+  const ids = assignSessions(steps, 'now-id', past, '/work/oracle')
+  expect([...ids.values()]).toEqual(['tx-1', 'tx-1', 'earlier-1', 'earlier-1', 'earlier-1'])
+  const sessions = sessionSummaries(steps, 'now-id', 0.4, past, '/work/oracle')
+  expect(sessions.map(s => [s.id, s.usd, s.usdIs])).toEqual([['earlier-1', 0.3, 'atLeast'], ['tx-1', 1.9, 'exact']])
+  expect(sessionLabel('earlier-1')).toBe('Earlier session 1 (no ID recorded)')
+})
+
+test("the sessions' cost is what's known: never $0 for a cost that wasn't recorded", () => {
+  expect(sessionsCost([])).toEqual({ isAtLeast: false, missing: 0 })
+  const none = { id: 'earlier-1', isCurrent: false, firstAt: 0, lastAt: 0, steps: 71, failed: 7, components: 6 }
+  expect(sessionsCost([none])).toEqual({ isAtLeast: false, missing: 1 })
+  expect(sessionsCost([none, { ...none, id: 'x', usd: 0.5, usdIs: 'atLeast' }])).toEqual({ usd: 0.5, isAtLeast: true, missing: 1 })
+})
+
+test('a deploy, test or save recorded twice within minutes is one step, the one that says the most', () => {
+  const twins: Activity[] = [
+    step(1, { kind: 'deploy', subject: 'a component', detail: "SUCCESS: Deployed 'Oracle' (package: p-1)", startedAt: NOW }),
+    step(2, { kind: 'deploy', subject: 'Oracle', file: 'active-development/process/Oracle.xml', detail: "SUCCESS: Deployed 'Oracle' (package: p-1)", startedAt: NOW + 1000 }),
+    step(3, { kind: 'test', subject: 'a component', executionId: 'execution-1', detail: 'status COMPLETE', startedAt: NOW + 2000 }),
+    step(4, { kind: 'test', subject: 'Oracle', executionId: 'execution-1', detail: 'status COMPLETE', startedAt: NOW + 2000 }),
+    // The same package deployed again a day later is another step; so is a test with another execution.
+    step(5, { kind: 'deploy', subject: 'Oracle', detail: "SUCCESS: Deployed 'Oracle' (package: p-1)", startedAt: NOW + 24 * HOUR }),
+    step(6, { kind: 'test', subject: 'Oracle', executionId: 'execution-2', detail: 'status COMPLETE', startedAt: NOW + 2000 }),
+  ]
+  expect(withoutEchoes(twins).map(a => a.id)).toEqual([2, 4, 5, 6])
 })

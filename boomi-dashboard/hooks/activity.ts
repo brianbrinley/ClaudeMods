@@ -457,6 +457,43 @@ export const unclaimedReading = (isError: boolean): Reading =>
     ? { outcome: 'failed', detail: 'ERROR: the command failed before this script printed a result' }
     : { outcome: 'ok', detail: 'no result of its own in the output (it ran in a command with other scripts)' }
 
+/** What makes a step the same as another: a test's execution, a deploy's package, a save's own line. */
+const echoKey = (a: Activity): string | undefined => {
+  if (a.product || a.outcome === 'running') return undefined
+  if (a.kind === 'test') return a.executionId ? `test:${a.executionId}` : undefined
+  if (a.kind === 'deploy') {
+    const pkg = a.detail.match(/\(package: ([^)\s]+)\)/)?.[1]
+    return pkg ? `deploy:${pkg}` : undefined
+  }
+  if ((a.kind === 'create' || a.kind === 'push') && /^SUCCESS:/.test(a.detail)) return `${a.kind}:${a.detail}`
+  return undefined
+}
+
+/** How much a step says: a file, a real name and a tool call beat their absence. */
+const richness = (a: Activity) => (a.file ? 4 : 0) + (a.subject !== 'a component' ? 2 : 0) + (a.source !== 'log' ? 1 : 0)
+
+/**
+ * The steps without echoes: the same test execution, deploy package or save
+ * line twice within a few minutes is one step, the one that says the most.
+ * Steps recorded before 0.26.0 could count a result printed twice as two, and
+ * Companion's activity log can repeat a tool call's run.
+ */
+export const withoutEchoes = (activity: readonly Activity[]): Activity[] => {
+  const best = new Map<string, Activity>()
+  const dropped = new Set<number>()
+  for (const a of activity) {
+    const key = echoKey(a)
+    if (!key) continue
+    const seen = best.get(key)
+    if (seen && Math.abs(a.startedAt - seen.startedAt) <= 5 * 60_000) {
+      const keep = richness(a) > richness(seen) ? a : seen
+      dropped.add(keep === a ? seen.id : a.id)
+      best.set(key, keep)
+    } else best.set(key, a)
+  }
+  return dropped.size === 0 ? [...activity] : activity.filter(a => !dropped.has(a.id))
+}
+
 /** The ID, name and type on a component XML's root element. */
 export const componentOf = (xml: string): { componentId?: string; name?: string; type?: string } => {
   const root = xml.match(/<(?:[A-Za-z]+:)?Component\b[^>]*>/)?.[0] ?? ''

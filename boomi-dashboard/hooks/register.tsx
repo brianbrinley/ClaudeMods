@@ -78,6 +78,7 @@ import {
   recapOf,
   welcomeLine,
   unclaimedReading,
+  withoutEchoes,
   tipsFor,
   quarantineLines,
   agents,
@@ -106,7 +107,7 @@ import {
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
-import { hasEarlierSteps, reportHtml, scoped, sessionSummaries } from './report-html'
+import { hasEarlierSteps, reportHtml, scoped } from './report-html'
 import type { BoomiFacts, ReportScope } from './report-html'
 import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
 import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
@@ -478,8 +479,9 @@ const restoreActivity = async ($: Engine, settings: Settings) => {
       | undefined
     if (saved?.recap) await update($, recap, () => saved.recap!)
     const now = await $.clock.now()
-    const all = saved?.activity ?? []
-    idFloor = all.reduce((max, a) => Math.max(max, a.id), 0)
+    // Steps recorded before results printed twice counted once lose their echoes here.
+    const all = withoutEchoes(saved?.activity ?? [])
+    idFloor = (saved?.activity ?? []).reduce((max, a) => Math.max(max, a.id), 0)
     const isRecent = (a: Activity) => now - (a.endedAt ?? a.startedAt) <= settings.windowMs
     const kept = all.filter(isRecent).map(a => ({ ...a, isRestored: true }))
     const earlier = all.filter(a => !isRecent(a)).map(a => ({ ...a, isRestored: true, isEarlier: true }))
@@ -1422,7 +1424,8 @@ const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly 
       scope,
       folder: cwd.split('/').filter(Boolean).pop(),
       boomi: await boomiFacts($, settings, view),
-      ...(scope === 'all' ? { sessions: sessionSummaries(view.activity, sessionId, usage.usd, (await read($, history)).sessions ?? []) } : {}),
+      cwd,
+      ...(scope === 'all' ? { pastSessions: await pastForReport($, settings) } : {}),
     },
     now,
     settings.windowMs,
@@ -1438,6 +1441,18 @@ const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly 
       : 'Open it in a browser (it works offline; with a connection it also loads the fonts). It is one file with nothing live in it and no credentials, so you can send it as it is.',
     `In it: ${scope === 'all' ? 'every session this folder kept, each with its steps and cost; ' : ''}the Boomi account, each component's ID, type, folder and version in Boomi with a link to open it, every deploy's package and test's execution ID, sortable tables, the steps filtered by product or by what failed, and the charts.`,
   ].join('\n')
+}
+
+/**
+ * Past Companion sessions for an all-sessions report: their IDs, times and
+ * Claude Code's own costs, from the last scan when it's under an hour old,
+ * else from a scan now. Empty when the transcripts can't be read.
+ */
+const pastForReport = async ($: Engine, settings: Settings) => {
+  const known = await read($, history)
+  const isFresh = known.phase === 'ready' && known.scannedAt !== undefined && (await $.clock.now()) - known.scannedAt < 3_600_000
+  const state = isFresh ? known : await scanHistory($, settings).catch(() => known)
+  return state.sessions ?? known.sessions ?? []
 }
 
 /**
