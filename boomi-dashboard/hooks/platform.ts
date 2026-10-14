@@ -77,6 +77,16 @@ export type ComponentVersion = {
   modifiedDate?: string
 }
 
+/** A component as Boomi has it now: what the report shows beside the session's own view of it. */
+export type ComponentDetails = ComponentVersion & {
+  componentId: string
+  type?: string
+  folderName?: string
+  createdBy?: string
+  createdDate?: string
+  branchName?: string
+}
+
 const text = (value: unknown): string | undefined =>
   value === undefined || value === null || value === '' ? undefined : String(value)
 
@@ -108,7 +118,48 @@ export const platformClient = (fetch: Fetch, credentials: Credentials) => {
     argument: [value],
   })
 
+  const details = (raw: Record<string, unknown>): ComponentDetails => ({
+    componentId: String(raw.componentId ?? ''),
+    name: text(raw.name),
+    version: text(raw.version),
+    type: text(raw.type),
+    folderName: text(raw.folderName),
+    createdBy: text(raw.createdBy),
+    createdDate: text(raw.createdDate),
+    modifiedBy: text(raw.modifiedBy),
+    modifiedDate: text(raw.modifiedDate),
+    branchName: text(raw.branchName),
+  })
+
   return {
+    /** The account's name, from its Account record; undefined when the API user can't read it. */
+    accountName: async (): Promise<string | undefined> => {
+      const response = await fetch(`${base}/Account/${encodeURIComponent(credentials.accountId)}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json', Authorization: basicAuth(credentials) },
+      })
+      if (!response.ok) throw new PlatformError('Read the account', response.status)
+      try {
+        return text((JSON.parse(response.text) as { name?: unknown }).name)
+      } catch {
+        return undefined
+      }
+    },
+
+    /**
+     * Components as Boomi has them now (current version on the default branch):
+     * type, folder, version and who changed them when. One query for up to 100.
+     */
+    componentDetails: async (componentIds: readonly string[]): Promise<ComponentDetails[]> => {
+      const ids = [...new Set(componentIds)].slice(0, 100)
+      if (ids.length === 0) return []
+      const which = ids.length === 1 ? equals('componentId', ids[0]!) : { operator: 'or', nestedExpression: ids.map(id => equals('componentId', id)) }
+      const found = await query('Read component metadata', 'ComponentMetadata/query', {
+        QueryFilter: { expression: { operator: 'and', nestedExpression: [which, equals('currentVersion', 'true')] } },
+      })
+      return found.map(details).filter(d => d.componentId)
+    },
+
     /** The IDs of the runtimes attached to an environment. */
     environmentAtoms: async (environmentId: string): Promise<string[]> =>
       (

@@ -177,6 +177,14 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** each works: the theme changes, a tooltip appears, the steps list shows only that product, the table re-orders, and the search narrows the list. **Fail:** say which didn't.
 - [ ] **K4. Share it.** Send the file to someone (or open it on another computer or a phone).
   **Pass:** it looks the same there, and on a phone nothing runs off the side of the screen; the tables scroll inside their cards. **Fail:** say what's off.
+- [ ] **K5. This session or all.** *(0.26.0)* In a folder where you used Companion in an earlier session today, do some Companion work, then run `/bc-dashboard report html`.
+  **Pass:** a question with **This session** and **All sessions in this folder**. **All** saves `boomi-sessions-report-<time>.html` with a **Sessions** table listing this session (tagged **this session**) and the earlier one. **This session** saves `boomi-session-report-<time>.html` with only this session's steps. **Fail:** no question, a session missing, or the earlier session's steps in a this-session report.
+- [ ] **K6. It opens.** *(0.26.0)* After K5, on your own computer.
+  **Pass:** the page opens in your browser by itself, and the command says `Opened it in your browser.` **Fail:** it doesn't open; say which system (macOS, Windows/WSL, Linux).
+- [ ] **K7. Boomi's view.** *(0.26.0)* In K5's page, look at **Boomi account** and **Components**, then press **Open in Boomi** on one component.
+  **Pass:** the account's name and ID match the platform's account menu. Each component has a type, a folder, its ID and a version. **Open in Boomi** opens that component in Boomi's build page. **Fail:** a blank type or folder for a component that's in Boomi, a wrong account, or the link opening the wrong page; send the link.
+- [ ] **K8. No doubled steps.** *(0.26.0)* Have Claude create, deploy and test a process in one command, with its file named through a variable (as in `D=active-development/processes && bash … "$D/X.xml"`), then make the report.
+  **Pass:** one step each for create, deploy and test, the component's type is `process`, and the test's result is its own `status …`, not the create's `SUCCESS:` line. **Fail:** a step twice, a blank type, or a test showing another script's line.
 
 ## L. Installed Companion plugins
 

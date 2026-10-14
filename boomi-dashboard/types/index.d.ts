@@ -76,6 +76,8 @@ export type Activity = {
   usdAt?: number
   /** The model that answered the latest call before this step. */
   model?: string
+  /** The Claude Code session the step happened in (since 0.26.0): the report tells sessions apart by it. */
+  session?: string
   /** Brought back from an earlier session in the same folder. */
   isRestored?: boolean
   /**
