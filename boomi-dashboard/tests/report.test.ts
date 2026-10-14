@@ -238,7 +238,7 @@ test("a session's budget: a meter and a warning in the summary near it, and how 
   const view = scoped(DASHBOARD, 'session')
   const base = { session: 'cccccccc-3333', sessionId: 'cccccccc-3333', date: '2026-10-14', scope: 'session' as const }
   const none = reportHtml(view, { ...base, usage: { usd: 0.4 }, budgets: [] }, NOW, 24 * HOUR)
-  expect(none).toContain('No budget set</span> <span class="na-how">Set <code>budgetUsd</code> for each session')
+  expect(none).toContain('No budget set</span> <span class="na-how">Run <code>/bc-dashboard config budget</code> to set one')
   expect(none).not.toContain('class="meter')
   const near = reportHtml(view, { ...base, usage: { usd: 0.9, budgetUsd: 1 }, budgets: [{ label: 'session', level: 'warning', percent: 90, detail: '$0.90 of $1.00' }], sessionBudgetUsd: 1 }, NOW, 24 * HOUR)
   expect(near).toContain('<li class="meter meter-warning"><div class="meter-head"><span>Session</span><span class="status status-warning">')

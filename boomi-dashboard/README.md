@@ -199,7 +199,9 @@ There are three budgets. Set any of them, or none. They only warn: nothing is ev
 
 Not sure? On a Pro or Max seat, start with `companionShare` (your limit is what runs out). On an API key, start with `companionMonthlyUsd` (your bill is what grows).
 
-**In Claude Code (easiest):**
+**With the dashboard (easiest):** run `/bc-dashboard config budget`. It asks about each budget in turn, starting with your current value. It offers figures from what your past Companion sessions cost, such as "twice a typical session" or "a quarter above the last 30 days". Pick one, keep what you have, or type your own under **Other**. The changes are saved to `/config` and take effect at once.
+
+**In `/config`:**
 
 1. Run `/config`.
 2. Find the **boomi-dashboard** rows: **Spend budget (USD)**, **Companion's share of your usage limit (%)**, **Companion share period** and **Companion's monthly amount (USD)**.
@@ -312,6 +314,7 @@ With a connection it loads Exosphere's fonts from Google Fonts; offline it falls
 | `/bc-dashboard resume [n]` | | Copies the command that reopens a past session in a new terminal; without a number, asks which. |
 | `/bc-dashboard review [n]` | | What drove a past session's cost, and what to change next time; without a number, asks which of the costliest. |
 | `/bc-dashboard theme [name]` | | Picks the pane's theme, or lists them. |
+| `/bc-dashboard config [budget\|pane\|data]` | | Walks through the dashboard's settings a question at a time, or one group of them. `config <setting> <value>` sets one, such as `config budgetUsd 5`. `config list` shows them all. |
 | `/bc-dashboard banner` | | Shows the banner again after **Hide**. |
 
 Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix?" and it answers from the summary.
@@ -322,7 +325,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 - **Claude Code on the web:** add the folder to `CLAUDE_CODE_PLUGIN_DIRS`, separating mods with `:`.
 - **One terminal session:** `claude --plugin-dir boomi-dashboard`.
 
-**Watched components** need network access to `api.boomi.com`. Settings are under `/config`:
+**Watched components** need network access to `api.boomi.com`. Settings are under `/config`, or a question at a time with `/bc-dashboard config`:
 
 | Setting | Default | |
 |---|---|---|

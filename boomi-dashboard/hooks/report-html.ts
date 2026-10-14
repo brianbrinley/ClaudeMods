@@ -690,7 +690,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   const budgetBlock = `<aside class="budgets" id="budget" aria-label="Budgets"><h2>Budget</h2>${
     budgetRows.length > 0
       ? `<ul class="plain">${budgetRows.join('')}</ul>`
-      : `<p class="note">${notSet('No budget set', 'Set <code>budgetUsd</code> for each session, or <code>companionMonthlyUsd</code> for the month, under <code>/config</code> to see spending against it.')}</p>`
+      : `<p class="note">${notSet('No budget set', 'Run <code>/bc-dashboard config budget</code> to set one for each session or for the month, and see spending against it here.')}</p>`
   }${perSession.length > 0 ? `<p class="note">${over.length === 0 ? status('healthy', `Every session stayed under the ${formatCost(facts.sessionBudgetUsd!)} session budget`) : status('critical', `${over.length} of ${perSession.length} sessions reached the ${formatCost(facts.sessionBudgetUsd!)} session budget`)}.</p>` : ''}</aside>`
   if (over.length > 0) lede.splice(lede.length - 1, 0, `${plural(over.length, 'session')} reached the ${strong(formatCost(facts.sessionBudgetUsd!) ?? '$0')} session budget.`)
 

@@ -208,3 +208,12 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** a **Data Hub** section saying `Quarantined entities show up here once Claude checks a universe's quarantine.`, and no **Agentstudio agents** or **Custom connectors** section unless those plugins are on. **Fail:** no **Data Hub** section, or sections for plugins you don't have.
 - [ ] **L3. A disabled plugin.** Run `claude plugin disable bc-integration@boomi-companion`, restart in a folder where Companion hasn't been used today, and open the pane.
   **Pass:** no **Components this session** section, and no Why?, Run again or watch tips. Turn it back on with `claude plugin enable bc-integration@boomi-companion`. **Fail:** the section is there with its empty-state line.
+
+## M. Settings menu
+
+- [ ] **M1. The budget, a question at a time.** *(0.32.0)* In a folder with past Companion sessions, run `/bc-dashboard config`, pick **Budget**, then pick the second option for the session budget, keep the rest, and pick **Done**.
+  **Pass:** the session budget question says what your sessions cost typically and at most, and its options include a figure "twice a typical session". After **Done**, the reply lists the change under "Saved to /config:", `/config` shows the new **Spend budget (USD)**, and the pane shows a **BUDGET** gauge without a restart. **Fail:** no figures from past sessions, a change that `/config` doesn't show, or no gauge until a restart.
+- [ ] **M2. Back, Other and closing.** *(0.32.0)* Run `/bc-dashboard config pane`, pick **Night** for the colors, then press Esc on the next question.
+  **Pass:** the pane turns Night, and the reply says the menu closed before Done and the change is saved. Run `/bc-dashboard config budgetUsd lots`: it says the budget takes a number and stays as it was. **Fail:** the change is lost on Esc, or the typed value is saved.
+- [ ] **M3. Where nothing can be asked.** *(0.32.0)* Run `claude -p "/bc-dashboard config"`.
+  **Pass:** it prints every setting by group with its value, and how to change one with `/bc-dashboard config <setting> <value>`. **Fail:** it hangs or prints nothing.

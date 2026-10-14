@@ -2,6 +2,14 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.32.0
+
+- **`/bc-dashboard config`: the settings a question at a time.** Pick **Budget**, **Pane and banner** or **Data and reports**, and the dashboard asks about each setting in that group. Each question starts with **Keep** and the current value, offers two likely changes, and has **Back to the menu**. Type any other value under **Other**.
+  - The budget questions offer figures from what your past Companion sessions on this machine really cost, such as "twice a typical session", "your costliest session" or "a quarter above the last 30 days".
+  - The changes are saved to `/config` when you pick **Done**, and take effect at once. Settings the dashboard reads only at the start of a session (the flamingo, polling, the activity log, update checks) say so.
+  - Shortcuts: `/bc-dashboard config budget` goes straight to the budget, `config budgetUsd 5` sets one setting, and `config list` shows them all. Where nothing can be asked, as in a `-p` run, it lists them.
+- The report's "No budget set" and the new-session budget tip point to `/bc-dashboard config budget`.
+
 ## 0.31.0
 
 - **The report says what's missing, and why.** Where something isn't there, the report says which of three cases it is. Hover over it, or use a screen reader, for the reason:
