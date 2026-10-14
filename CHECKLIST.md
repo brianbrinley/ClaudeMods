@@ -197,9 +197,9 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** each row's Saved, Deployed and Tested columns show the stage with its icon, its time, and the version, package or execution. The clicked ID is copied: paste it somewhere to check. **Fail:** a stage in the wrong column, or nothing copied.
 - [ ] **K14. What's missing.** *(0.31.0)* Run `/bc-dashboard report html all` in a folder where Companion tested a process without waiting, and where no budget is set. Hover over the ⓘ notes and the dashes.
   **Pass:** a stage that didn't happen shows a dash, and hovering says "Not deployed in these sessions" (or saved, or tested). The test without a wait says "execution ID not available", with the reason on hover. The budget panel says "No budget set", with how to set one beneath it. **Fail:** an empty cell, a note with no reason on hover, or a dash where the step did happen.
-
 - [ ] **K15. Less navy, and charts per session.** *(0.33.0)* In a folder with two or more Companion sessions, run `/bc-dashboard report html all`.
   **Pass:** the navy band holds only the title, the summary and the budget. The sessions come next, on a light card. **Charts** has **Cost by session** and **Outcomes by session**, a bar per session, and clicking one opens that session's steps. **Fail:** the sessions still inside the navy band, no charts, or a click that goes nowhere.
+
 ## L. Installed Companion plugins
 
 *boomi-dashboard 0.24.0. Needs a Companion workspace (an `active-development` folder) and a session restart between steps.*
