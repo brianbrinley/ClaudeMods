@@ -279,24 +279,19 @@ Boomi Companion sessions on this machine, last 90 days:
 
 - **This session or all of them.** When the dashboard kept steps from earlier sessions in this folder, it asks which to cover. **This session** saves `boomi-session-report-<time>.html`. **All sessions in this folder** saves `boomi-sessions-report-<time>.html`, with a **Sessions** table giving each session's ID, when it ran, its steps, failures, components and cost. Costs are Claude Code's own, from each session's transcript (it scans them first if the last scan is over an hour old). Where no transcript covers a step, the cost is "at least" what the session had cost by its last Companion step, and one that wasn't recorded shows as **—**, never $0. `report html session` or `report html all` skips the question.
 - **Opening it:** it uses your system's opener (`open` on macOS, `wslview` or Explorer under WSL, `xdg-open` on a Linux desktop). Where there's no browser (a container, a server), it just says where the file is. `--no-open`, or `reportOpen` set to off, saves without opening.
-- **The Boomi account:** the account's name and ID, the environment ID and the Platform API host, read from Companion's `.env`. The API token and user name never go in the page.
-- **Each component as Boomi has it now:** type, folder, component ID, current version, and who changed it last and when, read from the Platform API as the report is made. A component Boomi now knows by another name shows that name too. **Open in Boomi** goes to the component in Boomi's build page. If the API can't be reached, the report says so and shows what the session saw.
-- **Deployments and tests:** every deploy with its package ID, and every test with its execution ID and status, so you can find them in Boomi's Process Reporting and Deploy pages.
-- **Each step:** its result, component (with **Open in Boomi**), version, package, execution, file, how long it took, and whether it came from Claude's tool call or Companion's activity log. In an all-sessions report, also its session.
+- **The top of the page** is a navy band holding the title, the summary in sentences, your budgets and the timeline. The Boomi account (name, account ID, environment ID, API host) follows on one line. The account details come from Companion's `.env`, but the API token and user name never go in the page.
+- **Budgets:** each budget you set under `/config` gets a meter showing how far along it is: `budgetUsd` for the session, `companionMonthlyUsd` for the month's Companion spend, and `companionShare` for Companion's share of your Claude limit. Past 80% a budget says so with its icon, and past 100% it shows as spent. In an all-sessions report, each session is also held against the session budget, on its timeline band and in the summary ("1 session reached the $5.00 session budget"). With no budget set, the report says how to set one.
+- **The timeline** is the index of sessions:
+  - each session is a band, with its full ID on hover, and the idle time between sessions is a gap with its length;
+  - each step is a tick, with failures marked by their icon;
+  - the arrow keys move between ticks, and Enter or a click opens that step in the list.
+- **Components** are swimlanes: one row per component, with columns for **Saved**, **Deployed** and **Tested**. Each stage is in the dashboard's own words with its icon, when it happened, and the ID to find it by: Boomi's current version, the deploy package, the test execution. Boomi's view of the component (type, folder, current name) and **Open in Boomi** sit under its name. Click any ID to copy it.
+- **Claude's steps,** grouped by session: search them, filter to what failed, to deploys and tests, or to one product, and open one (or **Expand all**). A failed step shows what went wrong without being opened.
 
 It follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system: its Exo III color tokens, light and dark (Light and Dark buttons at the top, or your system's setting), Poppins headings and Noto Sans text, its cards, badges and alerts. Every status shows its icon and its label, never color alone.
 
-- **The opening:** a title (the repository, else the Boomi account, else the folder) and a paragraph saying what happened in plain sentences: the sessions or how long this one has run, the components and steps, what failed, what it cost against your budget, and what needs attention. Links in the bar at the top go to each section.
-- **The timeline,** under the summary: each session a band on one strip, the idle time between them as a gap with its length, each step a tick with failures marked by their icon. Hover a tick for the step, or click a session for its steps.
-- **Four charts,** each with hover details and a **Show the data** table:
-  - outcomes by product (click a product to list its steps);
-  - cost over the session (in a one-session report: different sessions' costs don't add up to one line);
-  - spend by product;
-  - the component pipeline: worked on, saved in Boomi, deployed, tested and passing.
-
-  Products keep the same color in every chart, from a set of Exosphere colors checked for color blindness and contrast. Status colors are used only for status.
-- **Tables** of components, custom connectors and Agentstudio agents, sorted by clicking a column.
-- **Claude's steps,** grouped by session, newest first (or oldest first): search them, filter to what failed or to one product, and open one for its result, component, execution and file.
+- **Charts** appear only when they add something: outcomes and spend by product when the work spans two products or more, and cost over the session in a one-session report. Each has hover details and a **Show the data** table, and products keep the same color in every chart.
+- **Tables** of custom connectors and Agentstudio agents, sorted by clicking a column.
 
 With a connection it loads Exosphere's fonts from Google Fonts; offline it falls back to your system's fonts.
 

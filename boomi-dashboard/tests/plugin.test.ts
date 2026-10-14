@@ -1814,13 +1814,13 @@ test('/bc-dashboard report html writes the session as one web page, escaped and 
   expect(page).toContain('<title>Companion Session Report</title>')
   expect(page).toContain('content="boomi-dashboard 9.9.9"')
   // Each status has its icon and its label, never color alone.
-  expect(page).toContain('<span class="badge badge-healthy"><svg class="i" viewBox="0 0 16 16" aria-hidden="true" focusable="false">')
+  expect(page).toContain('<td class="lane" data-sort="3"><span class="status status-healthy"><svg class="i" viewBox="0 0 16 16" aria-hidden="true" focusable="false">')
   expect(page).toContain('<span class="sr">Healthy: </span>saved v4</span>')
   expect(page).toContain('<span class="sr">Failed: </span>BDI: couldn&#39;t run flow flow-1')
   expect(page).toContain('<h3>Outcomes by product</h3>')
   expect(page).toContain('data-pick="product:BDI"')
-  expect(page).toContain('<h3>Component pipeline</h3>')
-  expect(page).toContain('<th scope="row">Orders Sync</th>')
+  expect(page).not.toContain('Component pipeline')
+  expect(page).toContain('<th scope="row" data-sort="Orders Sync">Orders Sync')
   expect(page).toContain('data-filter="product:BDI"')
   expect(page).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
   expect(page).not.toContain('<script>alert(1)')
@@ -1964,10 +1964,10 @@ test('/bc-dashboard report html asks which steps to cover, adds Boomi\'s view of
   expect(opened).toEqual([[written[0]!.path]])
   const page = written[0]!.text
   expect(page).toContain('<title>Companion Sessions Report</title>')
-  expect(page).toContain('<code>earlier-session-id</code>')
-  expect(page).toContain('<dt>Account</dt><dd>Acme Integration</dd>')
-  expect(page).toContain('<td data-sort="process">process<div class="sub">Orders</div></td>')
-  expect(page).toContain('<span class="muted">package</span> <code>pkg-42</code>')
+  expect(page).toContain('title="earlier-session-id"')
+  expect(page).toContain('<span class="label">Boomi account</span> <strong>Acme Integration</strong>')
+  expect(page).toContain('<div class="sub">process · Orders</div>')
+  expect(page).toContain('package <code class="copy" data-copy="pkg-42" title="Copy">pkg-42</code>')
   // Only IDs and names reach the page, never the credentials.
   for (const secret of Object.values(CREDENTIALS).filter(v => !v.startsWith('https') && v !== 'acct-1')) expect(page).not.toContain(secret)
   expect(urls.some(u => u.endsWith('/acct-1/ComponentMetadata/query'))).toBe(true)
@@ -2006,11 +2006,11 @@ test("an all-sessions report reads only this folder's transcripts, only for step
   await $.command.run(dashboard('report html all --no-open'))
   // Only this folder's transcripts, from a day before the step on.
   expect(scans).toEqual([['--root', '/home/me/.claude/projects/-work', '--since', String(NOW - 3 * 3_600_000 - 86_400_000)]])
-  expect(written[0]).toContain('<code>transcript-1</code>')
+  expect(written[0]).toContain('data-copy="transcript-1"')
   expect(written[0]).toContain('$2.50')
 
   // The next report already knows that session: no scan.
   await $.command.run(dashboard('report html all --no-open'))
   expect(scans).toHaveLength(1)
-  expect(written[1]).toContain('<code>transcript-1</code>')
+  expect(written[1]).toContain('data-copy="transcript-1"')
 })

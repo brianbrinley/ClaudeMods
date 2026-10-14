@@ -1427,6 +1427,8 @@ const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly 
       folder: cwd.split('/').filter(Boolean).pop(),
       boomi: await boomiFacts($, settings, view),
       cwd,
+      budgets: budgetLines(usage, settings),
+      ...(settings.budgetUsd > 0 ? { sessionBudgetUsd: settings.budgetUsd } : {}),
       ...(scope === 'all' ? { pastSessions: await pastForReport($, view, cwd) } : {}),
     },
     now,
