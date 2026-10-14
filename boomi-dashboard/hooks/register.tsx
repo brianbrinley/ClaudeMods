@@ -111,7 +111,7 @@ import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from '.
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
-import type { BoomiFacts, ReportScope } from './report-html'
+import type { BoomiFacts, ReportScope, ReportStyle } from './report-html'
 import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, listing, menuQuestion, parseValue, pastSpend, questionFor, show, valueOf } from './config'
 import type { Group, PastSpend, Value } from './config'
 import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
@@ -224,6 +224,7 @@ type Settings = {
   isCheckingUpdates: boolean
   updateCheckHours: number
   isOpeningReport: boolean
+  reportStyle: ReportStyle
   /** The options these settings came from, for a change to one of them. */
   options: Readonly<Record<string, unknown>>
 }
@@ -249,6 +250,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   isCheckingUpdates: options.updateCheck !== false,
   updateCheckHours: Math.max(0, Number(options.updateCheckHours ?? 24) || 0),
   isOpeningReport: options.reportOpen !== false,
+  reportStyle: options.reportStyle === 'expressive' ? 'expressive' : 'exosphere',
   options: { ...options },
 })
 
@@ -1478,6 +1480,13 @@ const ownVersion = async ($: Engine): Promise<string | undefined> => {
  * open in a browser or send to someone: Valence Day and Night, sortable
  * tables, a filterable list of steps and the spend charted.
  */
+/** The report's style: --style <name> (or --style=<name>) on the command, else the reportStyle setting. */
+const styleOf = (words: readonly string[], settings: Settings): ReportStyle => {
+  const at = words.findIndex(w => w === '--style' || w.startsWith('--style='))
+  const named = at < 0 ? undefined : words[at]!.includes('=') ? words[at]!.split('=')[1] : words[at + 1]
+  return named === 'expressive' || named === 'exosphere' ? named : settings.reportStyle
+}
+
 const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly string[]): Promise<string> => {
   const now = await $.clock.now()
   const footer = await footerOf($)
@@ -1512,6 +1521,7 @@ const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly 
       budgets: budgetLines(usage, settings),
       ...(settings.budgetUsd > 0 ? { sessionBudgetUsd: settings.budgetUsd } : {}),
       ...(scope === 'all' ? { pastSessions: await pastForReport($, view, cwd) } : {}),
+      style: styleOf(words, settings),
     },
     now,
     settings.windowMs,

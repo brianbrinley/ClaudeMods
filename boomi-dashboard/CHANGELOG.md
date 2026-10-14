@@ -2,6 +2,16 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.36.0
+
+- **A second style for the HTML report.** Set `reportStyle` to `expressive`, or add `--style expressive` to one `/bc-dashboard report html`. That report uses the repository's own Valence theme, Miami Deco:
+  - Sand by day and Midnight Navy by night, with your Light and Dark choice kept;
+  - Poiret One for the title and the wordmark, Josefin Sans for headings and labels;
+  - a Deco Gold double rule closing the top of the page, and Flamingo marking the sessions;
+  - Valence's fixed status colors, always with the icon and label.
+
+  `exosphere` stays the default, for anything Boomi people will read. The setting is in `/bc-dashboard config data` too.
+
 ## 0.35.0
 
 - **Why? on a failed BDI run.** A BDI run that failed gets a **Why?** under **Needs attention**, in the pane and with `/bc-dashboard why`. It follows bc-bdi's own troubleshooting guide, and both reads leave the flow as it is. It shows:

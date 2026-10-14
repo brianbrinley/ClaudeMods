@@ -201,6 +201,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** a stage that didn't happen shows a dash, and hovering says "Not deployed in these sessions" (or saved, or tested). The test without a wait says "execution ID not available", with the reason on hover. The budget panel says "No budget set", with how to set one beneath it. **Fail:** an empty cell, a note with no reason on hover, or a dash where the step did happen.
 - [ ] **K15. Less navy, and charts per session.** *(0.33.0)* In a folder with two or more Companion sessions, run `/bc-dashboard report html all`.
   **Pass:** the navy band holds only the title, the summary and the budget. The sessions come next, on a light card. **Charts** has **Cost by session** and **Outcomes by session**, a bar per session, and clicking one opens that session's steps. **Fail:** the sessions still inside the navy band, no charts, or a click that goes nowhere.
+- [ ] **K16. Report style.** *(0.36.0)* Run `/bc-dashboard report html all --style expressive`, switch **Light** and **Dark**, then run it again without `--style`.
+  **Pass:** the first page is Sand (Midnight Navy in Dark), with the title in Poiret One, a gold double rule under the top, and Flamingo dates on the sessions. Status icons keep their labels, and both theme buttons stay readable. The second page is the usual Exosphere report. **Fail:** a mix of the two styles, unreadable buttons, or `--style` ignored.
 
 ## L. Installed Companion plugins
 

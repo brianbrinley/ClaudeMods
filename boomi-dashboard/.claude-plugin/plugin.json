@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.35.0",
+  "version": "0.36.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -127,6 +127,16 @@
       "title": "Update check interval (hours)",
       "description": "How long between update checks; 0 turns them off",
       "default": 24
+    },
+    "reportStyle": {
+      "type": "string",
+      "title": "HTML report style",
+      "description": "How /bc-dashboard report html looks: exosphere (Boomi's design system, for anything Boomi people read) or expressive (Valence, Miami Deco: a display face for the title and a Flamingo accent on the sessions). --style on the command picks one for that report",
+      "options": [
+        "exosphere",
+        "expressive"
+      ],
+      "default": "exosphere"
     },
     "reportOpen": {
       "type": "boolean",
