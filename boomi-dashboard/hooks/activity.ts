@@ -208,8 +208,10 @@ export const scriptRuns = (command: string): ScriptRun[] => {
     for (let j = 0; j < args.length; j++) {
       const arg = args[j]!
       const value = args[j + 1]
-      if (arg === '--process-id' && value) run.processId = value
-      else if (arg === '--component-id' && value) run.componentId = value
+      // An ID the shell fills in (`"$PID"`, `$(cat id)`) isn't known yet: the script's output names it.
+      const isKnown = value !== undefined && value !== '' && !value.includes('$')
+      if (arg === '--process-id' && isKnown) run.processId = value
+      else if (arg === '--component-id' && isKnown) run.componentId = value
       else if (arg === '--by-component' && value) run.file = joinPath(dir, value)
       if (TAKES_VALUE.has(arg)) {
         j++
@@ -1067,6 +1069,16 @@ export const sessionRuns = (dashboard: Dashboard, now: number, windowMs: number)
   return recentRuns(dashboard.platform.runs, now, windowMs).filter(run => rows.some(row => runsOf(row, [run]).length > 0))
 }
 
+/**
+ * A test's arguments to run it again: a process ID the shell filled in
+ * (`"$PID"`, `$(cat id)`) becomes the one its output gave. Undefined when
+ * that ID isn't known or another argument still needs the shell.
+ */
+export const rerunArgs = (args: readonly string[], componentId: string | undefined): string[] | undefined => {
+  const out = args.map((arg, i) => (args[i - 1] === '--process-id' && arg.includes('$') && componentId ? componentId : arg))
+  return out.some(arg => arg.includes('$')) ? undefined : out
+}
+
 /** What failed and is still failing, each with what to do about it. */
 export const attention = (dashboard: Dashboard, now: number, windowMs: number): Attention[] => {
   const items: Attention[] = []
@@ -1087,7 +1099,7 @@ export const attention = (dashboard: Dashboard, now: number, windowMs: number): 
         hint,
         at: when(a),
         executionId: a.kind === 'test' ? a.executionId : undefined,
-        rerunId: a.kind === 'test' && a.args ? a.id : undefined,
+        rerunId: a.kind === 'test' && a.args && rerunArgs(a.args, a.componentId) ? a.id : undefined,
       })
     }
   }
