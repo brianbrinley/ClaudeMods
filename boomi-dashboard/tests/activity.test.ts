@@ -42,6 +42,7 @@ import {
   assignResults,
   githubUrl,
   parseResults,
+  unclaimedReading,
   runsOf,
   runsSummary,
   recentRuns,
@@ -629,7 +630,7 @@ test('the session report has each section, and a pipe in a name keeps the table 
   expect(text).toContain('# Boomi Companion session report')
   expect(text).toContain('Session 3adaec6a · 2026-10-12 · 1h 0m · Opus 5.5')
   expect(text).toContain('Repository: https://github.com/o/r')
-  expect(text).toContain('| A \\| B |  | ✓ saved v2 · ✓ deployed · ✗ test ERROR |')
+  expect(text).toContain('| A \\| B | process | ✓ saved v2 · ✓ deployed · ✗ test ERROR |')
   expect(text).toContain('- ✗ Test of A | B ended ERROR (execution execution-1)')
   expect(text).toContain('## Needs attention')
   expect(text).toContain('- Cost: $0.42')
@@ -1073,4 +1074,39 @@ test('connectordevReading reads what each connector script says', () => {
   expect(isAwaitingApproval('PENDING_APPROVAL')).toBe(true)
   expect(isAwaitingApproval('APPROVED')).toBe(false)
   expect(isAwaitingApproval(undefined)).toBe(false)
+})
+
+test('a variable set earlier in the command is expanded in the file a script names', () => {
+  const runs = scriptRuns(
+    'cd /Users/me/proj && D="active-development/processes" && bash scripts/boomi-component-create.sh "$D/Magic8Ball - Broken Oracle.xml" && bash scripts/boomi-deploy.sh "${D}/Magic8Ball - Broken Oracle.xml"',
+  )
+  expect(runs.map(r => r.file)).toEqual([
+    '/Users/me/proj/active-development/processes/Magic8Ball - Broken Oracle.xml',
+    '/Users/me/proj/active-development/processes/Magic8Ball - Broken Oracle.xml',
+  ])
+  expect(scriptRuns('export D=active-development/process; bash boomi-deploy.sh $D/X.xml')[0]!.file).toBe('active-development/process/X.xml')
+  // A loop's variable isn't the command's to know: it stays as written.
+  expect(scriptRuns('for f in a b; do bash boomi-deploy.sh "$f.xml"; done')[0]!.file).toBe('$f.xml')
+})
+
+test('a result printed twice in one output is one step; a loop over two components is two', () => {
+  const echoed = ["Packaging 'Orders' (1a2b3c4d-1111-2222-3333-444455556666)", "SUCCESS: Deployed 'Orders' (package: p-1)", "SUCCESS: Deployed 'Orders' (package: p-1)"].join('\n')
+  expect(parseResults(echoed)).toHaveLength(1)
+  const loop = ["SUCCESS: Deployed 'Orders' (package: p-1)", "SUCCESS: Deployed 'Invoices' (package: p-2)"].join('\n')
+  expect(parseResults(loop)).toHaveLength(2)
+})
+
+test("a run with no result of its own doesn't take another script's line", () => {
+  expect(unclaimedReading(false)).toEqual({ outcome: 'ok', detail: 'no result of its own in the output (it ran in a command with other scripts)' })
+  expect(unclaimedReading(true).outcome).toBe('failed')
+})
+
+test('a tested component whose XML was never read is a process', () => {
+  const rows = components([
+    { id: 1, kind: 'create', outcome: 'ok', subject: 'Broken Oracle', detail: '', startedAt: 1, componentId: 'c-1', file: '$D/Broken Oracle.xml' },
+    { id: 2, kind: 'test', outcome: 'ok', subject: 'Broken Oracle', detail: 'status COMPLETE', startedAt: 2, componentId: 'c-1' },
+    { id: 3, kind: 'create', outcome: 'ok', subject: 'Map', detail: '', startedAt: 3, componentId: 'c-2' },
+  ])
+  expect(rows.find(r => r.componentId === 'c-1')?.type).toBe('process')
+  expect(rows.find(r => r.componentId === 'c-2')?.type).toBeUndefined()
 })

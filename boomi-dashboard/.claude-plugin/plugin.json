@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -127,6 +127,12 @@
       "title": "Update check interval (hours)",
       "description": "How long between update checks; 0 turns them off",
       "default": 24
+    },
+    "reportOpen": {
+      "type": "boolean",
+      "title": "Open the HTML report",
+      "description": "Open /bc-dashboard report html's page in your browser once it's saved (open on macOS, wslview or Explorer under WSL, xdg-open on a Linux desktop). Where there's no browser to open, it only says where the file is",
+      "default": true
     }
   }
 }
