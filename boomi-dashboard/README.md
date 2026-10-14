@@ -296,6 +296,16 @@ It follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system: its 
 - **Charts** appear only when they add something: outcomes and spend by product when the work spans two products or more, cost over the session in a one-session report, and in an all-sessions report with two sessions or more, each session's cost and how its steps went (click a session to open its steps). Each has hover details and a **Show the data** table, and products keep the same color in every chart.
 - **Tables** of custom connectors and Agentstudio agents, sorted by clicking a column.
 
+**To print it or keep it as a PDF,** press **Print or save as PDF** at the top of the page, or use your browser's Print, and pick **Save as PDF** to keep a copy. The printout:
+- is always in the light theme, whatever the screen shows;
+- has every session's steps unfolded, though each step's details stay closed (a failure's reason shows anyway);
+- fits the tables to the page;
+- prints each Boomi link's address under it;
+- keeps rows and charts from splitting across pages;
+- has the report's name and date at the top of each page, and its page number at the bottom.
+
+The buttons, search and filters are left off.
+
 With a connection it loads its fonts from Google Fonts; offline it falls back to your system's fonts.
 
 ## Commands and tools

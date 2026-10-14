@@ -139,7 +139,7 @@ const outcomesByProduct = (steps: readonly Activity[]): string => {
 <text x="0" y="${i * rowH + 19}" class="label">${esc(productName(r.key))}</text>${segs.join('')}<text x="${(x + 4).toFixed(1)}" y="${i * rowH + 19}" class="value">${total}</text></g>`
     })
     .join('')
-  return `<figure class="chart"><figcaption><h3>Outcomes by product</h3><span class="sub">click a product to list its steps</span></figcaption>
+  return `<figure class="chart"><figcaption><h3>Outcomes by product</h3><span class="sub screen-only">click a product to list its steps</span></figcaption>
 ${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], level: l })))}
 <svg viewBox="0 0 560 ${rows.length * rowH}" role="img" aria-label="Steps per product, stacked by outcome">${marks}</svg>
 ${dataTable(['Product', ...LEVELS.map(l => LABEL[l])], rows.map(r => [productName(r.key), ...LEVELS.map(l => r.counts[l])]))}</figure>`
@@ -199,7 +199,7 @@ const sessionCharts = (summaries: readonly SessionSummary[], steps: readonly Act
       })
       .join('')
     const hasAtLeast = costed.some(s => s.usdIs === 'atLeast')
-    charts.push(`<figure class="chart"><figcaption><h3>Cost by session</h3><span class="sub">click a session to open its steps${hasAtLeast ? '; a paler bar is counted only up to its last Companion step' : ''}</span></figcaption>
+    charts.push(`<figure class="chart"><figcaption><h3>Cost by session</h3><span class="sub"><span class="screen-only">click a session to open its steps${hasAtLeast ? '; ' : ''}</span>${hasAtLeast ? 'a paler bar is counted only up to its last Companion step' : ''}</span></figcaption>
 <svg viewBox="0 0 560 ${costed.length * rowH}" role="img" aria-label="Cost by session">${marks}</svg>
 ${dataTable(['Session (UTC)', 'Cost'], costed.map(s => [sessionTick(s.firstAt), shown(s)]))}</figure>`)
   }
@@ -807,7 +807,7 @@ ${
     ? '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poiret+One&family=Josefin+Sans:wght@400;600;700&display=swap">'
     : '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Noto+Sans:wght@400;600;700&family=Fira+Mono&display=swap">'
 }
-<style>${STYLE}${facts.style === 'expressive' ? VALENCE_STYLE : ''}</style>
+<style>${STYLE}${facts.style === 'expressive' ? VALENCE_STYLE : ''}${PRINT_STYLE}${facts.style === 'expressive' ? VALENCE_PRINT : ''}${pageMargins(`${title} · ${isAll ? 'Companion sessions' : 'Companion session'} · ${facts.date}`)}</style>
 </head>
 <body${isAll ? ' data-days' : ''}>
 <header class="masthead">
@@ -818,6 +818,7 @@ ${
       <button type="button" data-theme-pick="light" aria-pressed="false">Light</button>
       <button type="button" data-theme-pick="dark" aria-pressed="false">Dark</button>
     </div>
+    <button type="button" class="print" data-print title="Print the report, or save it as a PDF from the print dialog">Print or save as PDF</button>
   </div>
 </header>
 <div class="band" id="top">
@@ -912,10 +913,13 @@ ${X} .wordmark{font:400 1.25rem/1 "Poiret One",system-ui,sans-serif;color:var(--
 ${X} .opening h1{font:400 clamp(2rem,4.4vw,3.25rem)/1.1 "Poiret One",system-ui,sans-serif;letter-spacing:.02em}
 ${X} h2,${X} h3,${X} thead th,${X} .label,${X} .budgets h2{font-family:"Josefin Sans",system-ui,sans-serif}
 ${X} main>section>h2,${X} .ledger-title{font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:1rem}
-${X} .theme button{color:var(--exo-color-font);border-color:var(--exo-color-border)}${X} .theme button[aria-pressed="true"]{background:var(--exo-color-font);border-color:var(--exo-color-font);color:var(--exo-color-page)}
+${X} .theme button,${X} button.print{color:var(--exo-color-font);border-color:var(--exo-color-border)}${X} .theme button[aria-pressed="true"]{background:var(--exo-color-font);border-color:var(--exo-color-font);color:var(--exo-color-page)}
 ${X} .ledger{border:3px double var(--valence-line)}
 ${X} .l-when strong{color:var(--valence-primary)}
 `
+
+/** Valence's Day tokens for print, whatever theme the page shows. */
+const VALENCE_PRINT = `@media print{${X},${X} .band{${DAY.split(';').map(d => `${d} !important`).join(';')}}}`
 
 const STYLE = `
 :root,.ex-theme-light{--exo-color-page:#ffffff;--exo-color-body:#f5f5f5;--exo-color-background:#ffffff;--exo-color-background-secondary:#f5f5f5;--exo-color-background-brand:#072b55;--exo-color-font:#1f1f1f;--exo-color-font-secondary:#707070;--exo-color-font-inverse:#ffffff;--exo-color-font-link:#006cd6;--exo-color-border:#cccccc;--exo-color-border-secondary:#e5e5e5;--exo-color-background-selected:#006cd6;
@@ -994,7 +998,7 @@ thead button{all:unset;cursor:pointer;font-weight:600;font-size:.813rem;color:va
 thead button:hover{color:var(--exo-color-font-link);text-decoration:underline}
 thead button[data-dir="asc"]::after{content:" ▲"}thead button[data-dir="desc"]::after{content:" ▼"}
 button{font:inherit}
-.theme button{background:transparent;color:var(--exo-color-font-inverse);border:1px solid var(--exo-color-font-inverse);border-radius:var(--exo-radius-x-large,1.5625rem);padding:.25rem .875rem;cursor:pointer;font-weight:600}
+.theme button,button.print{background:transparent;color:var(--exo-color-font-inverse);border:1px solid var(--exo-color-font-inverse);border-radius:var(--exo-radius-x-large,1.5625rem);padding:.25rem .875rem;cursor:pointer;font-weight:600}button.print{white-space:nowrap}@media (max-width:640px){button.print{display:none}}
 .theme button[aria-pressed="true"]{background:var(--exo-color-font-inverse);color:var(--exo-color-background-brand)}
 .filters button{background:var(--exo-color-background);color:var(--exo-color-font);border:1px solid var(--exo-color-border);border-radius:1.5625rem;padding:.25rem .875rem;cursor:pointer;font-weight:600}
 .filters button[aria-pressed="true"]{background:var(--exo-color-background-selected);border-color:var(--exo-color-background-selected);color:var(--exo-color-font-inverse)}
@@ -1061,6 +1065,48 @@ footer{max-width:1440px;margin:0 auto;padding:var(--exo-spacing-standard) var(--
 @media (forced-colors:active){.badge,.alert{border:1px solid CanvasText}}
 `
 
+/** Text for a CSS string: quotes, backslashes and line breaks escaped. */
+const cssString = (text: string) => `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ')}"`
+
+/** Each printed page's margins: the report's name and date at the top, the page number at the bottom. */
+const pageMargins = (heading: string) =>
+  `@media print{@page{margin:16mm 14mm 18mm;@top-left{content:${cssString(heading)};font:400 8pt system-ui,sans-serif;color:#707070}@bottom-right{content:"Page " counter(page) " of " counter(pages);font:400 8pt system-ui,sans-serif;color:#707070}}}`
+
+/**
+ * The report on paper, or saved as a PDF: the light theme whatever the screen
+ * shows, every session's steps unfolded (each step's details stay closed; a
+ * failure's reason shows without them), tables fitted to the page with long
+ * IDs wrapping, a Boomi link's address printed after it, nothing cut across a
+ * page break, and the controls left off. Charts and status icons keep their
+ * colors.
+ */
+const PRINT_STYLE = `
+@media print{
+:root,.band{${(STYLE.match(/:root,\.ex-theme-light\{([^}]*)\}/)?.[1] ?? '').replace(/\n/g, '').split(';').filter(Boolean).map(d => `${d} !important`).join(';')};color-scheme:light}
+html,body{background:#fff !important}
+html{font-size:11.5px}
+.masthead{position:static;background:none;color:var(--exo-color-font);border-bottom:1px solid var(--exo-color-border-secondary)}
+.masthead nav,.theme,.print,.controls,details.data,.copy-hint,.screen-only{display:none !important}
+.bar,.band-inner,main,footer{max-width:none;padding-left:0;padding-right:0}
+.band{background:none !important;color:var(--exo-color-font);border-bottom:1px solid var(--exo-color-border-secondary)}
+.opening{grid-template-columns:minmax(0,1fr) 15rem}
+.scroll{overflow:visible}.scroll table,.scroll table.wide{min-width:0 !important}
+table.lanes td.lane,table.lanes tbody th{min-width:0}
+code,.sub{overflow-wrap:anywhere;word-break:break-word}
+a[href^="http"]{white-space:normal !important}a[href^="http"]::after{content:attr(href);display:block;font-size:6.5pt;line-height:1.3;color:var(--exo-color-font-secondary);overflow-wrap:anywhere;word-break:break-all}
+.charts{grid-template-columns:1fr 1fr;gap:1rem 1.5rem}
+table{font-size:8.5pt}table.lanes tbody th{width:32%}
+ol.steps summary{list-style:none}ol.steps summary::-webkit-details-marker{display:none}ol.steps summary::marker{content:""}
+details.step-group::details-content{content-visibility:visible;display:block}
+.ledger-row,tr,figure.chart,ol.steps>li,.meter,.account-line,.why{break-inside:avoid}
+h2,h3,.group-head,figcaption{break-after:avoid}
+main>section{break-inside:auto}
+svg,.status .i,.fill-healthy,.fill-warning,.fill-serious,.fill-critical,.meter-bar,.meter-bar span,.tag{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.hit .target{display:none}
+#tip,.tooltip{display:none !important}
+}
+`
+
 /** The theme, sorting, the chart tooltip and the steps' filter and search: no libraries, nothing sent anywhere. */
 const SCRIPT = `
 (function(){
@@ -1120,6 +1166,11 @@ const SCRIPT = `
   document.addEventListener('click',function(e){var c=e.target.closest&&e.target.closest('[data-copy]');if(!c)return;e.preventDefault();
     var done=function(){c.classList.add('copied');c.title='Copied';setTimeout(function(){c.classList.remove('copied');c.title='Copy'},1200)};
     if(navigator.clipboard)navigator.clipboard.writeText(c.getAttribute('data-copy')).then(done,function(){});});
+  // Printing unfolds every session's steps, and folds them back after.
+  var folded=[];
+  window.addEventListener('beforeprint',function(){folded=[];document.querySelectorAll('details.step-group:not([open])').forEach(function(g){folded.push(g);g.open=true})});
+  window.addEventListener('afterprint',function(){folded.forEach(function(g){g.open=false});folded=[]});
+  var printer=document.querySelector('[data-print]');if(printer)printer.addEventListener('click',function(){window.print()});
   document.querySelectorAll('.ledger-link,.session-pick').forEach(function(l){l.addEventListener('click',function(){
     var g=document.querySelector(l.getAttribute('href'));if(g&&g.tagName==='DETAILS')g.open=true})});
 })();

@@ -203,6 +203,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** the navy band holds only the title, the summary and the budget. The sessions come next, on a light card. **Charts** has **Cost by session** and **Outcomes by session**, a bar per session, and clicking one opens that session's steps. **Fail:** the sessions still inside the navy band, no charts, or a click that goes nowhere.
 - [ ] **K16. Report style.** *(0.36.0)* Run `/bc-dashboard report html all --style expressive`, switch **Light** and **Dark**, then run it again without `--style`.
   **Pass:** the first page is Sand (Midnight Navy in Dark), with the title in Poiret One, a gold double rule under the top, and Flamingo dates on the sessions. Status icons keep their labels, and both theme buttons stay readable. The second page is the usual Exosphere report. **Fail:** a mix of the two styles, unreadable buttons, or `--style` ignored.
+- [ ] **K17. Print to PDF.** *(0.37.0)* With the report open in **Dark**, press **Print or save as PDF** and save a PDF. Then try your browser's own Print from the menu.
+  **Pass:** the PDF is light, with dark text on white. Every session's steps are there, and the Components table shows all five columns through **Cost**. Each **Open in Boomi** has its address under it. Each page has the report's name and date at the top and `Page n of m` at the bottom, and no buttons or search box are printed. Back on screen, the sessions are folded as before. **Fail:** pale or dark pages, missing columns, sessions printed as headings only, or rows cut across pages.
 
 ## L. Installed Companion plugins
 
