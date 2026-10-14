@@ -2,6 +2,11 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.39.3
+
+- **No more components named `$`.** When Claude passed a process ID through the shell (`PID=$(…) && boomi-test-execute.sh --process-id "$PID"`, or `--process-id $(…)`), the dashboard took a bare `$` as the ID and showed the process as `$` under **Components this session** and in the steps. An ID the shell fills in is no longer read from the command: the script's output names the component.
+- **Run again works for those tests too.** It repeated the command as written, passing `$` or `"$PID"` as the process ID. It now uses the ID the test's output gave, and isn't offered when the test can't be repeated as it ran.
+
 ## 0.39.2
 
 - **Budget enforcement checked against every Companion plugin.** I went through every script and subcommand in the current releases of all six plugins (bc-integration 1.0.83, bc-marketplace 0.2.10, bc-datahub 0.2.12, bc-bdi 0.2.5, bc-agentstudio 0.1.42 and bc-connectordev 0.0.50): 185 in all.

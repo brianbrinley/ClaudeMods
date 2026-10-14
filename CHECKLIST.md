@@ -32,6 +32,9 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **B10. Guardrails.** With boomi-runtime loaded, run `/boomi up`.
   **Pass:** the dashboard's **Guardrails** section shows `◐ Runtime … installing`, then `✓ Runtime … online`. **Fail:** no **Guardrails** section, or it doesn't change. (The standards half of this check comes back with boomi-standards; see IDEAS.md.)
 
+- [ ] **B11. A process ID from the shell.** *(0.39.3)* Ask Claude to test a process by its ID read from its file in the same command, for example: *"Run `PID=$(grep -o 'componentId=\"[^\"]*' <file> | cut -d'\"' -f2) && bash boomi-test-execute.sh --process-id \"$PID\"` for <process>."* Make it one that fails, then press **Run again**.
+  **Pass:** the step and **Components this session** show the process's name, never `$`, and **Run again** runs the test with the real ID. **Fail:** a component named `$` or `$PID`, or **Run again** fails with the ID as written.
+
 ## C. Windows (WSL)
 
 - [ ] **C1.** In Claude Code inside WSL, install the dashboard with the prompt under [Install](boomi-dashboard/README.md#install), then press **Scan**.

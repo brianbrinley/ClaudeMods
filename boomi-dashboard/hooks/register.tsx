@@ -107,6 +107,7 @@ import {
   parseActivityLog,
   newLogSteps,
   PAUSED,
+  rerunArgs,
 } from './activity'
 import type { Attention, BudgetLine, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
@@ -1272,18 +1273,19 @@ const whyByNumber = async ($: Engine, settings: Settings, target: string): Promi
 const rerun = async ($: Engine, settings: Settings, stepId: number): Promise<string> => {
   const current = await read($, dashboard)
   const step = current.activity.find(a => a.id === stepId)
-  if (!step?.args) return 'That test has no command to repeat.'
+  const args = step?.args && rerunArgs(step.args, step.componentId)
+  if (!step || !args) return 'That test has no command to repeat.'
   if (current.activity.some(a => a.kind === 'test' && a.outcome === 'running' && a.componentId === step.componentId)) {
     return `A test of ${step.subject} is already running.`
   }
   const scripts = await findScripts($)
   if (!scripts) return "Couldn't find Boomi Companion's scripts. Run any Companion script once, then try again."
-  const run: ScriptRun = { kind: 'test', args: step.args }
+  const run: ScriptRun = { kind: 'test', args }
   if (step.componentId) run.processId = step.componentId
   const started = await noteStart($, settings, [run])
   let ran: Ran
   try {
-    const result = await $.process.run(['bash', `${scripts}/boomi-test-execute.sh`, ...step.args], {
+    const result = await $.process.run(['bash', `${scripts}/boomi-test-execute.sh`, ...args], {
       cwd: await $.session.cwd(),
       timeoutMs: 600_000,
     })

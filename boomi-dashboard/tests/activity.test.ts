@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   attention,
+  rerunArgs,
   closeItem,
   diagnose,
   fixPrompt,
@@ -1088,6 +1089,33 @@ test('a variable set earlier in the command is expanded in the file a script nam
   expect(scriptRuns('export D=active-development/process; bash boomi-deploy.sh $D/X.xml')[0]!.file).toBe('active-development/process/X.xml')
   // A loop's variable isn't the command's to know: it stays as written.
   expect(scriptRuns('for f in a b; do bash boomi-deploy.sh "$f.xml"; done')[0]!.file).toBe('$f.xml')
+})
+
+test("an ID the shell fills in at run time isn't taken as the component's ID or name", () => {
+  for (const command of [
+    'PID=$(grep -o "componentId=[^ ]*" X.xml | cut -d= -f2) && bash boomi-test-execute.sh --process-id "$PID"',
+    'bash boomi-test-execute.sh --process-id $(cat id.txt)',
+    'PID="$(cat id.txt)" && bash boomi-test-execute.sh --process-id "$PID"',
+    'bash boomi-test-execute.sh --process-id "$PID"',
+    'bash boomi-component-pull.sh --component-id "${CID}"',
+  ]) {
+    const [run] = scriptRuns(command)
+    expect(run!.processId).toBeUndefined()
+    expect(run!.componentId).toBeUndefined()
+  }
+  expect(scriptRuns('bash boomi-test-execute.sh --process-id f7f15782-2ee8-4df4-bfec-733cfb090883')[0]!.processId).toBe('f7f15782-2ee8-4df4-bfec-733cfb090883')
+})
+
+test('Run again repeats a test with the ID its output gave in place of one the shell filled in, or not at all', () => {
+  expect(rerunArgs(['--process-id', '$PID'], ID)).toEqual(['--process-id', ID])
+  expect(rerunArgs(['--process-id', '$'], ID)).toEqual(['--process-id', ID])
+  expect(rerunArgs(['--process-id', '$PID'], undefined)).toBeUndefined()
+  expect(rerunArgs(['--process-id', ID, '--test-data', '$F'], ID)).toBeUndefined()
+  expect(rerunArgs(['--process-id', ID], ID)).toEqual(['--process-id', ID])
+
+  const step = (more: Partial<Activity>) => act('test', 'failed', 'Orders Sync', NOW, { args: ['--process-id', '$'], executionId: 'execution-0490202b-2e2f', ...more })
+  expect(attention(dashboard([step({ componentId: ID })]), NOW, 24 * HOUR)[0]!.rerunId).toBeDefined()
+  expect(attention(dashboard([step({ file: FILE })]), NOW, 24 * HOUR)[0]!.rerunId).toBeUndefined()
 })
 
 test('a result printed twice in one output is one step; a loop over two components is two', () => {
