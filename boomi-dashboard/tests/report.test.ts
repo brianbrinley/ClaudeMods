@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Activity, Dashboard } from '../types'
-import { assignSessions, boomiLink, hasEarlierSteps, packageOf, reportHtml, scoped, sessionLabel, sessionSummaries, sessionsCost, sessionLedger, stepsToMatch, transcriptsFolder, workSentence } from '../hooks/report-html'
+import { assignSessions, boomiLink, hasEarlierSteps, packageOf, reportHtml, scoped, sessionLabel, sessionSummaries, sessionsCost, notDone, notSet, sessionLedger, stepsToMatch, transcriptsFolder, unavailable, workSentence } from '../hooks/report-html'
 import { repaired, withoutEchoes } from '../hooks/activity'
 import { platformClient } from '../hooks/platform'
 
@@ -230,7 +230,7 @@ test('the session ledger: a row each, oldest first, saying when it ran, what it 
   expect(ledger).toMatch(/<span class="status status-healthy"><svg[^]*?Healthy: <\/span>2<\/span>/)
   expect(ledger).toContain('<span class="sr">Failed: </span>1</span>')
   expect(ledger).toContain('<span class="l-cost">$1.00</span>')
-  expect(ledger).toContain('<span class="l-cost"><span class="muted">not recorded</span></span>')
+  expect(ledger).toContain('<span class="l-cost"><span class="na" title="Claude Code&#39;s transcript for this session doesn&#39;t record a cost.">')
   expect(sessionLedger([], a => a.session!, id => id, new Map())).toBe('')
 })
 
@@ -238,7 +238,7 @@ test("a session's budget: a meter and a warning in the summary near it, and how 
   const view = scoped(DASHBOARD, 'session')
   const base = { session: 'cccccccc-3333', sessionId: 'cccccccc-3333', date: '2026-10-14', scope: 'session' as const }
   const none = reportHtml(view, { ...base, usage: { usd: 0.4 }, budgets: [] }, NOW, 24 * HOUR)
-  expect(none).toContain('No budget set. Set <code>budgetUsd</code> for each session')
+  expect(none).toContain('No budget set</span> <span class="na-how">Set <code>budgetUsd</code> for each session')
   expect(none).not.toContain('class="meter')
   const near = reportHtml(view, { ...base, usage: { usd: 0.9, budgetUsd: 1 }, budgets: [{ label: 'session', level: 'warning', percent: 90, detail: '$0.90 of $1.00' }], sessionBudgetUsd: 1 }, NOW, 24 * HOUR)
   expect(near).toContain('<li class="meter meter-warning"><div class="meter-head"><span>Session</span><span class="status status-warning">')
@@ -258,4 +258,42 @@ test('steps recorded by older versions read properly: a placeholder takes its co
   ])
   expect(fixed.map(a => a.subject)).toEqual(['Oracle', 'Oracle', 'Oracle', 'a component'])
   expect(fixed[2]!.detail).toBe('no result of its own (it ran in a command with other scripts)')
+})
+
+test("what's missing says so, and why: not done, not available, or not set up", () => {
+  expect(notDone('Not deployed in these sessions')).toBe('<span class="nd" title="Not deployed in these sessions">—<span class="sr"> Not deployed in these sessions</span></span>')
+  expect(unavailable('name not available', "It wasn't <named>")).toContain('title="It wasn&#39;t &lt;named&gt;"><svg class="i"')
+  expect(unavailable('name not available', 'why')).toContain('name not available<span class="sr">: why</span>')
+  expect(notSet('No budget set', 'Set <code>budgetUsd</code>')).toContain('<span class="na-how">Set <code>budgetUsd</code></span>')
+
+  const page = reportHtml(scoped({ ...DASHBOARD, activity: [
+    step(1, { kind: 'deploy', subject: 'Orders', componentId: 'c-9', detail: 'SUCCESS: Deployed', startedAt: NOW - HOUR, session: 'cccccccc-3333' }),
+    step(2, { kind: 'test', subject: 'a component', detail: 'status COMPLETE', executionStatus: 'COMPLETE', startedAt: NOW - HOUR, session: 'cccccccc-3333' }),
+  ] }, 'session'), { session: 'cccccccc-3333', sessionId: 'cccccccc-3333', date: '2026-10-14', usage: USAGE, scope: 'session', boomi: { accountId: 'acct-1', components: {} } }, NOW, 24 * HOUR)
+  // A component Boomi doesn't know, a deploy whose package wasn't named, stages that didn't happen.
+  expect(page).toContain('not found in Boomi')
+  expect(page).toContain('package ID not available')
+  expect(page).toContain('title="Not saved in these sessions"')
+  expect(page).toContain('title="Not tested in these sessions"')
+  expect(page).toContain('type not available')
+  // A step Companion didn't name; the account's name that couldn't be read; no environment set.
+  expect(page).toContain('Test of a component passed</span> <span class="na"')
+  expect(page).toContain('Boomi account</span> <span class="na" title="Boomi didn&#39;t return the account&#39;s name')
+  expect(page).toContain('no environment')
+  // With no credentials at all, the account line says how to set it up.
+  const bare = reportHtml(scoped(DASHBOARD, 'session'), { session: 'c', sessionId: 'c', date: '2026-10-14', usage: USAGE, scope: 'session', boomi: { components: {}, note: "Boomi's own details aren't included: an API credential is missing" } }, NOW, 24 * HOUR)
+  expect(bare).toContain('Not set up</span> <span class="na-how">Add the Platform API credentials')
+})
+
+test('a step that named a component but not its ID takes the one ID that name has', () => {
+  const fixed = repaired([
+    step(1, { kind: 'create', subject: 'Oracle', componentId: 'c-1' }),
+    step(2, { kind: 'deploy', subject: 'Oracle' }),
+    step(3, { kind: 'deploy', subject: 'Twin', componentId: 't-1' }),
+    step(4, { kind: 'deploy', subject: 'Twin', componentId: 't-2' }),
+    step(5, { kind: 'deploy', subject: 'Twin' }),
+  ])
+  expect(fixed[1]!.componentId).toBe('c-1')
+  // Two components share the name: no guessing.
+  expect(fixed[4]!.componentId).toBeUndefined()
 })

@@ -2,6 +2,14 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.31.0
+
+- **The report says what's missing, and why.** Where something isn't there, the report says which of three cases it is. Hover over it, or use a screen reader, for the reason:
+  - **didn't happen:** a dash, for a stage a component didn't reach in these sessions;
+  - **not available:** a note with an ⓘ, for something we tried to find but couldn't, such as a component name the output didn't give, a deploy's package ID, a test's execution ID, a cost no transcript records, or a component Boomi doesn't know;
+  - **not set up:** for something you can turn on, with how to do it, such as a budget, the Boomi environment, or the Platform API credentials.
+- **A step that named a component but not its ID** now lands on that component's row, when no other component has that name. Before, a deploy recorded this way left the row's Deployed column empty. This applies in the pane too.
+
 ## 0.30.0
 
 - **The sessions as a ledger, in place of the timeline's bands.** Each session gets a row:

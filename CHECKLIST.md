@@ -195,6 +195,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** beside the summary, a meter for the session and one for the month, each with a percent and an icon. The summary says how many sessions reached the session budget, and those sessions' timeline bands say "⊗ N% of budget". With both settings back at 0, the report says "No budget set" and how to set one. **Fail:** a meter missing, a percent that doesn't match the pane's BUDGET gauge, or no budget note on a session that went over.
 - [ ] **K13. Swimlanes and IDs.** *(0.29.0)* In the same report, look at **Components**, then click a component ID.
   **Pass:** each row's Saved, Deployed and Tested columns show the stage with its icon, its time, and the version, package or execution. The clicked ID is copied: paste it somewhere to check. **Fail:** a stage in the wrong column, or nothing copied.
+- [ ] **K14. What's missing.** *(0.31.0)* Run `/bc-dashboard report html all` in a folder where Companion tested a process without waiting, and where no budget is set. Hover over the ⓘ notes and the dashes.
+  **Pass:** a stage that didn't happen shows a dash, and hovering says "Not deployed in these sessions" (or saved, or tested). The test without a wait says "execution ID not available", with the reason on hover. The budget panel says "No budget set", with how to set one beneath it. **Fail:** an empty cell, a note with no reason on hover, or a dash where the step did happen.
 
 ## L. Installed Companion plugins
 
