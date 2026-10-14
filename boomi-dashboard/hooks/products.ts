@@ -323,6 +323,109 @@ export const bdiRunReading = (output: string): { status: BdiRunStatus | string; 
   return reason ? { status, reason } : { status }
 }
 
+/** The rows of a CSV text, quoted fields (commas, doubled quotes, line breaks) read whole. */
+const csvRows = (text: string): string[][] => {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let isQuoted = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!
+    if (isQuoted) {
+      if (c === '"' && text[i + 1] === '"') {
+        field += '"'
+        i++
+      } else if (c === '"') isQuoted = false
+      else field += c
+    } else if (c === '"') isQuoted = true
+    else if (c === ',') {
+      row.push(field)
+      field = ''
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++
+      row.push(field)
+      if (row.some(f => f.trim())) rows.push(row)
+      row = []
+      field = ''
+    } else field += c
+  }
+  row.push(field)
+  if (row.some(f => f.trim())) rows.push(row)
+  return rows
+}
+
+/** What a failed BDI run's evidence says, as the pane and /bc-dashboard why show it. */
+export type BdiDiagnosis = { lines: string[]; errors: number; warnings: number }
+
+/**
+ * Reads a BDI run's log, `bdi-flow.sh logs`: CSV with the header
+ * `timestamp,level,msg`, newest first. Leads with the run's failure reason
+ * and, for a logic flow, the first step that failed; then the log's ERROR
+ * lines (else its last few) in the order they happened. An empty log says so,
+ * and where to look instead.
+ */
+export const bdiDiagnosis = (log: string, reason?: string, failedStep?: string): BdiDiagnosis => {
+  const rows = csvRows(log.trim().startsWith('{') ? '' : log)
+  const header = rows[0]?.map(f => f.trim().toLowerCase())
+  const at = header?.indexOf('timestamp') ?? -1
+  const lvl = header?.indexOf('level') ?? -1
+  const msg = header?.indexOf('msg') ?? -1
+  const entries = (lvl >= 0 && msg >= 0 ? rows.slice(1) : [])
+    .map(r => ({ at: (r[at] ?? '').trim(), level: (r[lvl] ?? '').trim().toUpperCase(), text: (r[msg] ?? '').replace(/\s+/g, ' ').trim() }))
+    .filter(e => e.text)
+    .reverse()
+  const isError = (level: string) => /^(ERROR|CRITICAL|FATAL)$/.test(level)
+  const errors = entries.filter(e => isError(e.level))
+  const warnings = entries.filter(e => /^WARN(ING)?$/.test(e.level)).length
+  const picked = errors.length > 0 ? errors.slice(-5) : entries.slice(-5)
+  const shown = (e: (typeof entries)[number]) => {
+    const time = e.at.match(/(\d{2}:\d{2}:\d{2})/)?.[1]
+    const text = `${time ? `${time} ` : ''}${e.level ? `${e.level} ` : ''}${e.text}`
+    return text.length > 200 ? `${text.slice(0, 199)}…` : text
+  }
+  const lines = [
+    ...(reason ? [`Failure: ${reason}`] : []),
+    ...(failedStep ? [failedStep] : []),
+    ...(entries.length > 0 ? picked.map(shown) : ["The run's log is empty: BDI kept no lines for it. Open the run in the BDI console for more."]),
+  ]
+  return { lines, errors: errors.length, warnings }
+}
+
+/**
+ * The first logic step that failed, from `bdi-flow.sh steps`: its name and
+ * error message. Read leniently, as only those fields are documented.
+ * Undefined for a flow that isn't a logic flow, or where every step finished.
+ */
+export const bdiFailedStep = (output: string): string | undefined => {
+  let body: unknown
+  try {
+    const start = output.search(/[[{]/)
+    body = start < 0 ? undefined : JSON.parse(output.slice(start))
+  } catch {
+    return undefined
+  }
+  const top = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  const list = Array.isArray(body) ? body : ['items', 'logic_steps', 'steps'].map(k => top[k]).find(Array.isArray)
+  if (!Array.isArray(list)) return undefined
+  const text = (o: Record<string, unknown>, keys: string[]) => keys.map(k => o[k]).find((v): v is string => typeof v === 'string' && v.trim() !== '')
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue
+    const step = item as Record<string, unknown>
+    const status = text(step, ['status', 'step_status', 'run_status']) ?? ''
+    if (!/fail|error/i.test(status)) continue
+    const name = text(step, ['step_name', 'name', 'block_name', 'step_id']) ?? 'a step'
+    const error = text(step, ['error_message', 'error', 'error_description'])
+    return `Step "${name}" failed${error ? `: ${error.replace(/\s+/g, ' ').trim()}` : ''}`
+  }
+  return undefined
+}
+
+/** The failure reason a failed run's step kept, from its detail: "ERROR: <reason> (run <id>)". */
+export const bdiReasonOf = (detail: string): string | undefined => {
+  const m = detail.match(/^ERROR: (.*) \(run [^)]+\)$/)
+  return m && m[1] !== 'the run failed' ? m[1] : undefined
+}
+
 // --- Data Hub deployments and quarantine ------------------------------------------
 
 /** How a deployment stands, from whatever status its response or a status check names. */

@@ -2,6 +2,16 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.35.0
+
+- **Why? on a failed BDI run.** A BDI run that failed gets a **Why?** under **Needs attention**, in the pane and with `/bc-dashboard why`. It follows bc-bdi's own troubleshooting guide, and both reads leave the flow as it is. It shows:
+  - the reason BDI gave for the failure;
+  - for a logic flow, the first step that failed and its error;
+  - the run log's `ERROR` lines, oldest first.
+
+  An empty log says so, and points to the BDI console. **Ask Claude to fix** drafts a request to find the cause and propose a fix, without changing the flow until you approve it.
+- A failed BDI run's line under **Needs attention** now leads with BDI's reason, not `ERROR: … (run …)`.
+
 ## 0.34.0
 
 - **The pane's theme and size are saved in `/config`.** The theme buttons, `/bc-dashboard theme` and `/bc-dashboard size` now set `paneTheme`, `paneRows` and `paneColumns`, the same settings `/config` and `/bc-dashboard config` show. Before, they were kept apart and quietly won over `/config`. A theme or size an earlier version kept moves to `/config` when your next session starts. Where `/config` won't take a change, such as a setting your organization locks, the dashboard keeps it as before.

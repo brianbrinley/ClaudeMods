@@ -1300,7 +1300,7 @@ test("a BDI run started shows how it ended once Claude checks its status: a fail
   const failed = (await $.command.run(dashboard('text'))).text ?? ''
   expect(failed).toContain('Needs attention (1):')
   expect(failed).toContain('✗ BDI: flow orders-flow run failed')
-  expect(failed).toContain('ERROR: Target table orders_stg does not exist (run r-77)')
+  expect(failed).toContain('Target table orders_stg does not exist. Run r-77…: press Why? to read its log.')
   expect(toasts.some(t => t.includes('run failed'))).toBe(true)
 
   // The same run, checked again after a rerun succeeds: the failure clears.
@@ -2193,4 +2193,80 @@ test('a theme and size an earlier version kept move to /config as the session st
   expect((await $.command.run(dashboard('theme'))).text).toContain('◆ night')
   await $.command.run(dashboard())
   expect(opens.at(-1)).toMatchObject({ rows: 24 })
+})
+
+// --- Why? for a failed BDI run ----------------------------------------------------------
+
+/** A BDI run Claude started that then failed; bc-bdi's own scripts answer the dashboard's reads, which are recorded. */
+const failedBdiRun = async ($: Engine, on: On, scripts: Record<string, { stdout: string; exitCode?: number }>) => {
+  world(on)
+  mock.store(on)
+  const run = 'bash scripts/bdi-flow.sh run orders-flow'
+  const check = 'bash scripts/bdi-flow.sh status orders-flow r-77'
+  on('tool.call', { tool: 'Bash' }, async (_$, e) => ({
+    result: {
+      stdout: String(e.command) === run ? '{"run_id":"r-77"}' : '{"run_id":"r-77","status":"failed","error_description":"Target table orders_stg does not exist"}',
+      stderr: '',
+      interrupted: false,
+    },
+  }))
+  const ran: string[][] = []
+  const BDI = '/root/.claude/plugins/cache/boomi-companion/bc-bdi/0.2.5/skills/boomi-bdi/scripts'
+  on('process.run', async (_$, e) => {
+    ran.push([...e.argv])
+    const command = e.argv.join(' ')
+    const answer = /ls -d/.test(command) ? { stdout: `${BDI}\n` } : (scripts[e.argv.slice(2).join(' ')] ?? { stdout: '', exitCode: 1 })
+    return { value: { exitCode: answer.exitCode ?? 0, stdout: answer.stdout, stderr: answer.exitCode ? answer.stdout : '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await $.tool.call({ tool: 'Bash', command: run })
+  await $.tool.call({ tool: 'Bash', command: check })
+  return { ran, BDI }
+}
+
+const BDI_LOG = ['timestamp,level,msg', '2026-10-12T11:58:07,ERROR,"Loading orders_stg: relation ""orders_stg"" does not exist"', '2026-10-12T11:58:01,INFO,Extracted 1200 rows'].join('\n')
+
+test("/bc-dashboard why reads a failed BDI run's log with bc-bdi's own script", async ($, on) => {
+  const { ran, BDI } = await failedBdiRun($, on, {
+    'logs orders-flow r-77': { stdout: BDI_LOG },
+    'steps orders-flow r-77': { stdout: '{"detail":"Only logic flows have logic steps"}', exitCode: 1 },
+  })
+  const listed = (await $.command.run(dashboard('text'))).text ?? ''
+  expect(listed).toContain('Target table orders_stg does not exist. Run r-77…: press Why? to read its log.')
+  const why = (await $.command.run(dashboard('why'))).text
+  expect(why).toBe(
+    [
+      'BDI: flow orders-flow run failed (BDI run r-77):',
+      '  Failure: Target table orders_stg does not exist',
+      '  11:58:07 ERROR Loading orders_stg: relation "orders_stg" does not exist',
+    ].join('\n'),
+  )
+  // Read-only: the logs and the steps, nothing that changes the flow.
+  expect(ran.filter(argv => argv[1]?.endsWith('bdi-flow.sh'))).toEqual([
+    ['bash', `${BDI}/bdi-flow.sh`, 'logs', 'orders-flow', 'r-77'],
+    ['bash', `${BDI}/bdi-flow.sh`, 'steps', 'orders-flow', 'r-77'],
+  ])
+})
+
+test("the pane's Why? on a failed logic flow names the step that failed, and Ask Claude to fix drafts the request", async ($, on) => {
+  let filled = ''
+  on('prompt.fill', async (_$, e) => {
+    filled = e.text
+    return { isFilled: true }
+  })
+  await failedBdiRun($, on, {
+    'logs orders-flow r-77': { stdout: BDI_LOG },
+    'steps orders-flow r-77': { stdout: JSON.stringify({ items: [{ step_name: 'load_orders', status: 'failed', error_message: 'table not found' }] }) },
+  })
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  await pane.press({ key: 'why-0' })
+  expect(await pane.find({ text: /BDI says \(1 errors, 0 warnings in the log\):/ })).toBeDefined()
+  expect(await pane.find({ text: /Step "load_orders" failed: table not found/ })).toBeDefined()
+  await pane.press({ key: 'fix-0' })
+  expect(filled).toContain('BDI: flow orders-flow run failed (flow orders-flow, run r-77). BDI says:')
+  expect(filled).toContain("Don't change the flow until I approve it.")
+})
+
+test("Why? on a BDI run says plainly when bc-bdi's script can't read the log", async ($, on) => {
+  await failedBdiRun($, on, { 'logs orders-flow r-77': { stdout: 'ERROR: BDI_API_KEY is not set', exitCode: 1 } })
+  expect((await $.command.run(dashboard('why'))).text).toBe("Couldn't read the log of BDI run r-77: ERROR: BDI_API_KEY is not set")
 })

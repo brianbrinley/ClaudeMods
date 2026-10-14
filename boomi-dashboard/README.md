@@ -10,7 +10,7 @@
 **See your whole Boomi build at a glance, right beside the conversation.** While Claude builds with [Boomi Companion](https://github.com/OfficialBoomi/bc-integration), the dashboard follows every edit, save, deploy and test. It tells you what broke and what to do next, and keeps a running total of what the session costs. You don't leave Claude Code, and you don't scroll back through the transcript.
 
 - **Know where every component stands.** Edited, saved with its version, deployed, tested: each component's stage updates as Claude works.
-- **Go from failure to fix in two clicks.** **Why?** reads a failed test's process log. **Ask Claude to fix** drafts the request with the log's lines in it, and **Run again** checks the fix without a turn of Claude's.
+- **Go from failure to fix in two clicks.** **Why?** reads a failed test's process log, or a failed BDI run's log. **Ask Claude to fix** drafts the request with the log's lines in it, and **Run again** checks the fix without a turn of Claude's.
 - **Keep spend in sight.** Tokens, cost and how full the context is, per step and per component. On a Claude seat, your 5-hour and weekly usage limits and where your pace leads, read automatically, and an optional Companion budget of your own: a share of your limit per day, week or month, or a monthly amount.
 - **Learn from what cost the most.** Review a past session to see what drove its cost (the model, a long conversation, repeated tests) and the Claude Code habit that would have saved it.
 - **Pick up where you left off.** A new session opens with what the last one did and left to fix, and **Past Companion sessions** shows what earlier work cost.
@@ -123,6 +123,7 @@ Each item under **Needs attention** has buttons:
 
 - **☐** closes it, for a failure you expected or handled another way. Closed items stay closed across restarts; **Reopen** brings them back.
 - **Why?** (failed tests) runs Companion's `boomi-execution-query.sh --logs` and shows the log's `SEVERE` lines. **Ask Claude to fix** then puts a fix request with those lines in the prompt box, after anything you've typed. Nothing is sent until you press Enter.
+- **Why?** (failed BDI runs) follows bc-bdi's own troubleshooting guide. It shows the reason BDI gave for the failure. For a logic flow, it also shows the first step that failed (`bdi-flow.sh steps`). Then it shows the run log's `ERROR` lines in the order they happened (`bdi-flow.sh logs`). Both reads leave the flow as it is. **Ask Claude to fix** drafts a request to find the cause and propose a fix, without changing the flow until you approve it.
 - **Run again** (failed tests Claude ran) repeats the same `boomi-test-execute.sh` call, without a turn of Claude's. A pass clears the failure.
 
 Without a pane: `/bc-dashboard close <n>`, `why` and `rerun`. With nothing that fits, `why` and `rerun` say so; with one failure, they act on it; with several, they ask which in Claude Code's question dialog (the four newest, and **Other** takes a number). A number from `/bc-dashboard text` skips the question.
@@ -357,7 +358,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 - Steps are saved per working folder, the last 200 whatever their age. After a restart, the last 24 hours (`recentHours`) come back; **Show N earlier** under **Components this session**, or `/bc-dashboard earlier`, shows the rest, as history: their failures don't go under **Needs attention**. Tokens and spend start over each session, counted from when the mod loads.
 - Cost is the whole session's, not just Companion's share.
 - Past sessions are this machine's only (not the web's), and Claude Code deletes transcripts after 30 days unless `cleanupPeriodDays` says otherwise.
-- **Why?** and **Run again** need Companion's scripts, found where the last one ran or in Claude Code's plugin cache, and work where the CLI runs.
+- **Why?** and **Run again** need Companion's scripts, found where the last one ran or in Claude Code's plugin cache, and work where the CLI runs. **Why?** on a BDI run uses bc-bdi's scripts from the plugin cache, which read bc-bdi's own settings in the workspace.
 - A refusal by another mod shows as blocked only if it reaches the dashboard, which depends on hook order.
 
 ## How it works

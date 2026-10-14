@@ -194,6 +194,8 @@ export type QuarantineSeen = { count: number; causes: string; reason?: string; c
 /** Reading a failed execution's log: fetching, what it says, or why it couldn't be read. */
 export type DiagnosisState = {
   phase: 'loading' | 'ready' | 'error'
+  /** Whose log it is: a BDI run's (severe then counts its ERROR lines), else a Boomi execution's. */
+  source?: 'bdi'
   /** The log's SEVERE lines (else its last few), and how many SEVERE and WARNING lines it has. */
   lines?: string[]
   severe?: number

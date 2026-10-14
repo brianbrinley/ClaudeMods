@@ -115,6 +115,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** a **Custom connectors** section with the project folder's name and `✓ descriptor linted  ✓ validated  ✓ uploaded vN`, `◐ vN not active yet` until the version change, then `✓ vN active on dev`. **Fail:** two rows for one connector, no version number, or the warning staying after the change; send the upload's and the version change's output, so their field names can be confirmed.
 - [ ] **G16. A failed lint.** *(0.21.0)* Break the descriptor (an element in the wrong place) and have Claude lint it.
   **Pass:** `✗ lint failed` on the row, and under **Needs attention** the line xmllint gave, naming the file, line and element. **Fail:** only `failed`, or a pass.
+- [ ] **G17. Why? on a failed BDI run.** *(0.35.0)* Have Claude run a BDI flow that fails, such as one whose target table doesn't exist, and check its status until it ends. Press **Why?** under **Needs attention**, then **Ask Claude to fix**.
+  **Pass:** the line names BDI's reason. **Why?** shows `BDI says (n errors, …)` with the reason and the log's ERROR lines, plus the failed step for a logic flow. **Ask Claude to fix** puts a request in the prompt box that names the flow and run, and nothing changes in BDI. **Fail:** no **Why?**, an error about bc-bdi's scripts with bc-bdi installed, or log lines out of order.
 
 
 ## H. Usage limits and a Companion budget
