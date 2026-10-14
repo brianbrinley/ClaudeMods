@@ -1619,7 +1619,7 @@ const OPEN_SCRIPT = [
   'exit 3',
 ].join('\n')
 
-/** /bc-dashboard report [save|html [session|all] [--no-open]]: the report as text; save also writes it as Markdown, html as a web page. */
+/** /bc-dashboard report [save|html [session|all] [--no-open] [--style exosphere|expressive]]: the report as text; save also writes it as Markdown, html as a web page. */
 const reportCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
   const words = target.split(/\s+/).filter(Boolean)
   if (words[0] === 'html') return reportHtmlCommand($, settings, words.slice(1))
@@ -1709,7 +1709,7 @@ const USAGE = [
   '/bc-dashboard why [n]         read the log of a failed test or run (no number: pick one)',
   '/bc-dashboard rerun [n]       run a failed test again, the same way Claude ran it (no number: pick one)',
   '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
-  '/bc-dashboard report html     the session as a web page to open in a browser or share: one file, sortable and filterable',
+  '/bc-dashboard report html     the session as a web page to open in a browser or share: one file, sortable and filterable (--style expressive for the Valence look)',
   '/bc-dashboard history         past Companion sessions on this machine and what each cost',
   '/bc-dashboard resume [n]      copy the command that reopens a past session in a new terminal',
   '/bc-dashboard review [n]      what made a past session cost what it did, and what to change next time',
@@ -2119,7 +2119,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save|html [session|all] [--no-open]] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | config [budget|pane|data|list|<setting> <value>] | upgrade [--check] [--yes] [--rollback]',
+      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save|html [session|all] [--no-open] [--style exosphere|expressive]] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | config [budget|pane|data|list|<setting> <value>] | upgrade [--check] [--yes] [--rollback]',
     })
     await $.tool.register({
       name: 'summary',
