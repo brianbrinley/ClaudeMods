@@ -79,6 +79,7 @@ import {
   welcomeLine,
   unclaimedReading,
   withoutEchoes,
+  repaired,
   tipsFor,
   quarantineLines,
   agents,
@@ -482,7 +483,7 @@ const restoreActivity = async ($: Engine, settings: Settings) => {
     if (saved?.recap) await update($, recap, () => saved.recap!)
     const now = await $.clock.now()
     // Steps recorded before results printed twice counted once lose their echoes here.
-    const all = withoutEchoes(saved?.activity ?? [])
+    const all = repaired(withoutEchoes(saved?.activity ?? []))
     idFloor = (saved?.activity ?? []).reduce((max, a) => Math.max(max, a.id), 0)
     const isRecent = (a: Activity) => now - (a.endedAt ?? a.startedAt) <= settings.windowMs
     const kept = all.filter(isRecent).map(a => ({ ...a, isRestored: true }))

@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Activity, Dashboard } from '../types'
-import { assignSessions, boomiLink, hasEarlierSteps, packageOf, reportHtml, scoped, sessionLabel, sessionSummaries, sessionsCost, stepsToMatch, timeline, transcriptsFolder } from '../hooks/report-html'
-import { withoutEchoes } from '../hooks/activity'
+import { assignSessions, boomiLink, hasEarlierSteps, packageOf, reportHtml, scoped, sessionLabel, sessionSummaries, sessionsCost, sessionLedger, stepsToMatch, transcriptsFolder, workSentence } from '../hooks/report-html'
+import { repaired, withoutEchoes } from '../hooks/activity'
 import { platformClient } from '../hooks/platform'
 
 const NOW = Date.parse('2026-10-14T00:54:00Z')
@@ -79,9 +79,9 @@ test("an all-sessions report: sessions, the Boomi account, each component's ID a
   expect(page).not.toContain('eyebrow')
   // The timeline is the session index: no Sessions table, each session's band with its cost and, with a budget, how it stood.
   expect(page).not.toContain('<h2>Sessions')
-  expect(page).toContain('<a class="tl-head" href="#s-cccccccc-3333" title="cccccccc-3333"><span class="tl-name">This session</span>')
-  expect(page).toContain('<span class="tl-name">Earlier 1</span>')
-  expect(page).toContain('at least $0.30 · <span class="status status-critical">')
+  expect(page).toContain('<a class="ledger-link" href="#s-cccccccc-3333" title="cccccccc-3333">')
+  expect(page).toContain('<span class="l-id">Earlier 1</span>')
+  expect(page).toContain('at least $0.30<br><span class="l-budget"><span class="status status-critical">')
   expect(page).toContain('“At least”: a session from before the dashboard recorded session IDs')
   // Budgets beside the summary: each one set as a meter, and how the sessions stood against the session budget.
   expect(page).toContain('<li class="meter meter-warning"><div class="meter-head"><span>Companion this month</span>')
@@ -163,17 +163,17 @@ test("the Platform API client reads an account's name and its components' curren
 test("steps from before sessions were named find theirs: a transcript's time in this folder, else a drop in the running cost", () => {
   const old = (id: number, at: number, usdAt?: number): Activity => step(id, { startedAt: at, isRestored: true, ...(usdAt === undefined ? {} : { usdAt }) })
   const steps = [old(1, NOW - 30 * HOUR, 0.1), old(2, NOW - 29 * HOUR, 0.5), old(3, NOW - 20 * HOUR, 0.05), old(4, NOW - 19 * HOUR, 0.2), old(5, NOW - 2 * HOUR, 0.3)]
-  // Without a scan: a new session wherever the cost goes down.
-  expect([...assignSessions(steps, 'now-id').values()]).toEqual(['earlier-1', 'earlier-1', 'earlier-2', 'earlier-2', 'earlier-2'])
+  // Without a scan: a new session wherever the cost goes down, or after two quiet hours.
+  expect([...assignSessions(steps, 'now-id').values()]).toEqual(['earlier-1', 'earlier-1', 'earlier-2', 'earlier-2', 'earlier-3'])
   // With one: the transcript whose time covers a step in this folder claims it, with its exact cost.
   const past = [
     { id: 'tx-1', project: '/work/oracle', startedAt: new Date(NOW - 31 * HOUR).toISOString(), endedAt: new Date(NOW - 28 * HOUR).toISOString(), costUsd: 1.9, tokens: 0, cached: 0, models: [], runs: {}, components: [] },
     { id: 'tx-elsewhere', project: '/work/other', startedAt: new Date(NOW - 21 * HOUR).toISOString(), endedAt: new Date(NOW - 18 * HOUR).toISOString(), costUsd: 9, tokens: 0, cached: 0, models: [], runs: {}, components: [] },
   ]
   const ids = assignSessions(steps, 'now-id', past, '/work/oracle')
-  expect([...ids.values()]).toEqual(['tx-1', 'tx-1', 'earlier-1', 'earlier-1', 'earlier-1'])
+  expect([...ids.values()]).toEqual(['tx-1', 'tx-1', 'earlier-1', 'earlier-1', 'earlier-2'])
   const sessions = sessionSummaries(steps, 'now-id', 0.4, past, '/work/oracle')
-  expect(sessions.map(s => [s.id, s.usd, s.usdIs])).toEqual([['earlier-1', 0.3, 'atLeast'], ['tx-1', 1.9, 'exact']])
+  expect(sessions.map(s => [s.id, s.usd, s.usdIs])).toEqual([['earlier-2', 0.3, 'atLeast'], ['earlier-1', 0.2, 'atLeast'], ['tx-1', 1.9, 'exact']])
   expect(sessionLabel('earlier-1')).toBe('Earlier session 1 (no ID recorded)')
 })
 
@@ -208,27 +208,30 @@ test("the steps still to match to a transcript: unnamed, brought back, and cover
   expect(transcriptsFolder('/home/me/.claude', '/Users/me/boomi_brian-D1R00U')).toBe('/home/me/.claude/projects/-Users-me-boomi-brian-D1R00U')
 })
 
-test('the timeline: sessions oldest first on one strip, the idle time between them, each step a tick, and anything unhealthy marked with its icon', () => {
+test('the session ledger: a row each, oldest first, saying when it ran, what it did in words, how its steps went and what it cost', () => {
   const steps = [
     step(1, { kind: 'create', subject: 'A', startedAt: NOW - 30 * HOUR, session: 'one' }),
     step(2, { kind: 'test', outcome: 'failed', subject: 'A', executionId: 'e', detail: 'status ERROR', startedAt: NOW - 30 * HOUR + 600_000, session: 'one' }),
-    step(3, { kind: 'push', subject: 'B', startedAt: NOW - HOUR, session: 'two' }),
+    step(4, { kind: 'other', script: 'env-check', subject: 'the Boomi connection', startedAt: NOW - 30 * HOUR + 700_000, session: 'one' }),
+    step(5, { kind: 'other', script: 'env-check', outcome: 'blocked', subject: 'the Boomi connection', startedAt: NOW - 30 * HOUR + 800_000, session: 'one' }),
+    step(3, { kind: 'push', subject: 'B', version: '2', startedAt: NOW - HOUR, session: 'two' }),
   ]
-  const strip = timeline(steps, a => a.session!, id => `Session ${id}`, new Map([['one', '$1.00']]))
-  // Oldest first, with the gap between them in words.
-  expect(strip.indexOf('Session one')).toBeLessThan(strip.indexOf('Session two'))
-  expect(strip).toContain('<li class="tl-gap" aria-hidden="true"><span>28h 50m</span></li>')
-  // Each band's heading goes to its session's steps; its foot says what it held.
-  expect(strip).toContain('<a class="tl-head" href="#s-one" title="one">')
-  expect(strip).toContain('<div class="tl-foot">2 steps · 1 not healthy · $1.00</div>')
-  // Ticks are buttons a keyboard reaches, each naming and opening its step.
-  expect(strip).toContain('data-step="2" aria-label="')
-  // A failure is marked with its icon and named in its tooltip; a healthy tick carries no icon.
-  expect(strip).toMatch(/<button type="button" class="tl-tick tick-critical" style="left:[\d.]+%" data-tip="[^"]*Failed: Test of A failed" data-step="2" aria-label="[^"]*"><svg class="i"/)
-  expect(strip).toMatch(/<button type="button" class="tl-tick tick-healthy" style="left:[\d.]+%" data-tip="[^"]*" data-step="1" aria-label="[^"]*"><\/button>/)
-  // Its data as a table too.
-  expect(strip).toContain('<summary>Show the data</summary>')
-  expect(timeline([], a => a.session!, id => id, new Map())).toBe('')
+  const ledger = sessionLedger(steps, a => a.session!, id => `Session ${id}`, new Map([['one', '$1.00']]))
+  // Oldest first; each row links to its session's steps and shows its full ID on hover.
+  expect(ledger.indexOf('Session one')).toBeLessThan(ledger.indexOf('Session two'))
+  expect(ledger).toContain('<a class="ledger-link" href="#s-one" title="one">')
+  // When it ran, and how long after the session before.
+  expect(ledger).toContain('<strong>Mon, Oct 12</strong><span>18:54–19:07 UTC · 13m</span><span class="l-id">Session one</span>')
+  expect(ledger).toContain('<span class="l-id">Session two · 28h 46m later</span>')
+  // What it did, in words: each thing and what happened to it, a script that was stopped, and the housekeeping.
+  expect(workSentence(steps.slice(0, 4))).toBe('<strong>A</strong>: created, tested (1 failed) · env-check blocked · and 1 housekeeping step')
+  expect(workSentence([steps[2]!])).toBe('1 housekeeping step')
+  // How its steps went, each count with its icon, and its cost; a cost not recorded says so.
+  expect(ledger).toMatch(/<span class="status status-healthy"><svg[^]*?Healthy: <\/span>2<\/span>/)
+  expect(ledger).toContain('<span class="sr">Failed: </span>1</span>')
+  expect(ledger).toContain('<span class="l-cost">$1.00</span>')
+  expect(ledger).toContain('<span class="l-cost"><span class="muted">not recorded</span></span>')
+  expect(sessionLedger([], a => a.session!, id => id, new Map())).toBe('')
 })
 
 test("a session's budget: a meter and a warning in the summary near it, and how to set one when there's none", () => {
@@ -243,5 +246,16 @@ test("a session's budget: a meter and a warning in the summary near it, and how 
   expect(near).toContain('It has cost <strong>$0.90</strong> so far <span class="status status-warning">')
   expect(near).toContain('90% of the $1.00 budget</span>')
   // The timeline's band says it too, with its icon.
-  expect(near).toContain('$0.90 · <span class="status status-warning">')
+  expect(near).toContain('$0.90<br><span class="l-budget"><span class="status status-warning">')
+})
+
+test('steps recorded by older versions read properly: a placeholder takes its component name, a test that took another line says it had none', () => {
+  const fixed = repaired([
+    step(1, { kind: 'create', subject: 'Oracle', componentId: 'c-1', startedAt: NOW }),
+    step(2, { kind: 'test', subject: 'a component', componentId: 'c-1', executionStatus: 'COMPLETE', detail: 'status COMPLETE', startedAt: NOW }),
+    step(3, { kind: 'test', outcome: 'ok', subject: 'Oracle', detail: "SUCCESS: Component 'Oracle' created with ID: c-1", startedAt: NOW }),
+    step(4, { kind: 'test', subject: 'a component', detail: 'status COMPLETE', executionStatus: 'COMPLETE', startedAt: NOW }),
+  ])
+  expect(fixed.map(a => a.subject)).toEqual(['Oracle', 'Oracle', 'Oracle', 'a component'])
+  expect(fixed[2]!.detail).toBe('no result of its own (it ran in a command with other scripts)')
 })

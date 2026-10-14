@@ -1098,7 +1098,7 @@ test('a result printed twice in one output is one step; a loop over two componen
 })
 
 test("a run with no result of its own doesn't take another script's line", () => {
-  expect(unclaimedReading(false)).toEqual({ outcome: 'ok', detail: 'no result of its own in the output (it ran in a command with other scripts)' })
+  expect(unclaimedReading(false)).toEqual({ outcome: 'ok', detail: 'no result of its own (it ran in a command with other scripts)' })
   expect(unclaimedReading(true).outcome).toBe('failed')
 })
 
