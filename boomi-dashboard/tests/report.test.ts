@@ -377,3 +377,11 @@ test('budget overrides the person granted are listed for the audit trail, and st
   // An override isn't housekeeping: it shows in the session's sentence.
   expect(workSentence([step(2, { kind: 'other', subject: 'Budget override', outcome: 'ok', detail: 'x', isBudgetOverride: true })])).toBe('<strong>Budget</strong>: override allowed')
 })
+
+test('one quiet theme button: a moon to go dark, a sun to come back, labelled for a screen reader', () => {
+  const page = reportHtml(scoped(DASHBOARD, 'session'), { session: 'c', sessionId: 'c', date: '2026-10-14', usage: USAGE, scope: 'session' }, NOW, 24 * HOUR)
+  expect(page).toContain('<button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to the dark theme" title="Dark theme"><svg class="moon"')
+  expect(page).toContain('<svg class="sun"')
+  expect(page).not.toContain('data-theme-pick')
+  expect(page).toContain('.ex-theme-dark .theme-toggle .sun{display:block}')
+})
