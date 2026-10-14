@@ -16,7 +16,7 @@
 - **Pick up where you left off.** A new session opens with what the last one did and left to fix, and **Past Companion sessions** shows what earlier work cost.
 - **Every Companion plugin, not only integration.** Data Hub deploys, BDI flow runs, Agentstudio agents, custom connector releases and Marketplace recipes show up as steps too, with their failures under **Needs attention** and each product's share of the spend.
 - **Catch what happens outside the chat.** Companion's activity log adds script runs from a terminal, and watched components flag changes someone else makes in Boomi.
-- **Hand it off.** `/bc-dashboard report` writes the session up as Markdown for a pull request, a ticket or the next person.
+- **Hand it off.** `/bc-dashboard report` writes the session up as Markdown for a pull request, a ticket or the next person. `report html` makes it a web page with charts that you can send to anyone.
 
 ## Install
 
@@ -261,6 +261,26 @@ Boomi Companion sessions on this machine, last 90 days:
 
 `/bc-dashboard report` prints the session as Markdown for a pull request, ticket or hand-off: components, deployments and tests, what needs attention, runs and spend. `report save` also writes it to `boomi-session-report-<date>.md`. Claude can ask for it with the `report` tool.
 
+### As a web page to share
+
+`/bc-dashboard report html` saves the same report as one file, `boomi-session-report-<time>.html`, in the workspace. Open it in any browser, or send it to someone who doesn't use Claude Code. Nothing in it is live: it's a snapshot of the session, with no credentials, and anything shaped like a token is masked.
+
+It follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system: its Exo III color tokens, light and dark (Light and Dark buttons at the top, or your system's setting), Poppins headings and Noto Sans text, its cards, badges and alerts. Every status shows its icon and its label, never color alone.
+
+- **At a glance:** cost against your budget, tokens, components and steps, and what needs attention.
+- **Five charts,** each with hover details and a **Show the data** table:
+  - steps over the session, stacked by outcome;
+  - outcomes by product (click a product to list its steps);
+  - cost over the session;
+  - spend by product;
+  - the component pipeline: worked on, saved in Boomi, deployed, tested and passing.
+
+  Products keep the same color in every chart, from a set of Exosphere colors checked for color blindness and contrast. Status colors are used only for status.
+- **Tables** of components, custom connectors and Agentstudio agents, sorted by clicking a column.
+- **Claude's steps,** newest first: search them, filter to what failed or to one product, and open one for its result, component, execution and file.
+
+With a connection it loads Exosphere's fonts from Google Fonts; offline it falls back to your system's fonts.
+
 ## Commands and tools
 
 | Command | Tool | Does |
@@ -275,7 +295,7 @@ Boomi Companion sessions on this machine, last 90 days:
 | `/bc-dashboard size <rows> [columns]` | | The pane's size, kept for later sessions; `size` alone goes back to the default. |
 | `/bc-dashboard seen` | | Moves watched changes out of **Needs attention**. |
 | `/bc-dashboard watch <id\|file>` / `unwatch <id>` | `watch` | Watches a component, or stops. |
-| `/bc-dashboard report [save]` | `report` | The session report. |
+| `/bc-dashboard report [save\|html]` | `report` | The session report; `html` saves it as a web page to share. |
 | `/bc-dashboard history` | `history` | Past Companion sessions and their cost. |
 | `/bc-dashboard resume [n]` | | Copies the command that reopens a past session in a new terminal; without a number, asks which. |
 | `/bc-dashboard review [n]` | | What drove a past session's cost, and what to change next time; without a number, asks which of the costliest. |

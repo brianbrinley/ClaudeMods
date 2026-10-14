@@ -1786,3 +1786,45 @@ test('the update check is off when updateCheck is off', { options: { updateCheck
   expect(calls).toHaveLength(0)
   expect(toasts.filter(t => /available/.test(t))).toHaveLength(0)
 })
+
+test('/bc-dashboard report html writes the session as one web page, escaped and masked', async ($, on) => {
+  world(on, { [FILE]: ORDERS, '.claude-plugin/plugin.json': '{ "name": "boomi-dashboard", "version": "9.9.9" }' })
+  mock.store(on)
+  const push = `bash scripts/boomi-component-push.sh ${FILE}`
+  const run = 'bash scripts/bdi-flow.sh run flow-1'
+  productShell(on, {
+    [push]: { out: "SUCCESS: Pushed component 'Orders Sync' — now version 4" },
+    [run]: { out: 'ERROR: HTTP 401 <script>alert(1)</script> Authorization: Bearer abc.def-123', isError: true },
+  })
+  const written: { path: string; text: string }[] = []
+  on('fs.write', async (_$, e) => {
+    written.push({ path: e.path, text: e.text })
+    return { value: undefined }
+  })
+  await $.tool.call({ tool: 'Bash', command: push })
+  await $.tool.call({ tool: 'Bash', command: run })
+  const said = (await $.command.run(dashboard('report html'))).text ?? ''
+  expect(said).toContain('Saved the report as a web page: /work/boomi-session-report-')
+  expect(written).toHaveLength(1)
+  expect(written[0]!.path).toMatch(/^\/work\/boomi-session-report-\d{12}\.html$/)
+  const page = written[0]!.text
+  expect(page.startsWith('<!doctype html>')).toBe(true)
+  expect(page).toContain('<title>Companion Session Report</title>')
+  expect(page).toContain('content="boomi-dashboard 9.9.9"')
+  // Each status has its icon and its label, never color alone.
+  expect(page).toContain('<span class="badge badge-healthy"><span class="icon" aria-hidden="true">✓</span><span class="sr">Healthy: </span>saved v4</span>')
+  expect(page).toContain('<span class="sr">Failed: </span>BDI: couldn&#39;t run flow flow-1')
+  expect(page).toContain('<h3>Outcomes by product</h3>')
+  expect(page).toContain('data-pick="product:BDI"')
+  expect(page).toContain('<h3>Component pipeline</h3>')
+  expect(page).toContain('<th scope="row">Orders Sync</th>')
+  expect(page).toContain('data-filter="product:BDI"')
+  expect(page).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+  expect(page).not.toContain('<script>alert(1)')
+  expect(page).toContain('Bearer ****')
+  expect(page).not.toContain('abc.def-123')
+  // Exosphere's tokens, light and dark, and its fonts.
+  expect(page).toContain('--exo-color-background-brand:#072b55')
+  expect(page).toContain('.ex-theme-dark{--exo-color-page:#1a1a1a')
+  expect(page).toContain('family=Poppins')
+})

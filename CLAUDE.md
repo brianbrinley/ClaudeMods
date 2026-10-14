@@ -35,3 +35,5 @@ Every visual in this repository uses the Valence theme unless the user says othe
 - **HTML / UI:** use `brand/valence.css` (Miami Day by default, Miami Night for dark).
 - **Type:** Poiret One for the wordmark and display only; Josefin Sans for headings and labels; system UI sans for body text and data.
 - **New README:** start it with a Valence banner rendered from `brand/banner.html` into the mod's `assets/` folder, with Day and Night versions in a `<picture>` element.
+
+**The exception, Boomi's Exosphere:** what a mod produces for Boomi people to read outside Claude Code, such as the dashboard's `report html`, follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system instead: its Exo III tokens (light and dark), Poppins for headings, Noto Sans for text and Fira Mono for code. Status still always shows an icon and a label.
