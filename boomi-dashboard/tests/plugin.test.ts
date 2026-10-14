@@ -2108,3 +2108,89 @@ test('/bc-dashboard config keeps what was picked when the menu closes before Don
   expect(saved.text).toBe('Saved to /config:\n  Pane colors: day → night\nThe menu closed before Done; what you picked before it closed is saved.')
   expect((await $.command.run(dashboard('theme'))).text).toContain('◆ night')
 })
+
+// --- The pane's theme and size live in /config ----------------------------------------
+
+/** /config's writer: records what the plugin set, or refuses it all (as a locked or unwritable /config does). */
+const configWriter = (on: On, isRefusing = false) => {
+  const sets: [string, unknown][] = []
+  on('config.set', async (_$, e) => {
+    if (isRefusing) return { deny: 'locked' }
+    sets.push([e.key, e.value])
+    return { value: e.value }
+  })
+  return sets
+}
+
+/** The store in memory, deletes included. */
+const memoryStore = (on: On, store: Record<string, unknown>) => {
+  on('store.get', async (_$, e) => ({ value: store[e.key] }))
+  on('store.set', async (_$, e) => {
+    store[e.key] = JSON.parse(JSON.stringify(e.value))
+    return { value: undefined }
+  })
+  on('store.delete', async (_$, e) => {
+    delete store[e.key]
+    return { value: undefined }
+  })
+}
+
+test("the pane's theme buttons and /bc-dashboard theme save the theme in /config", async ($, on) => {
+  world(on)
+  const store: Record<string, unknown> = {}
+  memoryStore(on, store)
+  const sets = configWriter(on)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  await pane.press({ key: 'theme-night' })
+  expect(sets).toEqual([['boomi-dashboard.paneTheme', 'night']])
+  expect(propsOf(await pane.drawn()).backgroundColor).toBe('#161A2E')
+  expect((await pane.find({ type: 'Button', key: 'theme-night' }))?.props.label).toBe('◆ Night')
+  expect(store.theme).toBeUndefined()
+  await $.command.run(dashboard('theme day'))
+  expect(sets.at(-1)).toEqual(['boomi-dashboard.paneTheme', 'day'])
+  expect(propsOf(await pane.drawn()).backgroundColor).toBe('#FBF6EE')
+})
+
+test('where /config refuses the theme, the dashboard keeps it in its own store', async ($, on) => {
+  world(on)
+  const store: Record<string, unknown> = {}
+  memoryStore(on, store)
+  configWriter(on, true)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  await pane.press({ key: 'theme-night' })
+  expect(store.theme).toBe('night')
+  expect(propsOf(await pane.drawn()).backgroundColor).toBe('#161A2E')
+})
+
+test('/bc-dashboard size saves the size in /config, and with no numbers sets it back', async ($, on) => {
+  world(on, {}, { isPlaced: true })
+  const store: Record<string, unknown> = {}
+  memoryStore(on, store)
+  const sets = configWriter(on)
+  expect((await $.command.run(dashboard('size 30 90'))).text).toContain('asks for 30 rows and 90 columns')
+  expect(sets).toEqual([['boomi-dashboard.paneRows', 30], ['boomi-dashboard.paneColumns', 90]])
+  expect(store.paneSize).toBeUndefined()
+  await $.command.run(dashboard())
+  expect(opens.at(-1)).toMatchObject({ rows: 30, columns: 90 })
+  await $.command.run(dashboard('size'))
+  expect(sets.slice(-2)).toEqual([['boomi-dashboard.paneRows', 0], ['boomi-dashboard.paneColumns', 0]])
+  await $.command.run(dashboard())
+  expect(opens.at(-1)?.rows).toBeUndefined()
+})
+
+test('a theme and size an earlier version kept move to /config as the session starts', async ($, on) => {
+  world(on, {}, { isPlaced: true })
+  const store: Record<string, unknown> = { theme: 'night', paneSize: { rows: 24, columns: 0 } }
+  memoryStore(on, store)
+  const sets = configWriter(on)
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', async () => ({ value: undefined }) as never)
+  on('tool.register', async () => ({ value: undefined }) as never)
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  expect(sets).toEqual([['boomi-dashboard.paneTheme', 'night'], ['boomi-dashboard.paneRows', 24], ['boomi-dashboard.paneColumns', 0]])
+  expect(store.theme).toBeUndefined()
+  expect(store.paneSize).toBeUndefined()
+  expect((await $.command.run(dashboard('theme'))).text).toContain('◆ night')
+  await $.command.run(dashboard())
+  expect(opens.at(-1)).toMatchObject({ rows: 24 })
+})

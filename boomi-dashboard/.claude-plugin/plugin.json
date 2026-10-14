@@ -1,13 +1,13 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.33.0",
+  "version": "0.34.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
     "paneTheme": {
       "type": "string",
       "title": "Pane colors",
-      "description": "The pane's colors until you pick a theme in the pane or with /bc-dashboard theme: day (Valence Day, light, with its own background), night (Valence Night, dark) or terminal (your terminal's theme)",
+      "description": "The pane's colors, which the pane's theme buttons and /bc-dashboard theme also set: day (Valence Day, light, with its own background), night (Valence Night, dark) or terminal (your terminal's theme)",
       "options": [
         "day",
         "night",

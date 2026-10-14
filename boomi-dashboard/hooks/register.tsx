@@ -222,6 +222,8 @@ type Settings = {
   isCheckingUpdates: boolean
   updateCheckHours: number
   isOpeningReport: boolean
+  /** The options these settings came from, for a change to one of them. */
+  options: Readonly<Record<string, unknown>>
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -245,6 +247,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   isCheckingUpdates: options.updateCheck !== false,
   updateCheckHours: Math.max(0, Number(options.updateCheckHours ?? 24) || 0),
   isOpeningReport: options.reportOpen !== false,
+  options: { ...options },
 })
 
 const PANE = 'boomi-dashboard'
@@ -278,7 +281,19 @@ const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit'])
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
-/** The pane's size, picked with /bc-dashboard size and kept; until then the settings'. 0 leaves it to Claude Code. */
+/**
+ * Saves one of the dashboard's settings where /config keeps it, and puts it to
+ * work in this session. False when /config refused it (an organization's lock,
+ * a value it won't take, no settings to write to): the caller keeps it its own way.
+ */
+const saveSetting = async ($: Engine, settings: Settings, field: string, value: Value): Promise<boolean> => {
+  const done = await $.config.set({ key: `boomi-dashboard.${field}`, value }).catch(() => ({ deny: 'unavailable' }))
+  if (done.deny !== undefined) return false
+  Object.assign(settings, settingsFrom({ ...settings.options, [field]: value } as PluginOptions))
+  return true
+}
+
+/** The pane's size, picked with /bc-dashboard size where /config wouldn't keep it; otherwise the settings'. 0 leaves it to Claude Code. */
 const paneSize = atom({ plugin: 'boomi-dashboard', key: 'paneSize' } as const, null as { rows: number; columns: number } | null)
 const SIZE_KEY = 'paneSize'
 
@@ -306,6 +321,8 @@ const resize = async ($: Engine, settings: Settings, target: string): Promise<st
   if (!rows) {
     await update($, paneSize, () => null)
     await $.store.delete(SIZE_KEY).catch(() => undefined)
+    await saveSetting($, settings, 'paneRows', 0)
+    await saveSetting($, settings, 'paneColumns', 0)
     return 'The dashboard pane is back to its usual size. Drag its edge to resize it by hand.'
   }
   const r = Number(rows)
@@ -314,8 +331,13 @@ const resize = async ($: Engine, settings: Settings, target: string): Promise<st
     return 'Usage: /bc-dashboard size <rows 8-200> [columns 40-400]. With nothing after size, back to the default.'
   }
   const size = { rows: r, columns: c }
-  await update($, paneSize, () => size)
-  await $.store.set(SIZE_KEY, size).catch(() => undefined)
+  if ((await saveSetting($, settings, 'paneRows', r)) && (await saveSetting($, settings, 'paneColumns', c))) {
+    await update($, paneSize, () => null)
+    await $.store.delete(SIZE_KEY).catch(() => undefined)
+  } else {
+    await update($, paneSize, () => size)
+    await $.store.set(SIZE_KEY, size).catch(() => undefined)
+  }
   await $.ui.open({ id: PANE, title: 'Boomi Companion Dashboard', focus: true, closeOnEscape: true, ...(await sizeOf($, settings)) }).catch(() => undefined)
   return `The dashboard pane asks for ${r} rows${c ? ` and ${c} columns` : ''}, now and in later sessions. A size you drag it to wins.`
 }
@@ -1577,10 +1599,18 @@ const showEarlier = async ($: Engine): Promise<string> => {
   return `Showing ${earlier.length} older step${earlier.length === 1 ? '' : 's'} from this folder. Their failures are history: they don't go under Needs attention.`
 }
 
-/** Picks the pane's theme, now and for later sessions. */
-const pickTheme = async ($: Engine, theme: PaneTheme) => {
+/**
+ * Picks the pane's theme, now and for later sessions: saved in /config where it
+ * will take it, else kept in the dashboard's own store. The pane redraws at once.
+ */
+const pickTheme = async ($: Engine, settings: Settings, theme: PaneTheme) => {
   await update($, pickedTheme, () => theme)
-  await $.store.set(THEME_KEY, theme)
+  if (await saveSetting($, settings, 'paneTheme', theme)) {
+    await $.store.delete(THEME_KEY).catch(() => undefined)
+    await update($, pickedTheme, () => null)
+  } else {
+    await $.store.set(THEME_KEY, theme).catch(() => undefined)
+  }
 }
 
 const themeOf = async ($: Engine, settings: Settings): Promise<PaneTheme> => (await read($, pickedTheme)) ?? settings.paneTheme
@@ -1589,7 +1619,7 @@ const themeOf = async ($: Engine, settings: Settings): Promise<PaneTheme> => (aw
 const theme = async ($: Engine, settings: Settings, target: string): Promise<string> => {
   const wanted = target.toLowerCase()
   if (isTheme(wanted)) {
-    await pickTheme($, wanted)
+    await pickTheme($, settings, wanted)
     return `Dashboard theme: ${THEME_NAMES[wanted]}.`
   }
   const current = await themeOf($, settings)
@@ -1750,7 +1780,10 @@ const saveConfig = async ($: Engine, settings: Settings, values: Record<string, 
     }
     lines.push(changeLine(field, values[key]!, value))
     applied[key] = value
-    if (key === 'paneTheme' && isTheme(value)) await pickTheme($, value)
+    if (key === 'paneTheme') {
+      await $.store.delete(THEME_KEY).catch(() => undefined)
+      await update($, pickedTheme, () => null)
+    }
   }
   Object.assign(settings, settingsFrom(applied as PluginOptions))
   await refreshStatus($, settings).catch(() => undefined)
@@ -2048,10 +2081,17 @@ export const register: Register = (on, options) => {
     })
 
     // The watch list outlives the session; restore it the first time.
+    // A theme or size kept in the store (by 0.33.0 and earlier, or where /config refused it) moves to /config once it will take it.
     const saved = await $.store.get(THEME_KEY)
-    if (isTheme(saved)) await update($, pickedTheme, () => saved)
+    if (isTheme(saved)) {
+      if (await saveSetting($, settings, 'paneTheme', saved)) await $.store.delete(THEME_KEY).catch(() => undefined)
+      else await update($, pickedTheme, () => saved)
+    }
     const size = (await $.store.get(SIZE_KEY)) as { rows?: number; columns?: number } | undefined
-    if (size && typeof size.rows === 'number') await update($, paneSize, () => ({ rows: size.rows!, columns: size.columns ?? 0 }))
+    if (size && typeof size.rows === 'number') {
+      if ((await saveSetting($, settings, 'paneRows', size.rows)) && (await saveSetting($, settings, 'paneColumns', size.columns ?? 0))) await $.store.delete(SIZE_KEY).catch(() => undefined)
+      else await update($, paneSize, () => ({ rows: size.rows!, columns: size.columns ?? 0 }))
+    }
 
     await restoreActivity($, settings)
 
@@ -2392,7 +2432,7 @@ export const register: Register = (on, options) => {
           <Box>
             {t('Theme ', { color: p.muted })}
             {THEMES.map(name => (
-              <Button key={`theme-${name}`} label={name === themeNow ? `◆ ${THEME_NAMES[name]}` : THEME_NAMES[name]} onPress={() => pickTheme($, name)} />
+              <Button key={`theme-${name}`} label={name === themeNow ? `◆ ${THEME_NAMES[name]}` : THEME_NAMES[name]} onPress={() => pickTheme($, settings, name)} />
             ))}
           </Box>
         </Box>
