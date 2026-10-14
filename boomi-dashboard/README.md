@@ -248,11 +248,11 @@ Numbers go in without quotes. The period is `"day"`, `"week"` or `"month"`. Leav
 | `confirm` | Before each Companion change, asks you: **Allow this one**, **Allow for the rest of this session**, **Raise the budget** (opens `/bc-dashboard config budget`, then lets the change through if the budget is no longer spent) or **Stop**. Closing the question stops the change. |
 | `block` | Refuses each Companion change outright. |
 
-**What counts as a Companion change:** creating, saving (push), deploying, undeploying and test-executing a component; bc-integration's other changing scripts (creating a folder, creating or deleting a branch, setting extensions, calling a deployed web service, creating Event Streams topics); and the other plugins' subcommands that change something, the same ones the dashboard counts as steps. Also gated:
+**What counts as a Companion change:** creating, saving (push), deploying, undeploying and test-executing a component; bc-integration's other changing scripts (creating a folder, creating or deleting a branch, setting extensions, calling a deployed web service, and creating Event Streams topics, subscriptions, tokens or connections, or sending a message to a topic); and the other plugins' subcommands that change something, the same ones the dashboard counts as steps. Also gated:
 - a call straight to the Platform API that changes something: PUT, PATCH, DELETE, or a POST that isn't a query, sent with curl, wget or HTTPie to `api.boomi.com`;
 - a local script that Claude runs (`bash run-all.sh`) and that contains any of the above. The dashboard reads the script first.
 
-**Never stopped:** reads (list, get, query, status, logs, pull, search; the Platform API's GETs and `…/query` POSTs), the dashboard's own tools, and **Why?** and **Run again** when you press them in the pane. A change that's already running when the budget runs out always finishes.
+**Never stopped:** reads (list, get, query, status, logs, pull, search; the Platform API's GETs and `…/query` POSTs); checks and scaffolding on your machine (a connector's descriptor lint, doctor, init and validate); downloads (a Marketplace bundle's supporting materials); cancelling a BDI run, which only stops spending; the dashboard's own tools, and **Why?** and **Run again** when you press them in the pane. A change that's already running when the budget runs out always finishes.
 
 **`budgetGrace`** (percent, default `0`) lets work run a little past a budget before enforcement starts: `10` means at 110%.
 
