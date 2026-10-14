@@ -12,6 +12,7 @@ import {
   historyTotals,
   historySummary,
   pastParts,
+  shortWhen,
   projectsDiffer,
   runWords,
   budgetOf,
@@ -1109,4 +1110,10 @@ test('a tested component whose XML was never read is a process', () => {
   ])
   expect(rows.find(r => r.componentId === 'c-1')?.type).toBe('process')
   expect(rows.find(r => r.componentId === 'c-2')?.type).toBeUndefined()
+})
+
+test('shortWhen reads the same on every runtime: a comma between date and time, and midnight as 00', () => {
+  expect(shortWhen(Date.parse('2026-10-10T09:00:00Z'), 'UTC')).toBe('Oct 10, 09:00')
+  expect(shortWhen(Date.parse('2026-10-10T00:05:00Z'), 'UTC')).toBe('Oct 10, 00:05')
+  expect(shortWhen(Date.parse('2026-10-10T23:59:00Z'), 'America/New_York')).toBe('Oct 10, 19:59')
 })
