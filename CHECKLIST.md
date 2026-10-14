@@ -206,11 +206,11 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** the navy band holds only the title, the summary and the budget. The sessions come next, on a light card. **Charts** has **Cost by session** and **Outcomes by session**, a bar per session, and clicking one opens that session's steps. **Fail:** the sessions still inside the navy band, no charts, or a click that goes nowhere.
 - [ ] **K16. Report style.** *(0.36.0)* Run `/bc-dashboard report html all --style expressive`, switch to dark and back with the moon and sun button, then run it again without `--style`.
   **Pass:** the first page is Sand (Midnight Navy in Dark), with the title in Poiret One, a gold double rule under the top, and Flamingo dates on the sessions. Status icons keep their labels, and both theme buttons stay readable. The second page is the usual Exosphere report. **Fail:** a mix of the two styles, unreadable buttons, or `--style` ignored.
-- [ ] **K17. Print to PDF.** *(0.37.0)* With the report switched to dark (the moon button), press **Print or save as PDF** and save a PDF. Then try your browser's own Print from the menu.
+- [x] **K17. Print to PDF.** *(Passed: Claude Code 2.1.299, macOS, 0.39.2.)* *(0.37.0)* With the report switched to dark (the moon button), press **Print or save as PDF** and save a PDF. Then try your browser's own Print from the menu.
   **Pass:** the PDF is light, with dark text on white. Every session's steps are there, and the Components table shows all five columns through **Cost**. Each **Open in Boomi** has its address under it. Each page has the report's name and date at the top and `Page n of m` at the bottom, and no buttons or search box are printed. Back on screen, the sessions are folded as before. **Fail:** pale or dark pages, missing columns, sessions printed as headings only, or rows cut across pages.
 - [ ] **K18. Components to a spreadsheet.** *(0.38.0)* In the report, press **Copy for a spreadsheet**, then paste into the first cell of a new Excel or Google Sheets sheet. Press **Save as CSV** and open the file in Excel. In Claude Code, run `/bc-dashboard components` and paste again.
   **Pass:** one row per component, with every column in its own cell: name, type, folder, component ID, version, deploy, package ID, test, execution ID, cost and link. The note beside the buttons says what was copied, the CSV opens with its characters intact, and the command's paste matches. **Fail:** everything in one column, IDs cut or reformatted (for example as numbers), or nothing copied.
-- [ ] **K19. The theme button.** *(0.39.1)* In the report, press the round moon button at the top right, then reload the page.
+- [x] **K19. The theme button.** *(Passed: Claude Code 2.1.299, macOS, 0.39.2.)* *(0.39.1)* In the report, press the round moon button at the top right, then reload the page.
   **Pass:** the page turns dark, the button shows a sun, and the page stays dark after the reload. Pressing the sun turns it light again. A screen reader announces "Switch to the dark theme" (or light). **Fail:** no change, the wrong icon, or the choice is lost on reload.
 
 ## L. Installed Companion plugins
@@ -234,26 +234,26 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** it prints every setting by group with its value, and how to change one with `/bc-dashboard config <setting> <value>`. **Fail:** it hangs or prints nothing.
 - [ ] **M4. Theme and size in /config.** *(0.34.0)* Press **Night** in the pane, run `/bc-dashboard size 24`, then open `/config`.
   **Pass:** the boomi-dashboard rows show **Pane colors** `night` and **Pane height (rows)** `24`. Set **Pane colors** back to `day` in `/config`: the pane turns Day. Restart, and the pane is still Day, 24 rows tall. **Fail:** `/config` still shows the old values, or the pane ignores a change made in `/config`.
-- [ ] **M5. A group with a value.** *(0.39.6)* Run `/bc-dashboard config budget warn`.
+- [x] **M5. A group with a value.** *(Passed: Claude Code 2.1.299, macOS, 0.39.6.)* *(0.39.6)* Run `/bc-dashboard config budget warn`.
   **Pass:** no questions. The reply says `"warn" wasn't saved` and suggests `/bc-dashboard config budgetEnforce warn`, and `/config` is unchanged. **Fail:** the Budget questions start, or any setting changes.
 
 ## N. Budget enforcement
 
 *boomi-dashboard 0.39.0. Use a Companion workspace, and set a session budget a little under what the session has already cost (`/bc-dashboard config budget`), so it's spent.*
 
-- [ ] **N1. Warn stays the default.** With `budgetEnforce` left at `warn`, ask Claude to deploy a process.
+- [x] **N1. Warn stays the default.** *(Passed: Claude Code 2.1.299, macOS, 0.39.2.)* With `budgetEnforce` left at `warn`, ask Claude to deploy a process.
   **Pass:** it deploys; the status line shows the spent budget as before, and nothing asks or refuses. **Fail:** anything is stopped.
-- [ ] **N2. Block refuses changes, not reads.** Set `budgetEnforce` to `block` and ask Claude to deploy, then to list folders and read an execution's log.
+- [x] **N2. Block refuses changes, not reads.** *(Passed: Claude Code 2.1.299, macOS, 0.39.2.)* Set `budgetEnforce` to `block` and ask Claude to deploy, then to list folders and read an execution's log.
   **Pass:** the deploy doesn't run. Claude says which budget is spent and stops, and doesn't try another way. The step shows `⚠ Blocked by budget` under **Needs attention**. The status line and banner say `⛔ budget reached, Companion changes paused`, and one toast appeared. The listing and the log read work. **Fail:** the deploy runs, a read is refused, or Claude retries with curl or a script.
-- [ ] **N3. Claude knew before trying.** In the same session, send a new prompt asking for a push.
+- [x] **N3. Claude knew before trying.** *(Passed: Claude Code 2.1.299, macOS, 0.39.2.)* In the same session, send a new prompt asking for a push.
   **Pass:** Claude says up front that the budget is spent and asks you, rather than attempting the push. **Fail:** it attempts the push without mentioning the budget.
-- [ ] **N4. Confirm asks, and allows.** Set `budgetEnforce` to `confirm`, ask Claude to deploy, and pick **Allow this one**. Ask again and pick **Stop**.
+- [x] **N4. Confirm asks, and allows.** *(Passed: Claude Code 2.1.299, macOS, 0.39.2.)* Set `budgetEnforce` to `confirm`, ask Claude to deploy, and pick **Allow this one**. Ask again and pick **Stop**.
   **Pass:** the question names the spent budget and the change. The first deploy runs; the second is refused. `/bc-dashboard report` lists the first under **Budget overrides**. **Fail:** no question, or the wrong one runs.
-- [ ] **N5. Allow for the session, and raise the budget.** Pick **Allow for the rest of this session**: no further questions this session. In a new session, pick **Raise the budget** and set the budget above the cost.
+- [x] **N5. Allow for the session, and raise the budget.** *(Passed: Claude Code 2.1.299, macOS, 0.39.2. Deploy to Test: auto mode refuses a production deploy on its own, which is Claude Code, not the dashboard.)* Pick **Allow for the rest of this session**: no further questions this session. In a new session, pick **Raise the budget** and set the budget above the cost.
   **Pass:** after the raise, the change runs without another question, and the banner's pause goes away. **Fail:** it keeps asking, or the raise doesn't let the change through.
-- [ ] **N6. The pane's Why? and Run again aren't stopped.** With a failed test under **Needs attention** and `block` on, press **Why?** and **Run again**.
+- [ ] **N6. The pane's Why? and Run again aren't stopped.** *(Run again passed: Claude Code 2.1.299, macOS, 0.39.2. Why? not tested yet: the Test atom refused every execution, so there was no log to read.)* With a failed test under **Needs attention** and `block` on, press **Why?** and **Run again**.
   **Pass:** both work. **Fail:** either is refused.
-- [ ] **N7. A subagent is held too.** With `block` on, ask Claude to have a subagent deploy a process.
+- [x] **N7. A subagent is held too.** *(Passed: Claude Code 2.1.299, macOS, 0.39.6. The subagent's deploy was refused before the script ran, with no retry.)* With `block` on, ask Claude to have a subagent deploy a process.
   **Pass:** the subagent's deploy is refused the same way. **Fail:** it runs.
 - [ ] **N8. Cancelling isn't held back.** *(0.39.2)* With `block` on and a BDI flow running, ask Claude to cancel the run.
   **Pass:** the cancel goes through. **Fail:** it's refused as a budget block.
