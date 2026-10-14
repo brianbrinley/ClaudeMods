@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.39.4
+
+- **A refused test keeps its process's name.** When a test's process ID came from the shell and the atom refused to run it (HTTP 400, "cannot be executed on atom"), the step read "Test of a component failed". It now takes the name the process already has in this session, from the ID the script printed, and **Run again** is offered for it.
+
 ## 0.39.3
 
 - **No more components named `$`.** When Claude passed a process ID through the shell (`PID=$(…) && boomi-test-execute.sh --process-id "$PID"`, or `--process-id $(…)`), the dashboard took a bare `$` as the ID and showed the process as `$` under **Components this session** and in the steps. An ID the shell fills in is no longer read from the command: the script's output names the component.

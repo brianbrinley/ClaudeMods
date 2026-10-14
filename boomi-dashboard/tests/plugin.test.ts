@@ -730,6 +730,19 @@ const V1083 = {
   ].join('\n'),
 }
 
+test("a test whose process ID the shell filled in, and that the atom refused, is named after the process", async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  const refused = [`Executing test for process ${ID} on atom atom-1`, `ERROR: Execution failed (HTTP 400): <error><message>Process ${ID} cannot be executed on atom atom-1.</message></error>`].join('\n')
+  on('tool.call', { tool: 'Bash' }, async (_$, e) =>
+    /test-execute/.test(String(e.command)) ? { isError: true as const, result: refused, text: refused } : { result: { stdout: V1083.deploy, stderr: '', interrupted: false } },
+  )
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-deploy.sh ${FILE}` })
+  await $.tool.call({ tool: 'Bash', command: `PID=$(grep -o 'componentId="[^"]*' ${FILE} | cut -d'"' -f2) && bash scripts/boomi-test-execute.sh --process-id "$PID"` })
+  const text = String((await $.command.run(dashboard('text'))).text)
+  expect(text).toContain('Test of Orders Sync failed')
+  expect(text).not.toContain('a component')
+})
+
 test('Companion v1.0.83: a deploy is one step, though it prints SUCCESS for its package first', async ($, on) => {
   world(on, { [FILE]: ORDERS })
   shell(on, V1083.deploy)
