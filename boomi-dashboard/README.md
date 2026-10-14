@@ -296,7 +296,7 @@ It follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system: its 
 
   Products keep the same color in every chart, from a set of Exosphere colors checked for color blindness and contrast. Status colors are used only for status.
 - **Tables** of components, custom connectors and Agentstudio agents, sorted by clicking a column.
-- **Claude's steps,** newest first: search them, filter to what failed or to one product, and open one for its result, component, execution and file.
+- **Claude's steps,** grouped by session, newest first (or oldest first): search them, filter to what failed or to one product, and open one for its result, component, execution and file.
 
 With a connection it loads Exosphere's fonts from Google Fonts; offline it falls back to your system's fonts.
 

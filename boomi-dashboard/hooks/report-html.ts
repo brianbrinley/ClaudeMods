@@ -345,6 +345,25 @@ export const assignSessions = (activity: readonly Activity[], current: string | 
 /** An earlier session no step named and no transcript claimed: `earlier-<n>`. */
 const isUnnamed = (id: string) => /^earlier-\d+$/.test(id)
 
+/**
+ * The steps an all-sessions report still has to match to a transcript: brought
+ * back from an earlier session, naming none (recorded before 0.26.0), and not
+ * covered by any past session already known for this folder. Usually none: a
+ * past session's cost never changes, so an old scan still answers for it.
+ */
+export const stepsToMatch = (activity: readonly Activity[], past: readonly PastSession[], folder?: string): Activity[] => {
+  const unnamed = activity.filter(a => !a.session && (a.isRestored || a.isEarlier))
+  if (unnamed.length === 0) return []
+  const of = assignSessions(unnamed, undefined, past, folder)
+  return unnamed.filter(a => isUnnamed(of.get(a.id) ?? ''))
+}
+
+/**
+ * Where Claude Code keeps one folder's transcripts: its projects folder, named
+ * after the working directory with every character but a letter or digit as -.
+ */
+export const transcriptsFolder = (configDir: string, cwd: string): string => `${configDir}/projects/${cwd.replace(/[^A-Za-z0-9]/g, '-')}`
+
 /** A session's ID as a person reads it: whole, or which unnamed earlier one it is. */
 export const sessionLabel = (id: string): string => {
   const m = id.match(/^earlier-(\d+)$/)
@@ -511,8 +530,8 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     const link = row.componentId && boomi?.accountId ? ` <a href="${esc(boomiLink(boomi.accountId, row.componentId))}" target="_blank" rel="noopener">Open in Boomi</a>` : ''
     const id = row.componentId ? `<code>${esc(row.componentId)}</code>${link}` : '<span class="muted">not created in Boomi</span>'
     const version = d?.version ?? row.saved?.version
-    const changed = d?.modifiedDate ? `${esc(d.modifiedDate.replace('T', ' ').slice(0, 16))}${d.modifiedBy ? `<div class="sub">${esc(d.modifiedBy)}</div>` : ''}` : ''
-    return `<tr><th scope="row">${esc(row.name)}${renamed}${row.recipe ? `<div class="sub">from recipe ${esc(row.recipe)}</div>` : ''}</th><td>${esc(type)}</td><td>${esc(d?.folderName ?? '')}</td><td class="id">${id}</td>${num(version === undefined ? undefined : Number(version), version === undefined ? '' : `v${version}`)}<td>${changed}</td><td>${badges(stages(row, runs))}</td>${num(spent.tokens, spent.tokens ? formatTokens(spent.tokens) : '')}${num(spent.usd, formatCost(spent.usd))}</tr>`
+    const changed = d?.modifiedDate ? `${esc(d.modifiedDate.replace('T', ' ').slice(0, 16))}${d.modifiedBy ? `<br>${esc(d.modifiedBy)}` : ''}` : ''
+    return `<tr><th scope="row">${esc(row.name)}${renamed}${row.recipe ? `<div class="sub">from recipe ${esc(row.recipe)}</div>` : ''}</th><td data-sort="${esc(type)}">${esc(type)}${d?.folderName ? `<div class="sub">${esc(d.folderName)}</div>` : ''}</td><td class="id">${id}</td><td data-sort="${version === undefined ? -1 : Number(version)}">${version === undefined ? '' : `v${esc(version)}`}${changed ? `<div class="sub">${changed}</div>` : ''}</td><td class="stages">${badges(stages(row, runs))}</td>${num(spent.tokens, spent.tokens ? formatTokens(spent.tokens) : '')}${num(spent.usd, formatCost(spent.usd))}</tr>`
   })
 
   // Every deploy and test with the ID to find it by in Boomi: the package, or the execution.
@@ -533,12 +552,12 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   })
 
   const account = boomi && (boomi.accountId || boomi.environmentId)
-    ? `<section id="account"><h2>Boomi account</h2><dl class="facts">${[
+    ? `<aside id="account" class="account"><h2>Boomi account</h2><dl class="facts">${[
         boomi.accountName && `<dt>Account</dt><dd>${esc(boomi.accountName)}</dd>`,
         boomi.accountId && `<dt>Account ID</dt><dd><code>${esc(boomi.accountId)}</code></dd>`,
         boomi.environmentId && `<dt>Environment ID</dt><dd><code>${esc(boomi.environmentId)}</code></dd>`,
         boomi.apiHost && `<dt>Platform API</dt><dd>${esc(boomi.apiHost)}</dd>`,
-      ].filter(Boolean).join('')}</dl>${boomi.note ? `<p class="muted">${esc(boomi.note)}</p>` : ''}</section>`
+      ].filter(Boolean).join('')}</dl>${boomi.note ? `<p class="muted">${esc(boomi.note)}</p>` : ''}</aside>`
     : ''
   const connectorRows = connectors(dashboard.activity).map(row => {
     const spent = spendOf(row.ids, all)
@@ -551,9 +570,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
 
   const quarantine = quarantineLines(dashboard, now)
   const products = PRODUCT_ORDER.filter(k => steps.some(a => productKey(a) === k)).map(productName)
-  const stepItems = [...steps]
-    .reverse()
-    .map(a => {
+  const stepItem = (a: Activity) => {
       const level = levelOf(a)
       const product = productName(productKey(a))
       const spent = all.get(a.id)
@@ -575,7 +592,22 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
         .filter(Boolean)
         .join('')
       const at = isAll ? `${when(a.startedAt)} UTC` : `${new Date(a.startedAt).toISOString().slice(11, 16)} UTC`
-      return `<li data-level="${level}" data-product="${esc(product)}"><details><summary><time datetime="${new Date(a.startedAt).toISOString()}">${esc(at)}</time> ${status(level, describe(a))} <span class="tag tag-${slot(productKey(a))}">${esc(product)}</span>${aside ? ` <span class="aside">${esc(aside)}</span>` : ''}</summary><dl>${detail}</dl></details></li>`
+      return `<li data-level="${level}" data-product="${esc(product)}" data-at="${a.startedAt}"><details><summary><time datetime="${new Date(a.startedAt).toISOString()}">${esc(at)}</time> ${status(level, describe(a))} <span class="tag tag-${slot(productKey(a))}">${esc(product)}</span>${aside ? ` <span class="aside">${esc(aside)}</span>` : ''}</summary><dl>${detail}</dl></details></li>`
+  }
+  // The steps by session, newest first (the page's Oldest first turns both around); one report's session needs no heading.
+  const groups = new Map<string, Activity[]>()
+  for (const a of steps) groups.set(isAll ? sessionOf(a) : 'this', [...(groups.get(isAll ? sessionOf(a) : 'this') ?? []), a])
+  const stepGroups = [...groups.entries()]
+    .map(([id, list]) => ({ id, list, firstAt: Math.min(...list.map(a => a.startedAt)), lastAt: Math.max(...list.map(a => a.endedAt ?? a.startedAt)) }))
+    .sort((a, b) => b.firstAt - a.firstAt)
+    .map(g => {
+      const summary = sessions.find(s => s.id === g.id)
+      const cost = summary?.usd === undefined ? undefined : `${summary.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(summary.usd) ?? '$0'}`
+      const name = isUnnamed(g.id) ? esc(sessionLabel(g.id)) : `Session <code>${esc(g.id)}</code>`
+      const facts = [`${esc(when(g.firstAt))} – ${esc(when(g.lastAt).slice(11))} UTC`, esc(`${g.list.length} step${g.list.length === 1 ? '' : 's'}`), cost && esc(cost)].filter(Boolean).join(' · ')
+      const head = isAll ? `<h3 class="group-head">${name}${summary?.isCurrent ? ' <span class="tag tag-1">this session</span>' : ''} <span class="aside">${facts}</span></h3>` : ''
+      const items = [...g.list].sort((a, b) => b.startedAt - a.startedAt).map(stepItem).join('\n')
+      return `<div class="step-group" data-at="${g.firstAt}">${head}<ol class="steps">${items}</ol></div>`
     })
     .join('\n')
 
@@ -587,7 +619,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   ].join('')
 
   const sectionsShown: [string, string][] = [
-    ['attention', 'Attention'],
+    ...(needs.length > 0 ? ([['attention', 'Attention']] as [string, string][]) : []),
     ...(isAll ? ([['sessions', 'Sessions']] as [string, string][]) : []),
     ['components', 'Components'],
     ...(releaseRows.length > 0 ? ([['releases', 'Deploys & tests']] as [string, string][]) : []),
@@ -621,13 +653,17 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   </div>
 </header>
 <main id="top">
+<div class="opening${account ? '' : ' alone'}">
+<div>
 <h1>${esc(title)}</h1>
 <p class="lede">${lede.join(' ')}</p>
 <p class="dateline">${dateline}</p>
-<section id="attention"><h2>Needs attention</h2>${attentionList}</section>
+</div>
 ${account}
+</div>
+${needs.length > 0 ? `<section id="attention"><h2>Needs attention</h2>${attentionList}</section>` : ''}
 ${isAll ? table('sessions', 'Sessions', ['Session', 'Started', 'Last step', 'Steps', 'Failed or blocked', 'Components', 'Cost'], sessionRows) : ''}
-${componentRows.length === 0 ? `<section id="components"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Type', 'Folder', 'Component ID', 'Version', 'Changed in Boomi', 'Where it stands', 'Tokens', 'Cost'], componentRows, 'wide')}
+${componentRows.length === 0 ? `<section id="components"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Type · folder', 'Component ID', 'In Boomi', 'Where it stands', 'Tokens', 'Cost'], componentRows, 'wide')}
 ${table('releases', 'Deployments and tests', ['When', 'Step', 'ID in Boomi', 'Status', ...(isAll ? ['Session'] : [])], releaseRows)}
 ${table('connectors', 'Custom connectors', ['Connector', 'Group', 'Where it stands', 'Tokens', 'Cost'], connectorRows)}
 ${table('agents', 'Agentstudio agents', ['Agent', 'Where it stands', 'Tokens', 'Cost'], agentRows)}
@@ -645,9 +681,13 @@ ${
     <button type="button" data-filter="issues" aria-pressed="false">Failed or warned</button>
     ${products.length > 1 ? products.map(p => `<button type="button" data-filter="product:${esc(p)}" aria-pressed="false">${esc(p)}</button>`).join('\n    ') : ''}
   </div>
+  <div class="filters order" role="group" aria-label="Order">
+    <button type="button" data-order="desc" aria-pressed="true">Newest first</button>
+    <button type="button" data-order="asc" aria-pressed="false">Oldest first</button>
+  </div>
   <span class="shown" aria-live="polite"></span>
 </div>
-<ol class="steps">${stepItems}</ol>`
+<div class="step-groups" data-steps>${stepGroups}</div>`
 }
 </section>
 </main>
@@ -679,21 +719,24 @@ const STYLE = `
 *{box-sizing:border-box}
 html{background:var(--exo-color-body)}
 body{margin:0;background:var(--exo-color-body);color:var(--exo-color-font);font:400 .875rem/1.5 var(--exo-font-family)}
-.masthead{background:var(--exo-color-background-brand);color:var(--exo-color-font-inverse)}
-.bar{max-width:1180px;margin:0 auto;padding:.625rem var(--exo-spacing-large);display:flex;align-items:center;gap:var(--exo-spacing-large)}
+.masthead{background:var(--exo-color-background-brand);color:var(--exo-color-font-inverse);position:sticky;top:0;z-index:5}
+html{scroll-padding-top:3.75rem}
+.bar{max-width:1440px;margin:0 auto;padding:.625rem var(--exo-spacing-large);display:flex;align-items:center;gap:var(--exo-spacing-large)}
 .wordmark{font:600 1.0625rem/1 var(--exo-font-brand);color:inherit;text-decoration:none;white-space:nowrap}
 .masthead nav{display:flex;gap:1.25rem;flex:1;overflow-x:auto;scrollbar-width:none}
 .masthead nav a{color:inherit;text-decoration:none;font-size:.875rem;opacity:.82;white-space:nowrap;padding:.25rem 0;border-bottom:1px solid transparent}
 .masthead nav a:hover{opacity:1;border-bottom-color:currentColor}
-main>h1{font:600 clamp(1.75rem,3.6vw,2.5rem)/1.15 var(--exo-font-brand);letter-spacing:-.01em;margin:2.25rem 0 .75rem;overflow-wrap:anywhere;text-wrap:balance}
+.opening{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,340px);gap:1rem 3rem;align-items:end;margin-top:2rem}.opening.alone{grid-template-columns:minmax(0,1fr)}
+.account h2{font:600 .813rem/1.4 var(--exo-font-family);color:var(--exo-color-font-secondary);margin:0 0 .5rem}.account dl{grid-template-columns:max-content minmax(0,1fr);margin:0;font-size:.875rem}.account{padding-left:1.5rem;border-left:1px solid var(--exo-color-border-secondary)}
+.opening h1{font:600 clamp(1.75rem,3.6vw,2.5rem)/1.15 var(--exo-font-brand);letter-spacing:-.01em;margin:0 0 .75rem;overflow-wrap:anywhere;text-wrap:balance}
 .lede{font-size:1.0625rem;line-height:1.6;max-width:70ch;margin:0 0 .5rem}.lede strong{font-weight:600}.lede .status{white-space:normal}
 .dateline{font-size:.813rem;color:var(--exo-color-font-secondary);margin:0}.dateline code{font-size:.75rem}
-main{max-width:1180px;overflow-wrap:break-word;margin:0 auto;padding:var(--exo-spacing-large)}
+main{max-width:1440px;overflow-wrap:break-word;margin:0 auto;padding:var(--exo-spacing-large)}
 h1,h2,h3{font-family:var(--exo-font-brand);font-weight:400;line-height:1.25;margin:0}
 h1{font-size:1.75rem}h2{font-size:1.25rem;margin-bottom:var(--exo-spacing-small)}h3{font-size:1rem}
 .muted,.note,.hint,.aside,.sub,footer,.count{color:var(--exo-color-font-secondary)}
-main>section{margin-top:2.75rem;padding-top:1.25rem;border-top:1px solid var(--exo-color-border-secondary)}
-main>section>h2{margin-bottom:1rem}
+main>section{margin-top:2rem;padding-top:1rem;border-top:1px solid var(--exo-color-border-secondary)}
+main>section>h2{margin-bottom:.75rem}
 .chart{margin:0}
 svg.i{display:inline-block;width:1.05em;height:1.05em;vertical-align:-.17em;margin-right:.35em;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}.i .solid{fill:currentColor;stroke:none}
 .status-healthy .i,.badge-healthy .i{color:var(--exo-color-background-success-strong)}.status-warning .i,.badge-warning .i{color:var(--exo-color-background-warning-strong)}.status-serious .i,.badge-serious .i{color:var(--exo-color-background-highlight)}.status-critical .i,.badge-critical .i{color:var(--exo-color-background-danger-strong)}
@@ -703,7 +746,7 @@ a{text-underline-offset:.2em;text-decoration-thickness:1px}
 table,.lede,.legend{font-variant-numeric:tabular-nums}
 input::placeholder{color:var(--exo-color-font-secondary)}
 .status-healthy .icon{color:var(--exo-color-background-success-strong)}.status-warning .icon{color:var(--exo-color-background-warning-strong)}.status-serious .icon{color:var(--exo-color-background-highlight)}.status-critical .icon{color:var(--exo-color-background-danger-strong)}
-.badge{display:inline-block;border-radius:var(--exo-radius-standard);padding:0 .5rem;margin:0 .35rem .3rem 0;font-size:.813rem;line-height:1.6rem;border:1px solid transparent}
+.badge{display:inline-flex;align-items:center;white-space:nowrap;border-radius:var(--exo-radius-standard);padding:0 .5rem;margin:0 .35rem .3rem 0;font-size:.813rem;line-height:1.6rem;border:1px solid transparent}
 .badge-healthy{background:var(--exo-color-background-success)}.badge-healthy .icon{color:var(--exo-color-background-success-strong)}
 .badge-warning{background:var(--exo-color-background-warning)}.badge-warning .icon{color:var(--exo-color-background-warning-strong)}
 .badge-serious{background:var(--exo-color-background-secondary);border-color:var(--exo-color-background-highlight)}.badge-serious .icon{color:var(--exo-color-background-highlight)}
@@ -712,7 +755,7 @@ input::placeholder{color:var(--exo-color-font-secondary)}
 ol.attention{list-style:none;padding:0;margin:0}
 .alert{background:var(--exo-color-background-secondary);border-radius:var(--exo-radius-standard);padding:.5rem .75rem;margin-bottom:.5rem}
 .alert-warning{background:var(--exo-color-background-warning)}.alert-critical{background:var(--exo-color-background-danger-weak)}.alert-serious{box-shadow:inset 0 0 0 1px var(--exo-color-background-highlight)}
-.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:var(--exo-spacing-standard);margin-bottom:var(--exo-spacing-standard)}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:1.5rem 2rem;margin-bottom:var(--exo-spacing-standard)}
 .chart{margin:0}figcaption{display:flex;flex-wrap:wrap;align-items:baseline;gap:.5rem;margin-bottom:.5rem}
 svg{display:block;width:100%;height:auto;overflow:visible}
 svg text{font:12px var(--exo-font-family);fill:var(--exo-color-font)}svg .axis{fill:var(--exo-color-font-secondary)}svg .value{font-weight:600}
@@ -729,10 +772,10 @@ svg .hit:hover .target,svg .hit:focus-visible .target{fill:var(--exo-color-font)
 .legend li{display:flex;align-items:center;gap:.3rem}.legend .swatch{width:.75rem;height:.75rem;border-radius:2px;display:inline-block}.legend .icon{font-weight:700}
 details.data{margin-top:.5rem;font-size:.813rem;overflow-x:auto}details.data summary{cursor:pointer;color:var(--exo-color-font-link);font-weight:600}
 .scroll{overflow-x:auto;position:relative}.scroll table{min-width:560px}.scroll table.wide{min-width:1040px}thead th{white-space:nowrap}
-td.id code{overflow-wrap:anywhere}td .sub,th .sub{font-weight:400;font-size:.813rem;color:var(--exo-color-font-secondary)}
+td.id code{white-space:nowrap}td.stages{min-width:15rem}table.wide tbody th{min-width:11rem}td.id{white-space:nowrap}td .sub,th .sub{font-weight:400;font-size:.813rem;color:var(--exo-color-font-secondary)}
 a{color:var(--exo-color-font-link)}dl.facts{margin:0}
 table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:.5rem .75rem;border-bottom:1px solid var(--exo-color-border-secondary);vertical-align:top}
+th,td{text-align:left;padding:.4rem .65rem;border-bottom:1px solid var(--exo-color-border-secondary);vertical-align:top}
 thead th{background:var(--exo-color-background-secondary)}tbody th{font-weight:600}td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 thead button{all:unset;cursor:pointer;font-weight:600;font-size:.813rem;color:var(--exo-color-font)}
 thead button:hover{color:var(--exo-color-font-link);text-decoration:underline}
@@ -747,6 +790,8 @@ button{font:inherit}
 .filters{display:flex;flex-wrap:wrap;gap:.5rem}
 .search input{background:var(--exo-color-background);color:var(--exo-color-font);border:1px solid var(--exo-color-border);border-radius:var(--exo-radius-standard);padding:.4rem .75rem;min-width:240px;font:inherit}
 ol.steps{list-style:none;padding:0;margin:0}
+.step-group+.step-group{margin-top:1.75rem}.group-head{font:600 .95rem/1.4 var(--exo-font-family);margin:0 0 .25rem;padding-bottom:.4rem;border-bottom:1px solid var(--exo-color-border)}.group-head .aside{font-weight:400;font-size:.813rem;margin-left:.35em}
+.order{margin-left:auto}
 ol.steps li{border-bottom:1px solid var(--exo-color-border-secondary)}
 ol.steps summary{cursor:pointer;padding:.5rem .25rem}
 ol.steps time{font-variant-numeric:tabular-nums;color:var(--exo-color-font-secondary);margin-right:.5em}
@@ -756,7 +801,8 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:.125rem .75rem;margin:
 code{font:.813rem var(--exo-font-monospace)}
 ul.plain{list-style:none;padding:0;margin:0}ul.plain li{margin:.25rem 0}ul.plain li.sub{margin-left:1.4em;color:var(--exo-color-font-secondary)}
 .tooltip{position:fixed;z-index:10;pointer-events:none;max-width:320px;background:var(--exo-color-font);color:var(--exo-color-background);border-radius:var(--exo-radius-standard);padding:.35rem .6rem;font-size:.813rem;box-shadow:0 0 1rem 0 var(--exo-color-shadow-moderate)}
-footer{max-width:1180px;margin:0 auto;padding:var(--exo-spacing-standard) var(--exo-spacing-large) var(--exo-spacing-x-large);font-size:.813rem}
+footer{max-width:1440px;margin:0 auto;padding:var(--exo-spacing-standard) var(--exo-spacing-large) var(--exo-spacing-x-large);font-size:.813rem}
+@media (max-width:900px){.opening{grid-template-columns:minmax(0,1fr)}.account{padding-left:0;border-left:0;padding-top:1rem;border-top:1px solid var(--exo-color-border-secondary)}}
 @media (max-width:640px){main,footer,.bar{padding-left:1rem;padding-right:1rem}.bar{flex-wrap:wrap;row-gap:.25rem}.masthead nav{order:3;flex-basis:100%;gap:1rem}.search input{min-width:0;width:100%}}
 @media print{.theme,.controls,details.data,.masthead nav{display:none}}
 @media (forced-colors:active){.badge,.alert{border:1px solid CanvasText}}
@@ -780,7 +826,7 @@ const SCRIPT = `
       table.querySelectorAll('thead button').forEach(function(b){b.removeAttribute('data-dir')});btn.setAttribute('data-dir',dir);
       var body=table.tBodies[0],rows=Array.prototype.slice.call(body.rows);
       rows.sort(function(a,b){var x=a.cells[col],y=b.cells[col],nx=x.getAttribute('data-sort'),ny=y.getAttribute('data-sort');
-        var c=nx!==null&&ny!==null?(+nx)-(+ny):x.textContent.localeCompare(y.textContent);return dir==='asc'?c:-c});
+        var c=nx!==null&&ny!==null?(isNaN(+nx)||isNaN(+ny)?nx.localeCompare(ny):(+nx)-(+ny)):x.textContent.localeCompare(y.textContent);return dir==='asc'?c:-c});
       rows.forEach(function(r){body.appendChild(r)});
     })});
   });
@@ -793,12 +839,22 @@ const SCRIPT = `
     el.addEventListener('focus',function(){var r=el.getBoundingClientRect();show(el,r.left+r.width/2,r.top)});
     el.addEventListener('blur',function(){tip.hidden=true});
   });
-  var list=document.querySelector('ol.steps');if(!list)return;
-  var items=Array.prototype.slice.call(list.children),filter='all',search=document.querySelector('[data-search]'),shown=document.querySelector('.shown');
+  var box=document.querySelector('[data-steps]');if(!box)return;
+  var groups=Array.prototype.slice.call(box.querySelectorAll('.step-group'));
+  var items=Array.prototype.slice.call(box.querySelectorAll('ol.steps > li')),filter='all',search=document.querySelector('[data-search]'),shown=document.querySelector('.shown');
   function apply(){var q=(search.value||'').toLowerCase(),n=0;items.forEach(function(li){
     var lv=li.getAttribute('data-level'),pr='product:'+li.getAttribute('data-product');
     var ok=(filter==='all'||(filter==='issues'&&lv!=='healthy')||filter===pr)&&(!q||li.textContent.toLowerCase().indexOf(q)>=0);
-    li.hidden=!ok;if(ok)n++});shown.textContent=n===items.length?'':n+' of '+items.length+' shown'}
+    li.hidden=!ok;if(ok)n++});
+    groups.forEach(function(g){g.hidden=!g.querySelector('ol.steps > li:not([hidden])')});
+    shown.textContent=n===items.length?'':n+' of '+items.length+' shown'}
+  function order(dir){var by=function(a,b){var x=+a.getAttribute('data-at'),y=+b.getAttribute('data-at');return dir==='asc'?x-y:y-x};
+    groups.sort(by).forEach(function(g){box.appendChild(g);var ol=g.querySelector('ol.steps');Array.prototype.slice.call(ol.children).sort(by).forEach(function(li){ol.appendChild(li)})});
+    document.querySelectorAll('[data-order]').forEach(function(b){b.setAttribute('aria-pressed',String(b.getAttribute('data-order')===dir))});
+    try{localStorage.setItem('bc-report-order',dir)}catch(e){}}
+  document.querySelectorAll('[data-order]').forEach(function(b){b.addEventListener('click',function(){order(b.getAttribute('data-order'))})});
+  var savedOrder=null;try{savedOrder=localStorage.getItem('bc-report-order')}catch(e){}
+  if(savedOrder==='asc')order('asc');
   function setFilter(f){filter=f;var any=false;document.querySelectorAll('[data-filter]').forEach(function(x){var on=x.getAttribute('data-filter')===f;any=any||on;x.setAttribute('aria-pressed',String(on))});
     if(!any)document.querySelectorAll('[data-filter]').forEach(function(x){x.setAttribute('aria-pressed',String(false))});apply()}
   document.querySelectorAll('[data-filter]').forEach(function(b){b.addEventListener('click',function(){setFilter(b.getAttribute('data-filter'))})});

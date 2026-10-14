@@ -107,7 +107,7 @@ import {
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
-import { hasEarlierSteps, reportHtml, scoped } from './report-html'
+import { hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
 import type { BoomiFacts, ReportScope } from './report-html'
 import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
 import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
@@ -250,6 +250,8 @@ const SCRIPTS_KEY = 'scriptsDir'
 const THEME_KEY = 'theme'
 const HISTORY_KEY = 'history'
 const UPGRADE_KEY = 'upgradeCheckedAt'
+/** Per folder: when an all-sessions report last read that folder's transcripts, and the sessions it found. */
+const REPORT_SCAN_KEY = 'reportScan'
 /** The newest version an update check found, and the newest already toasted (UpdateSeen). */
 const UPDATE_SEEN_KEY = 'updateSeen'
 
@@ -1425,7 +1427,7 @@ const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly 
       folder: cwd.split('/').filter(Boolean).pop(),
       boomi: await boomiFacts($, settings, view),
       cwd,
-      ...(scope === 'all' ? { pastSessions: await pastForReport($, settings) } : {}),
+      ...(scope === 'all' ? { pastSessions: await pastForReport($, view, cwd) } : {}),
     },
     now,
     settings.windowMs,
@@ -1445,14 +1447,36 @@ const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly 
 
 /**
  * Past Companion sessions for an all-sessions report: their IDs, times and
- * Claude Code's own costs, from the last scan when it's under an hour old,
- * else from a scan now. Empty when the transcripts can't be read.
+ * Claude Code's own costs. The last scan answers when it covers every step
+ * that names no session (a past session's cost never changes). Otherwise only
+ * this folder's transcripts are read, and only those written since the
+ * earliest such step: never the whole machine's history, which can take
+ * minutes. What can't be read leaves those steps counted as "at least".
  */
-const pastForReport = async ($: Engine, settings: Settings) => {
-  const known = await read($, history)
-  const isFresh = known.phase === 'ready' && known.scannedAt !== undefined && (await $.clock.now()) - known.scannedAt < 3_600_000
-  const state = isFresh ? known : await scanHistory($, settings).catch(() => known)
-  return state.sessions ?? known.sessions ?? []
+const pastForReport = async ($: Engine, view: Dashboard, cwd: string) => {
+  const key = `${REPORT_SCAN_KEY}:${cwd}`
+  const kept = (await $.store.get(key).catch(() => undefined)) as { at?: number; sessions?: PastSession[] } | undefined
+  const fromScan = (await read($, history)).sessions ?? []
+  const known = [...fromScan.filter(k => !(kept?.sessions ?? []).some(f => f.id === k.id)), ...(kept?.sessions ?? [])]
+  const missing = stepsToMatch(view.activity, known, cwd)
+  if (missing.length === 0) return known
+  // Scanned after the last of these steps had long ended: their transcripts were there to find, so a rescan finds nothing new.
+  const latest = Math.max(...missing.map(a => a.endedAt ?? a.startedAt))
+  if (kept?.at !== undefined && kept.at > latest + 3_600_000) return known
+  const config = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)) || `${(await $.env.get('HOME').catch(() => undefined)) ?? ''}/.claude`
+  const folder = transcriptsFolder(config, cwd)
+  if (!(await $.fs.exists(folder).catch(() => false))) return known
+  const since = Math.min(...missing.map(a => a.startedAt)) - 86_400_000
+  const ran = await runScan($, ['--root', folder, '--since', String(since)]).catch(() => undefined)
+  if (!ran || ran.exitCode !== 0 || ran.isStdoutTruncated) return known
+  try {
+    const found = pastSessions(JSON.parse(ran.stdout) as { sessions?: [] })
+    const merged = [...(kept?.sessions ?? []).filter(k => !found.some(f => f.id === k.id)), ...found]
+    await $.store.set(key, { at: await $.clock.now(), sessions: merged }).catch(() => undefined)
+    return [...known.filter(k => !found.some(f => f.id === k.id)), ...found]
+  } catch {
+    return known
+  }
 }
 
 /**

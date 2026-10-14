@@ -2,6 +2,13 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.27.1
+
+- Faster all-sessions reports. To match older steps to their sessions, the report no longer scans every Claude Code transcript on the machine. It uses the last scan when that already covers them, and otherwise reads only this folder's transcripts, from the earliest unmatched step on. It remembers what it found, so the next report doesn't read them again.
+- Claude's steps are grouped by session, newest first, each under its session's ID, times, step count and cost. **Newest first** and **Oldest first** flip the order, and the page remembers your choice. Filtering hides a session with no matching steps.
+- Better use of a computer screen. The page is up to 1440px wide, and the summary and Boomi account sit side by side. Three charts fit in a row. The bar with section links stays at the top while you scroll. The Components table fits without scrolling sideways at 1280px: type with folder, and version with the last change, now share a column, and both still sort.
+- "Needs attention" appears only when something does; otherwise the summary says so.
+
 ## 0.27.0
 
 - The HTML report reads as a document, after a design pass with the [Impeccable](https://github.com/pbakaus/impeccable) skill's quality floor. A plain navy bar with links to each section replaces the header and chips. The title is followed by a paragraph saying what happened, in place of four number tiles. Sections are separated by rules instead of each sitting in a box.
