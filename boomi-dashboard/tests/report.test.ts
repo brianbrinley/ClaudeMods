@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Activity, Dashboard } from '../types'
-import { assignSessions, boomiLink, hasEarlierSteps, packageOf, reportHtml, scoped, sessionLabel, sessionSummaries, sessionsCost, stepsToMatch, transcriptsFolder } from '../hooks/report-html'
+import { assignSessions, boomiLink, hasEarlierSteps, packageOf, reportHtml, scoped, sessionLabel, sessionSummaries, sessionsCost, stepsToMatch, timeline, transcriptsFolder } from '../hooks/report-html'
 import { withoutEchoes } from '../hooks/activity'
 import { platformClient } from '../hooks/platform'
 
@@ -194,4 +194,25 @@ test("the steps still to match to a transcript: unnamed, brought back, and cover
   expect(stepsToMatch([unnamed], [covering], '/work')).toEqual([])
   expect(stepsToMatch([unnamed], [covering], '/elsewhere').map(a => a.id)).toEqual([1])
   expect(transcriptsFolder('/home/me/.claude', '/Users/me/boomi_brian-D1R00U')).toBe('/home/me/.claude/projects/-Users-me-boomi-brian-D1R00U')
+})
+
+test('the timeline: sessions oldest first on one strip, the idle time between them, each step a tick, and anything unhealthy marked with its icon', () => {
+  const steps = [
+    step(1, { kind: 'create', subject: 'A', startedAt: NOW - 30 * HOUR, session: 'one' }),
+    step(2, { kind: 'test', outcome: 'failed', subject: 'A', executionId: 'e', detail: 'status ERROR', startedAt: NOW - 30 * HOUR + 600_000, session: 'one' }),
+    step(3, { kind: 'push', subject: 'B', startedAt: NOW - HOUR, session: 'two' }),
+  ]
+  const strip = timeline(steps, a => a.session!, id => `Session ${id}`, new Map([['one', '$1.00']]))
+  // Oldest first, with the gap between them in words.
+  expect(strip.indexOf('Session one')).toBeLessThan(strip.indexOf('Session two'))
+  expect(strip).toContain('<li class="tl-gap" aria-hidden="true"><span>28h 50m</span></li>')
+  // Each band's heading goes to its session's steps; its foot says what it held.
+  expect(strip).toContain('<a class="tl-head" href="#s-one">')
+  expect(strip).toContain('<div class="tl-foot">2 steps · 1 not healthy · $1.00</div>')
+  // A failure is marked with its icon and named in its tooltip; a healthy tick carries no icon.
+  expect(strip).toMatch(/<span class="tl-tick tick-critical" style="left:[\d.]+%" data-tip="[^"]*Failed: Test of A failed"><svg class="i"/)
+  expect(strip).toMatch(/<span class="tl-tick tick-healthy" style="left:[\d.]+%" data-tip="[^"]*"><\/span>/)
+  // Its data as a table too.
+  expect(strip).toContain('<summary>Show the data</summary>')
+  expect(timeline([], a => a.session!, id => id, new Map())).toBe('')
 })

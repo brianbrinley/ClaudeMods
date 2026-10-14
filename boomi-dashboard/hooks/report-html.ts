@@ -21,6 +21,7 @@ import {
   formatTokens,
   friendlyType,
   levelOf,
+  FLAMINGO_IDLE,
   limitsLine,
   quarantineLines,
   sessionRuns,
@@ -59,7 +60,7 @@ const status = (level: Level, text: string) =>
 
 /** A component's or agent's stages as Exosphere badges. */
 const badges = (list: readonly Stage[]) =>
-  list.map(s => `<span class="badge badge-${s.level}">${icon(s.level)}<span class="sr">${LABEL[s.level]}: </span>${esc(s.text)}</span>`).join(' ')
+  `<span class="rail">${list.map(s => `<span class="badge badge-${s.level}">${icon(s.level)}<span class="sr">${LABEL[s.level]}: </span>${esc(s.text)}</span>`).join(' ')}</span>`
 
 /** A cell that sorts by a number, not its text. */
 const num = (value: number | undefined, shown: string | undefined) => `<td class="n" data-sort="${value ?? -1}">${esc(shown ?? '')}</td>`
@@ -86,64 +87,10 @@ const dataTable = (head: string[], rows: (string | number)[][]) =>
 const legend = (items: { cls: string; label: string; level?: Level }[]) =>
   `<ul class="legend">${items.map(i => `<li><span class="swatch ${i.cls}" aria-hidden="true"></span>${i.level ? `<span class="${i.cls}-ink">${icon(i.level)}</span>` : ''}${esc(i.label)}</li>`).join('')}</ul>`
 
-/** A bar's or column's top: square at the baseline, a 4px rounded data end. */
+/** A bar: square at the baseline, a 4px rounded data end. */
 const hbar = (x: number, y: number, w: number, h: number, r = 4) => {
   const rr = Math.min(r, w / 2, h / 2)
   return `M${x} ${y}h${(w - rr).toFixed(1)}a${rr} ${rr} 0 0 1 ${rr} ${rr}v${(h - 2 * rr).toFixed(1)}a${rr} ${rr} 0 0 1 -${rr} ${rr}h-${(w - rr).toFixed(1)}z`
-}
-const vbar = (x: number, y: number, w: number, h: number, r = 4) => {
-  const rr = Math.min(r, w / 2, h / 2)
-  return `M${x} ${y + h}v-${(h - rr).toFixed(1)}a${rr} ${rr} 0 0 1 ${rr} -${rr}h${(w - 2 * rr).toFixed(1)}a${rr} ${rr} 0 0 1 ${rr} ${rr}v${(h - rr).toFixed(1)}z`
-}
-
-const BUCKETS = [5, 10, 15, 30, 60, 120, 240, 480, 1440].map(m => m * 60_000)
-
-/** Steps over the session, a column per time span stacked by how they went. */
-const stepsOverTime = (steps: readonly Activity[], isAll = false): string => {
-  if (steps.length < 2) return ''
-  const t0 = Math.min(...steps.map(a => a.startedAt))
-  const t1 = Math.max(...steps.map(a => a.startedAt))
-  const size = BUCKETS.find(b => (t1 - t0) / b < 24) ?? BUCKETS[BUCKETS.length - 1]!
-  const start = Math.floor(t0 / size) * size
-  const n = Math.floor((t1 - start) / size) + 1
-  const cols = Array.from({ length: n }, (_, i) => ({ at: start + i * size, counts: { healthy: 0, warning: 0, serious: 0, critical: 0 } as Record<Level, number> }))
-  for (const a of steps) cols[Math.floor((a.startedAt - start) / size)]!.counts[levelOf(a)]++
-  const max = Math.max(...cols.map(c => LEVELS.reduce((s, l) => s + c.counts[l], 0)))
-  const W = 560
-  const H = 160
-  const left = 32
-  const plotW = W - left - 8
-  const colW = plotW / n
-  const barW = Math.max(4, Math.min(28, colW - 6))
-  const y = (v: number) => H - 22 - (v / max) * (H - 40)
-  const label = (t: number) => new Date(t).toISOString().slice(11, 16)
-  const marks = cols
-    .map((c, i) => {
-      const x = left + i * colW + (colW - barW) / 2
-      let base = 0
-      const total = LEVELS.reduce((s, l) => s + c.counts[l], 0)
-      const segs = LEVELS.filter(l => c.counts[l] > 0).map((l, k, shown) => {
-        const h = y(base) - y(base + c.counts[l])
-        const top = y(base + c.counts[l])
-        base += c.counts[l]
-        // A 2px surface gap between stacked segments; only the top one is rounded.
-        const gap = k > 0 ? 2 : 0
-        const d = k === shown.length - 1 ? vbar(x, top, barW, Math.max(1, h - gap)) : `M${x} ${top.toFixed(1)}h${barW}v${Math.max(1, h - gap).toFixed(1)}h-${barW}z`
-        return `<path d="${d}" class="fill-${l}"/>`
-      })
-      const tip = `${label(c.at)} UTC: ${total} step${total === 1 ? '' : 's'}${LEVELS.filter(l => c.counts[l]).map(l => `, ${c.counts[l]} ${LABEL[l].toLowerCase()}`).join('')}`
-      return `<g class="hit" tabindex="0" data-tip="${esc(tip)}"><rect x="${(left + i * colW).toFixed(1)}" y="8" width="${colW.toFixed(1)}" height="${H - 30}" class="target"/>${segs.join('')}</g>`
-    })
-    .join('')
-  const ticks = cols
-    .map((c, i) => (i % Math.ceil(n / 6) === 0 ? `<text x="${(left + i * colW + colW / 2).toFixed(1)}" y="${H - 6}" class="axis" text-anchor="middle">${label(c.at)}</text>` : ''))
-    .join('')
-  return `<figure class="chart"><figcaption><h3>${isAll ? 'Steps over time' : 'Steps over the session'}</h3><span class="sub">per ${Math.round(size / 60_000)} minutes, UTC</span></figcaption>
-${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], level: l })))}
-<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Steps over the session, stacked by outcome">
-<line x1="${left}" y1="${y(0)}" x2="${W - 8}" y2="${y(0)}" class="baseline"/><text x="${left - 6}" y="${y(max) + 4}" class="axis" text-anchor="end">${max}</text>
-${marks}${ticks}</svg>
-${dataTable(['Time (UTC)', ...LEVELS.map(l => LABEL[l])], cols.map(c => [label(c.at), ...LEVELS.map(l => c.counts[l])]))}</figure>`
 }
 
 /** How each product's steps went, a bar per product stacked by outcome; a click filters the steps below. */
@@ -441,6 +388,49 @@ export const boomiLink = (accountId: string, componentId: string): string =>
 /** The deployment package a deploy made, from its SUCCESS line. */
 export const packageOf = (detail: string): string | undefined => detail.match(/\(package: ([^)\s]+)\)/)?.[1]
 
+/** A session's anchor on the page: its steps' heading. */
+const sessionAnchor = (id: string) => `s-${id.replace(/[^A-Za-z0-9-]/g, '')}`
+
+/**
+ * The sessions on one strip, oldest first: each a band as wide as the square
+ * root of its length (a two-hour session doesn't crowd out a ten-minute one),
+ * the idle time between them a short gap that says how long it was, each step
+ * a tick at its moment, and anything that didn't go well marked above the band
+ * with its icon. A band's heading goes to that session's steps.
+ */
+export const timeline = (steps: readonly Activity[], sessionOf: (a: Activity) => string, label: (id: string) => string, costs: ReadonlyMap<string, string>): string => {
+  if (steps.length === 0) return ''
+  const groups = new Map<string, Activity[]>()
+  for (const a of steps) groups.set(sessionOf(a), [...(groups.get(sessionOf(a)) ?? []), a])
+  const bands = [...groups.entries()]
+    .map(([id, list]) => ({ id, list, first: Math.min(...list.map(a => a.startedAt)), last: Math.max(...list.map(a => a.endedAt ?? a.startedAt)) }))
+    .sort((a, b) => a.first - b.first)
+  const clock = (t: number) => new Date(t).toISOString().slice(11, 16)
+  const day = (t: number) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  const parts: string[] = []
+  bands.forEach((b, i) => {
+    if (i > 0) parts.push(`<li class="tl-gap" aria-hidden="true"><span>${esc(duration(b.first - bands[i - 1]!.last))}</span></li>`)
+    const span = Math.max(b.last - b.first, 60_000)
+    const ticks = [...b.list]
+      .sort((x, y) => x.startedAt - y.startedAt)
+      .map(a => {
+        const level = levelOf(a)
+        const at = b.last === b.first ? 50 : 1.5 + ((a.startedAt - b.first) / span) * 97
+        const tip = `${clock(a.startedAt)} UTC · ${LABEL[level]}: ${describe(a)}`
+        return `<span class="tl-tick tick-${level}" style="left:${at.toFixed(2)}%" data-tip="${esc(tip)}">${level === 'healthy' ? '' : icon(level)}</span>`
+      })
+      .join('')
+    const failed = b.list.filter(a => levelOf(a) !== 'healthy').length
+    const facts = [`${b.list.length} step${b.list.length === 1 ? '' : 's'}`, failed ? `${failed} not healthy` : undefined, costs.get(b.id)].filter(Boolean).join(' · ')
+    parts.push(
+      `<li class="tl-session" style="flex-grow:${Math.sqrt(span / 60_000).toFixed(2)}"><a class="tl-head" href="#${sessionAnchor(b.id)}"><span class="tl-name">${esc(label(b.id))}</span><span class="tl-when">${esc(`${day(b.first)}, ${clock(b.first)}–${clock(b.last)}`)}</span></a><div class="tl-band">${ticks}</div><div class="tl-foot">${esc(facts)}</div></li>`,
+    )
+  })
+  return `<figure class="timeline" aria-label="The sessions over time"><ol class="tl">${parts.join('')}</ol>
+${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], level: l })))}
+${dataTable(['Session', 'From (UTC)', 'To (UTC)', 'Steps', 'Not healthy'], bands.map(b => [label(b.id), `${day(b.first)} ${clock(b.first)}`, `${day(b.last)} ${clock(b.last)}`, b.list.length, b.list.filter(a => levelOf(a) !== 'healthy').length]))}</figure>`
+}
+
 /** What the HTML report needs beyond the Markdown one: the dashboard's own version, what it covers, the sessions and the Boomi account. */
 export type HtmlFacts = ReportFacts & {
   version?: string
@@ -607,7 +597,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
       const facts = [`${esc(when(g.firstAt))} – ${esc(when(g.lastAt).slice(11))} UTC`, esc(`${g.list.length} step${g.list.length === 1 ? '' : 's'}`), cost && esc(cost)].filter(Boolean).join(' · ')
       const head = isAll ? `<h3 class="group-head">${name}${summary?.isCurrent ? ' <span class="tag tag-1">this session</span>' : ''} <span class="aside">${facts}</span></h3>` : ''
       const items = [...g.list].sort((a, b) => b.startedAt - a.startedAt).map(stepItem).join('\n')
-      return `<div class="step-group" data-at="${g.firstAt}">${head}<ol class="steps">${items}</ol></div>`
+      return `<div class="step-group" id="${sessionAnchor(g.id)}" data-at="${g.firstAt}">${head}<ol class="steps">${items}</ol></div>`
     })
     .join('\n')
 
@@ -628,7 +618,10 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   ]
   const nav = sectionsShown.map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join('')
 
-  const charts = [stepsOverTime(steps, isAll), outcomesByProduct(steps), isAll ? '' : costOverTime(dashboard.activity, u.usd, now), spendByProduct(dashboard.activity, all), pipeline(dashboard, isAll)].filter(Boolean)
+  const costs = new Map(sessions.flatMap(s => (s.usd === undefined ? [] : [[s.id, `${s.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(s.usd) ?? '$0'}`] as [string, string]])))
+  if (!isAll && u.usd !== undefined) costs.set('this', formatCost(u.usd) ?? '$0')
+  const strip = timeline(steps, a => (isAll ? sessionOf(a) : 'this'), id => (id === 'this' ? 'This session' : isUnnamed(id) ? `Earlier ${id.slice(8)}` : id === facts.sessionId ? 'This session' : `Session ${id.slice(0, 8)}`), costs)
+  const charts = [outcomesByProduct(steps), isAll ? '' : costOverTime(dashboard.activity, u.usd, now), spendByProduct(dashboard.activity, all), pipeline(dashboard, isAll)].filter(Boolean)
 
   return `<!doctype html>
 <html lang="en">
@@ -661,6 +654,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
 </div>
 ${account}
 </div>
+${strip}
 ${needs.length > 0 ? `<section id="attention"><h2>Needs attention</h2>${attentionList}</section>` : ''}
 ${isAll ? table('sessions', 'Sessions', ['Session', 'Started', 'Last step', 'Steps', 'Failed or blocked', 'Components', 'Cost'], sessionRows) : ''}
 ${componentRows.length === 0 ? `<section id="components"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Type · folder', 'Component ID', 'In Boomi', 'Where it stands', 'Tokens', 'Cost'], componentRows, 'wide')}
@@ -691,7 +685,7 @@ ${
 }
 </section>
 </main>
-<footer>A snapshot of ${isAll ? `every Boomi Companion session the dashboard kept in ${esc(facts.folder ?? 'this folder')}` : 'a Boomi Companion session'}${facts.sessionId ? ` (Claude Code session ${esc(facts.sessionId)})` : ''}, made by boomi-dashboard${facts.version ? ` ${esc(facts.version)}` : ''} on ${esc(new Date(now).toISOString().replace('T', ' ').slice(0, 16))} UTC, styled to Boomi's Exosphere design system. Nothing in it is live, and it holds no credentials.</footer>
+<footer><svg class="maker" viewBox="0 0 12 16" aria-hidden="true" focusable="false" shape-rendering="crispEdges">${FLAMINGO_IDLE.flatMap((row, y) => [...row].map((c, x) => (c === '.' ? '' : `<rect x="${x}" y="${y}" width="1" height="1"/>`))).join('')}</svg>A snapshot of ${isAll ? `every Boomi Companion session the dashboard kept in ${esc(facts.folder ?? 'this folder')}` : 'a Boomi Companion session'}${facts.sessionId ? ` (Claude Code session ${esc(facts.sessionId)})` : ''}, made by boomi-dashboard${facts.version ? ` ${esc(facts.version)}` : ''} on ${esc(new Date(now).toISOString().replace('T', ' ').slice(0, 16))} UTC, styled to Boomi's Exosphere design system. Nothing in it is live, and it holds no credentials.</footer>
 <div class="tooltip" role="tooltip" hidden></div>
 <script>${SCRIPT}</script>
 </body>
@@ -789,6 +783,26 @@ button{font:inherit}
 .controls{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin-bottom:.75rem}
 .filters{display:flex;flex-wrap:wrap;gap:.5rem}
 .search input{background:var(--exo-color-background);color:var(--exo-color-font);border:1px solid var(--exo-color-border);border-radius:var(--exo-radius-standard);padding:.4rem .75rem;min-width:240px;font:inherit}
+.timeline{margin:1.75rem 0 0}
+.tl{display:flex;align-items:stretch;gap:0;list-style:none;margin:0;padding:0}
+.tl-session{flex-basis:0;min-width:9rem;display:flex;flex-direction:column}
+.tl-head{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;color:inherit;text-decoration:none;font-size:.813rem;padding:0 .1rem .35rem;white-space:nowrap;overflow:hidden}
+.tl-head:hover .tl-name{text-decoration:underline}.tl-name{font-weight:600}.tl-when{color:var(--exo-color-font-secondary);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
+.tl-band{position:relative;height:2.25rem;background:var(--exo-color-background);border:1px solid var(--exo-color-border-secondary);border-radius:var(--exo-radius-standard)}
+.tl-tick{position:absolute;top:.35rem;bottom:.35rem;width:3px;margin-left:-1.5px;border-radius:2px;cursor:default}
+.tl-tick .i{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);margin:0;width:1rem;height:1rem;background:var(--exo-color-background);border-radius:50%}
+.tick-healthy{background:var(--exo-color-background-success-strong)}.tick-warning{background:var(--exo-color-background-warning-strong);color:var(--exo-color-background-warning-strong)}
+.tick-serious{background:var(--exo-color-background-highlight);color:var(--exo-color-background-highlight)}.tick-critical{background:var(--exo-color-background-danger-strong);color:var(--exo-color-background-danger-strong)}
+.tl-foot{font-size:.75rem;color:var(--exo-color-font-secondary);padding:.35rem .1rem 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-gap{flex:0 0 3.25rem;display:flex;align-items:center;justify-content:center;position:relative}
+.tl-gap::before{content:"";position:absolute;left:.4rem;right:.4rem;top:50%;border-top:1px dashed var(--exo-color-border)}
+.tl-gap span{position:relative;background:var(--exo-color-body);padding:0 .25rem;font-size:.7rem;color:var(--exo-color-font-secondary);white-space:nowrap}
+.timeline .legend{margin-top:.75rem}
+.rail{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.25rem 1rem}
+.rail .badge{background:none;border:0;padding:0;margin:0;font-size:.813rem;line-height:1.5}
+.badge-critical{color:var(--exo-color-background-danger-strong)}.badge-serious{color:var(--exo-color-background-highlight)}
+footer .maker{width:.75rem;height:1rem;vertical-align:-.2rem;margin-right:.5rem;fill:var(--exo-color-font-secondary)}
+@media (max-width:640px){.tl{flex-direction:column;gap:.25rem}.tl-session{min-width:0}.tl-gap{flex-basis:1.5rem}.tl-gap::before{left:50%;right:auto;top:0;bottom:0;border-top:0;border-left:1px dashed var(--exo-color-border)}}
 ol.steps{list-style:none;padding:0;margin:0}
 .step-group+.step-group{margin-top:1.75rem}.group-head{font:600 .95rem/1.4 var(--exo-font-family);margin:0 0 .25rem;padding-bottom:.4rem;border-bottom:1px solid var(--exo-color-border)}.group-head .aside{font-weight:400;font-size:.813rem;margin-left:.35em}
 .order{margin-left:auto}

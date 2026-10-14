@@ -2,6 +2,17 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.28.0
+
+- The HTML report opens with a timeline of the sessions under its summary:
+  - each session is a band, wider for longer sessions;
+  - the idle time between sessions is a short gap that says how long it was ("24h 26m");
+  - each step is a tick at its moment, and a failed, blocked or warned step carries its icon;
+  - hovering a tick names the step, and clicking a session goes to its steps.
+- The timeline replaces the "Steps over time" chart, and it has its data as a table too. On a phone the sessions stack.
+- A component's stages read as one row of icons and labels instead of a stack of boxes.
+- The footer carries the dashboard's flamingo as a small maker's mark.
+
 ## 0.27.1
 
 - Faster all-sessions reports. To match older steps to their sessions, the report no longer scans every Claude Code transcript on the machine. It uses the last scan when that already covers them, and otherwise reads only this folder's transcripts, from the earliest unmatched step on. It remembers what it found, so the next report doesn't read them again.

@@ -187,6 +187,10 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** one step each for create, deploy and test, the component's type is `process`, and the test's result is its own `status …`, not the create's `SUCCESS:` line. **Fail:** a step twice, a blank type, or a test showing another script's line.
 - [ ] **K9. Old sessions' costs.** *(0.26.1)* In the folder from your 0.26.0 all-sessions report (the one that showed $0.00), run `/bc-dashboard report html all`.
   **Pass:** the **Sessions** table lists each day's session separately, with its own ID and cost, not one "Earlier" row. Each cost is within a few cents of what **Past Companion sessions** shows for that session, and the Cost tile is their sum. The same deploy package or test execution appears once under **Deployments and tests**. **Fail:** $0.00, a single earlier session, or a doubled step; send the Sessions table.
+- [ ] **K10. The timeline.** *(0.28.0)* In a folder with two or more Companion sessions, run `/bc-dashboard report html all`.
+  **Pass:** under the summary, one band per session, oldest on the left, with a gap between them saying how long it was. A failed test shows its ✕ icon on its tick. Hovering a tick names the step, and clicking a session's name scrolls to that session's steps. On a phone the bands stack. **Fail:** bands out of order, a failure with no icon, a click that goes nowhere, or anything cut off; send a screenshot.
+- [ ] **K11. Report speed.** *(0.27.1)* Time `/bc-dashboard report html all` in your busiest folder, then run it again.
+  **Pass:** the first run takes a few seconds at most, and the second is no slower. **Fail:** either takes more than about 10 seconds; say how long.
 
 ## L. Installed Companion plugins
 
