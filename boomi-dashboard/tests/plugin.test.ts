@@ -2014,3 +2014,97 @@ test("an all-sessions report reads only this folder's transcripts, only for step
   expect(scans).toHaveLength(1)
   expect(written[1]).toContain('data-copy="transcript-1"')
 })
+
+// --- /bc-dashboard config ---------------------------------------------------------
+
+/** The dashboard's /config rows, holding `values`; records each change the plugin makes, and answers the dialog in order. */
+const configWorld = (on: On, values: Record<string, unknown>, answers: (string | undefined)[], locked: string[] = []) => {
+  pastWorld(on, TWO_SCANNED)
+  const sets: [string, unknown][] = []
+  const asked: Question[] = []
+  on('config.list', async () => ({
+    value: Object.entries(values).map(([field, value]) => ({
+      key: `boomi-dashboard.${field}`,
+      label: field,
+      kind: typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'text',
+      value,
+      provider: { plugin: 'boomi-dashboard' },
+      isLocked: locked.includes(field),
+    })) as never,
+  }))
+  on('config.set', async (_$, e) => {
+    sets.push([e.key, e.value])
+    return { value: e.value }
+  })
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    const q = e.questions[0] as unknown as Question
+    asked.push(q)
+    const picked = answers.shift()
+    return picked === undefined ? { deny: 'dismissed' } : { result: { questions: [q], answers: { [q.question]: picked } } as never }
+  })
+  return { sets, asked }
+}
+
+test('/bc-dashboard config walks the budget with figures from past sessions, and saves at Done', async ($, on) => {
+  // Past sessions cost $3.50 and $1.25: twice the typical one is $2.50, the costliest $3.50.
+  const { sets, asked } = configWorld(on, { budgetUsd: 0, companionMonthlyUsd: 0, companionShare: 0 }, [
+    'Budget',
+    '$2.50 (twice a typical session)',
+    'Keep off',
+    '30%',
+    'Month',
+    'Done',
+  ])
+  const answer = await $.command.run(dashboard('config'))
+  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget 1/4', 'Budget 2/4', 'Budget 3/4', 'Budget 4/4', 'Settings'])
+  expect(asked[1]!.options.map(o => o.label)).toEqual(['Keep off', '$2.50 (twice a typical session)', '$3.50 (your costliest session)', 'Back to the menu'])
+  expect(asked[1]!.question).toContain('cost $1.25 typically, $3.50 at most')
+  expect(asked[5]!.question).toContain('3 changes so far, saved when you pick Done.')
+  expect(sets).toEqual([
+    ['boomi-dashboard.budgetUsd', 2.5],
+    ['boomi-dashboard.companionShare', 30],
+    ['boomi-dashboard.companionSharePeriod', 'month'],
+  ])
+  expect(answer.text).toBe(
+    ['Saved to /config:', '  Session budget: off → $2.50', '  Companion’s share of your usage limit: off → 30%', '  Period for the share: week → month'].join('\n'),
+  )
+})
+
+test('/bc-dashboard config skips the share period with no share, goes back to the menu, and asks again after a typo', async ($, on) => {
+  const { sets, asked } = configWorld(on, { budgetUsd: 5, companionShare: 0 }, ['lots', '7', 'Back to the menu'])
+  const answer = await $.command.run(dashboard('config budget'))
+  expect(asked[0]!.options.map(o => o.label)).toEqual(['Keep $5.00', '$2.50 (twice a typical session)', 'Off', 'Back to the menu'])
+  expect(asked[1]!.question).toMatch(/^"lots" didn't work: Session budget takes a number \(0 for off\)\. Session budget:/)
+  expect(asked[2]!.header).toBe('Budget 2/4')
+  expect(sets).toEqual([['boomi-dashboard.budgetUsd', 7]])
+  expect(answer.text).toBe('Saved to /config:\n  Session budget: $5.00 → $7.00')
+})
+
+test('/bc-dashboard config sets one setting by name, and lists them where it cannot ask', async ($, on) => {
+  const { sets } = configWorld(on, { budgetUsd: 0, toasts: true }, [], ['toasts'])
+  expect((await $.command.run(dashboard('config budgetUsd $4'))).text).toBe('Session budget: off → $4.00')
+  expect(sets).toEqual([['boomi-dashboard.budgetUsd', 4]])
+  expect((await $.command.run(dashboard('config budgetUsd lots'))).text).toBe('Session budget takes a number (0 for off). Session budget stays off.')
+  expect((await $.command.run(dashboard('config toasts off'))).text).toBe("Toasts is set by your organization's settings, so it can't be changed here.")
+  expect((await $.command.run(dashboard('config pollSeconds'))).text).toContain('Checking watched components: 1 minute.')
+  expect((await $.command.run(dashboard('config wibble'))).text).toMatch(/^No setting or group called wibble\./)
+  // The dialog dismissed at once, as in a -p run: every setting, and how to change one.
+  const listed = (await $.command.run(dashboard('config'))).text
+  expect(listed).toContain('Budget:\n  budgetUsd             off  (default)')
+  expect(listed).toContain('/bc-dashboard config <setting> <value>')
+  expect(sets).toHaveLength(1)
+})
+
+test('/bc-dashboard config closed before Done with nothing picked changes nothing', async ($, on) => {
+  const { sets } = configWorld(on, { toasts: true }, ['Pane and banner', 'Keep day', undefined])
+  expect((await $.command.run(dashboard('config'))).text).toBe('Nothing changed.')
+  expect(sets).toEqual([])
+})
+
+test('/bc-dashboard config keeps what was picked when the menu closes before Done, and the pane takes the colors', async ($, on) => {
+  const { sets } = configWorld(on, { toasts: true }, ['Pane and banner', 'Night', undefined])
+  const saved = await $.command.run(dashboard('config'))
+  expect(sets).toEqual([['boomi-dashboard.paneTheme', 'night']])
+  expect(saved.text).toBe('Saved to /config:\n  Pane colors: day → night\nThe menu closed before Done; what you picked before it closed is saved.')
+  expect((await $.command.run(dashboard('theme'))).text).toContain('◆ night')
+})

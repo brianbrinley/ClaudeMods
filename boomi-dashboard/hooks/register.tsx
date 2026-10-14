@@ -110,6 +110,8 @@ import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
 import type { BoomiFacts, ReportScope } from './report-html'
+import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, listing, menuQuestion, parseValue, pastSpend, questionFor, show, valueOf } from './config'
+import type { Group, PastSpend, Value } from './config'
 import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
 import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
@@ -1617,6 +1619,7 @@ const USAGE = [
   '/bc-dashboard seen            mark watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
+  '/bc-dashboard config [group]  walk through the dashboard\'s settings (budget, pane, data); config <setting> <value> sets one; config list shows them',
   '/bc-dashboard upgrade         update the dashboard from its GitHub checkout: --check only looks, --yes skips the question, --rollback goes back',
 ].join('\n')
 
@@ -1703,12 +1706,157 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return theme($, settings, target)
     case 'upgrade':
       return upgradeCommand($, target)
+    case 'config':
+    case 'settings':
+      return configCommand($, settings, target)
     case 'banner':
       await update($, isBandHidden, () => false)
       return 'The dashboard banner is back above the prompt.'
     default:
       return USAGE
   }
+}
+
+// --- Settings -------------------------------------------------------------------
+
+/** The dashboard's rows of /config: each field's value (the pane's colors as shown now), and which a trusted source locks. */
+const configNow = async ($: Engine, settings: Settings) => {
+  const rows = await $.config.list()
+  const values: Record<string, Value> = {}
+  const locked = new Set<string>()
+  for (const field of FIELDS) {
+    const row = rows.find(r => r.key === configKey(field))
+    values[field.key] = valueOf(field, row?.value)
+    if (row?.isLocked) locked.add(field.key)
+  }
+  values.paneTheme = await themeOf($, settings)
+  return { values, locked }
+}
+
+/**
+ * Writes each change through /config, so it lasts and shows there too, then
+ * puts it to work in this session where it can: the settings in place, the
+ * pane's colors, the status line. Says what changed, or why a change didn't take.
+ */
+const saveConfig = async ($: Engine, settings: Settings, values: Record<string, Value>, changes: ReadonlyMap<string, Value>): Promise<string[]> => {
+  const lines: string[] = []
+  const applied = { ...values }
+  for (const [key, value] of changes) {
+    const field = fieldNamed(key)!
+    const done = await $.config.set({ key: configKey(field), value }).catch((error: unknown) => ({ deny: messageOf(error) }))
+    if (done.deny !== undefined) {
+      lines.push(`${field.label}: not changed: ${done.deny}`)
+      continue
+    }
+    lines.push(changeLine(field, values[key]!, value))
+    applied[key] = value
+    if (key === 'paneTheme' && isTheme(value)) await pickTheme($, value)
+  }
+  Object.assign(settings, settingsFrom(applied as PluginOptions))
+  await refreshStatus($, settings).catch(() => undefined)
+  return lines
+}
+
+/**
+ * /bc-dashboard config: the settings a group at a time, each a question with
+ * the current value first; the budget's offers come from what past sessions
+ * cost. Changes are saved at Done, or when the menu is closed before it.
+ * `config <group>` walks one group, `config <setting> <value>` sets one,
+ * `config list` (and a run that can't ask) lists them all.
+ */
+const configCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const words = target.split(/\s+/).filter(Boolean)
+  let now: Awaited<ReturnType<typeof configNow>>
+  try {
+    now = await configNow($, settings)
+  } catch (error) {
+    return `The dashboard couldn't read its settings: ${messageOf(error)}. They're under /config too.`
+  }
+  const { values, locked } = now
+  const lockedNote = (label: string) => `${label} is set by your organization's settings, so it can't be changed here.`
+  if (words[0] === 'list') return listing(values)
+
+  // One setting, by name.
+  const named = words[0] ? fieldNamed(words[0]) : undefined
+  if (named) {
+    const current = values[named.key]!
+    if (words.length === 1) return `${named.label}: ${show(named, current)}. ${named.about} Change it with /bc-dashboard config ${named.key} <value>.`
+    if (locked.has(named.key)) return lockedNote(named.label)
+    const parsed = parseValue(named, words.slice(1).join(' '))
+    if ('error' in parsed) return `${parsed.error}. ${named.label} stays ${show(named, current)}.`
+    if (parsed.value === current) return `${named.label} is already ${show(named, current)}.`
+    return (await saveConfig($, settings, values, new Map([[named.key, parsed.value]]))).join('\n')
+  }
+  const only = words[0] ? groupNamed(words[0]) : undefined
+  if (words[0] && !only) return `No setting or group called ${words[0]}.\n\n${listing(values)}`
+
+  // The walk.
+  const changes = new Map<string, Value>()
+  const current = (key: string): Value => (changes.has(key) ? changes.get(key)! : values[key]!)
+  const notes: string[] = []
+  let spend: PastSpend | undefined
+  const spendNow = async (): Promise<PastSpend> => {
+    if (spend) return spend
+    const sessions = (await read($, history)).sessions ?? (await scanHistory($, settings).catch(() => undefined))?.sessions
+    spend = pastSpend(sessions, await $.clock.now())
+    return spend
+  }
+  let asked = 0
+  const walk = async (group: Group) => {
+    const fields = group.fields.filter(f => {
+      if (!locked.has(f.key)) return true
+      if (!notes.includes(lockedNote(f.label))) notes.push(lockedNote(f.label))
+      return false
+    })
+    for (let i = 0, retries = 0; i < fields.length; i++) {
+      const field = fields[i]!
+      // The share's period only matters with a share set.
+      if (field.key === 'companionSharePeriod' && Number(current('companionShare')) === 0) continue
+      const q = questionFor(field, current(field.key), field.unit === 'usd' ? await spendNow() : { sessions: 0 }, { index: i + 1, of: fields.length, group })
+      const retry = retries > 0 ? notes.pop() : undefined
+      const text = await $.ui.ask(retry ? `${retry} ${q.question}` : q.question, { header: q.header, options: q.options })
+      asked++
+      const answer = q.answer(text)
+      if (answer.kind === 'back') return
+      if (answer.kind === 'unreadable' && retries === 0) {
+        const why = parseValue(field, answer.text)
+        notes.push(`"${answer.text}" didn't work: ${'error' in why ? why.error : 'not a value it takes'}.`)
+        retries++
+        i--
+        continue
+      }
+      retries = 0
+      if (answer.kind === 'set') {
+        if (answer.value === values[field.key]) changes.delete(field.key)
+        else changes.set(field.key, answer.value)
+      }
+    }
+  }
+  let isClosed = false
+  try {
+    if (only) await walk(only)
+    else
+      for (let round = 0; round < 12; round++) {
+        const menu = menuQuestion(Object.fromEntries(FIELDS.map(f => [f.key, current(f.key)])), changes.size)
+        const picked = await $.ui.ask(menu.question, { header: 'Settings', options: menu.options })
+        asked++
+        const group = picked === DONE ? undefined : groupNamed(picked)
+        if (!group) break
+        await walk(group)
+      }
+  } catch {
+    isClosed = true
+  }
+  // Where nothing could be asked (a -p run) or the menu closed at once: the settings as they are.
+  if (asked === 0) return listing(values)
+  const saved = changes.size > 0 ? await saveConfig($, settings, values, changes) : []
+  return [
+    saved.length > 0 ? ['Saved to /config:', ...saved.map(line => `  ${line}`)].join('\n') : 'Nothing changed.',
+    isClosed && saved.length > 0 ? 'The menu closed before Done; what you picked before it closed is saved.' : '',
+    ...notes,
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 // --- Upgrading the dashboard ----------------------------------------------------
@@ -1871,7 +2019,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save|html [session|all] [--no-open]] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | upgrade [--check] [--yes] [--rollback]',
+      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save|html [session|all] [--no-open]] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | config [budget|pane|data|list|<setting> <value>] | upgrade [--check] [--yes] [--rollback]',
     })
     await $.tool.register({
       name: 'summary',
