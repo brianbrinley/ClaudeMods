@@ -106,8 +106,9 @@ import {
   resumeLabel,
   parseActivityLog,
   newLogSteps,
+  PAUSED,
 } from './activity'
-import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
+import type { Attention, BudgetLine, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { componentTable, hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
@@ -115,6 +116,8 @@ import { toCsv, toTsv } from './export'
 import type { BoomiFacts, ReportScope, ReportStyle } from './report-html'
 import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, listing, menuQuestion, parseValue, pastSpend, questionFor, show, valueOf } from './config'
 import type { Group, PastSpend, Value } from './config'
+import { blockedDetail, companionChanges, denyMessage, enforcementNote, platformWrites, spentBudgets, spentText, wrapperScripts } from './budget-gate'
+import type { Enforce } from './budget-gate'
 import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
 import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
@@ -181,6 +184,15 @@ const SHARE_KEY = 'shareDays'
 /** Each usage-limit window's last warning (80 or 100), by its kind and reset time, so each is toasted once. */
 const limitAlerts = atom({ plugin: 'boomi-dashboard', key: 'limitAlerts' } as const, {} as Record<string, number>)
 
+/** The person allowed Companion changes past a spent budget for the rest of this session (confirm mode). */
+const budgetAllowed = atom({ plugin: 'boomi-dashboard', key: 'budgetAllowed' } as const, false)
+
+/** What the spent budgets are while they pause Companion changes, for the banner; empty otherwise. */
+const budgetPaused = atom({ plugin: 'boomi-dashboard', key: 'budgetPaused' } as const, '')
+
+/** The enforcement state Claude was last told about with a prompt, so it's told once, and again on a change. */
+const enforceNoted = atom({ plugin: 'boomi-dashboard', key: 'enforceNoted' } as const, '')
+
 /** The budget's last warning, as a percent (0, 80 or 100), so each is toasted once. */
 const budgetAlert = atom({ plugin: 'boomi-dashboard', key: 'budgetAlert' } as const, 0)
 
@@ -225,6 +237,8 @@ type Settings = {
   isCheckingUpdates: boolean
   updateCheckHours: number
   isOpeningReport: boolean
+  budgetEnforce: Enforce
+  budgetGrace: number
   reportStyle: ReportStyle
   /** The options these settings came from, for a change to one of them. */
   options: Readonly<Record<string, unknown>>
@@ -251,6 +265,8 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   isCheckingUpdates: options.updateCheck !== false,
   updateCheckHours: Math.max(0, Number(options.updateCheckHours ?? 24) || 0),
   isOpeningReport: options.reportOpen !== false,
+  budgetEnforce: options.budgetEnforce === 'confirm' || options.budgetEnforce === 'block' ? options.budgetEnforce : 'warn',
+  budgetGrace: Math.min(100, Math.max(0, Number(options.budgetGrace ?? 0) || 0)),
   reportStyle: options.reportStyle === 'expressive' ? 'expressive' : 'exosphere',
   options: { ...options },
 })
@@ -380,7 +396,8 @@ const snapshot = async ($: Engine) => {
 const refreshStatus = async ($: Engine, settings: Settings) => {
   const now = await $.clock.now()
   const read0 = { ...(await usageOf($)), budgetUsd: settings.budgetUsd }
-  const usage = { ...read0, companion: await companionBudget($, settings, read0) }
+  const usage: Usage = { ...read0, companion: await companionBudget($, settings, read0) }
+  usage.isPaused = await notePause($, settings, usage)
   $.ui.status(statusLine(await read($, dashboard), now, settings.windowMs, usage, (await read($, recap)) ?? undefined))
   await warnBudget($, settings, usage.usd)
   await warnLimits($, settings, usage)
@@ -1818,6 +1835,121 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
   }
 }
 
+// --- Budget enforcement --------------------------------------------------------------
+
+/**
+ * The budgets spent past the grace while enforcement is on (confirm or
+ * block), and whether the person allowed changes for the rest of the
+ * session. Nothing is spent in warn mode.
+ */
+const enforcementNow = async ($: Engine, settings: Settings, usage?: Usage) => {
+  if (settings.budgetEnforce === 'warn') return { spent: [] as BudgetLine[], isAllowed: false }
+  const u = usage ?? (await withBudget($, settings))
+  return { spent: spentBudgets(budgetLines(u, settings), settings.budgetGrace), isAllowed: await read($, budgetAllowed) }
+}
+
+/** Keeps the banner's pause in step, toasting once as a pause starts. True while Companion changes are paused. */
+const notePause = async ($: Engine, settings: Settings, usage: Usage): Promise<boolean> => {
+  const { spent, isAllowed } = await enforcementNow($, settings, usage).catch(() => ({ spent: [] as BudgetLine[], isAllowed: false }))
+  const paused = spent.length > 0 && !isAllowed ? spentText(spent) : ''
+  const before = await read($, budgetPaused)
+  if (paused !== before) {
+    await update($, budgetPaused, () => paused)
+    if (paused && !before) {
+      toast($, settings, `⛔ Budget reached: ${paused}. Companion changes are ${settings.budgetEnforce === 'block' ? 'refused' : 'paused: each asks you first'}.`)
+    }
+  }
+  return paused !== ''
+}
+
+/** A refused change that wasn't a Companion script (a call to the Platform API, a wrapper script): a blocked step of its own. */
+const recordBlocked = async ($: Engine, settings: Settings, detail: string) => {
+  const at = await $.clock.now()
+  await record($, list => [...list, { id: nextId(list), kind: 'other', outcome: 'blocked', subject: 'Boomi change', detail, startedAt: at, endedAt: at, isBudgetBlocked: true }])
+  await refreshStatus($, settings).catch(() => undefined)
+  await saveActivity($, settings).catch(() => undefined)
+}
+
+/** Marks the steps the budget refused as such, for their words. */
+const markBudgetBlocked = async ($: Engine, ids: readonly number[]) => {
+  if (ids.length === 0) return
+  await record($, list => list.map(a => (ids.includes(a.id) ? { ...a, isBudgetBlocked: true as const } : a)))
+}
+
+/** A Companion change the person allowed past a spent budget, kept as a step for the audit trail. */
+const recordOverride = async ($: Engine, settings: Settings, text: string) => {
+  const at = await $.clock.now()
+  await record($, list => [...list, { id: nextId(list), kind: 'other', outcome: 'ok', subject: 'Budget override', detail: text, startedAt: at, endedAt: at, isBudgetOverride: true }])
+  await saveActivity($, settings).catch(() => undefined)
+}
+
+const ALLOW_ONE = 'Allow this one'
+const ALLOW_SESSION = 'Allow for the rest of this session'
+const RAISE = 'Raise the budget'
+const STOP = 'Stop'
+
+/**
+ * Whether a shell command may run while a budget is spent: the Companion
+ * changes it would make (its own scripts, a changing call to the Platform
+ * API, or either inside a local script it runs), held against the spent
+ * budgets. Block refuses; confirm asks the person, who can allow this one,
+ * allow the rest of the session, raise the budget, or stop. Undefined lets
+ * the command run; reads always do.
+ */
+const budgetGate = async ($: Engine, settings: Settings, command: string): Promise<{ deny: string; short: string } | undefined> => {
+  if (settings.budgetEnforce === 'warn') return undefined
+  const changes = [...companionChanges(command), ...platformWrites(command)]
+  for (const path of wrapperScripts(command).slice(0, 5)) {
+    const full = path.startsWith('/') ? path : `${await $.session.cwd()}/${path.replace(/^\.\//, '')}`
+    const text = await $.fs.read(full).then(String).catch(() => '')
+    changes.push(...[...companionChanges(text), ...platformWrites(text)].map(c => `${c}, inside ${path}`))
+  }
+  if (changes.length === 0) return undefined
+  const { spent, isAllowed } = await enforcementNow($, settings)
+  if (spent.length === 0 || isAllowed) return undefined
+  const refuse = (isChosen = false) => ({ deny: denyMessage(spent, changes, settings.budgetEnforce, isChosen), short: blockedDetail(spent) })
+  if (settings.budgetEnforce === 'block') return refuse()
+  const said = spentText(spent)
+  const answer = await $.ui
+    .ask(`Boomi Companion's budget is spent: ${said}. Claude wants to ${changes.join('; ')}. Let it?`, { header: 'Budget', options: [ALLOW_ONE, ALLOW_SESSION, RAISE, STOP] })
+    .catch(() => undefined)
+  if (answer === ALLOW_ONE) {
+    await recordOverride($, settings, `allowed once: ${changes.join('; ')}, with ${said} spent`)
+    return undefined
+  }
+  if (answer === ALLOW_SESSION) {
+    await update($, budgetAllowed, () => true)
+    await recordOverride($, settings, `allowed for the rest of the session, starting with: ${changes.join('; ')}, with ${said} spent`)
+    await refreshStatus($, settings).catch(() => undefined)
+    return undefined
+  }
+  if (answer === RAISE) {
+    await configCommand($, settings, 'budget').catch(() => undefined)
+    const after = await enforcementNow($, settings)
+    if (after.spent.length === 0) {
+      await refreshStatus($, settings).catch(() => undefined)
+      return undefined
+    }
+    return { deny: denyMessage(after.spent, changes, settings.budgetEnforce, true), short: blockedDetail(after.spent) }
+  }
+  return refuse(answer === STOP)
+}
+
+/**
+ * The note Claude gets with a prompt: once as enforcement starts, and again
+ * when it changes (an override for the session, a raised budget, a reset),
+ * so it plans without Companion changes instead of finding the gate mid-plan.
+ */
+const enforcementContext = async ($: Engine, settings: Settings): Promise<string | undefined> => {
+  if (settings.budgetEnforce === 'warn') return undefined
+  const { spent, isAllowed } = await enforcementNow($, settings)
+  const key = spent.length === 0 ? '' : `${settings.budgetEnforce}|${isAllowed}|${spent.map(l => l.label).join(',')}`
+  const before = await read($, enforceNoted)
+  if (key === before) return undefined
+  await update($, enforceNoted, () => key)
+  return enforcementNote(spent, settings.budgetEnforce, isAllowed)
+}
+
 // --- Components, to take elsewhere -------------------------------------------------
 
 /**
@@ -1950,6 +2082,8 @@ const configCommand = async ($: Engine, settings: Settings, target: string): Pro
       const field = fields[i]!
       // The share's period only matters with a share set.
       if (field.key === 'companionSharePeriod' && Number(current('companionShare')) === 0) continue
+      // The grace only matters once a spent budget does something.
+      if (field.key === 'budgetGrace' && current('budgetEnforce') === 'warn') continue
       const q = questionFor(field, current(field.key), field.unit === 'usd' ? await spendNow() : { sessions: 0 }, { index: i + 1, of: fields.length, group })
       const retry = retries > 0 ? notes.pop() : undefined
       const text = await $.ui.ask(retry ? `${retry} ${q.question}` : q.question, { header: q.header, options: q.options })
@@ -2263,10 +2397,22 @@ export const register: Register = (on, options) => {
   // The dashboard only watches: its own trouble never stops the command.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const command = String(e.command ?? '')
+    // A spent budget, with budgetEnforce confirm or block, stops Companion changes before they run.
+    const gate = await budgetGate($, settings, command).catch(() => undefined)
     const runs = scriptRuns(command)
     const checks = bdiStatusChecks(command)
     const deploys = datahubStatusChecks(command)
     const quarantines = quarantineChecks(command)
+    if (gate) {
+      const started = runs.length > 0 ? await noteStart($, settings, runs).catch(() => [] as Activity[]) : []
+      if (started.length > 0) await noteEnd($, settings, started, { deny: gate.short }).catch(() => undefined)
+      else await recordBlocked($, settings, gate.short).catch(() => undefined)
+      await markBudgetBlocked($, started.map(a => a.id)).catch(() => undefined)
+      // Settled before Claude hears the refusal, so the status line and the saved steps already show it.
+      await refreshStatus($, settings).catch(() => undefined)
+      await saveActivity($, settings).catch(() => undefined)
+      return { deny: gate.deny }
+    }
     if (runs.length === 0 && checks.length === 0 && deploys.length === 0 && quarantines.length === 0) return next(e)
     const started = runs.length > 0 ? await noteStart($, settings, runs).catch(() => [] as Activity[]) : []
     const ran = await next(e)
@@ -2290,6 +2436,12 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'bc-dashboard' }, async ($, e) => ({ text: await runCommand($, settings, e.args) }))
+
+  // A spent budget that pauses Companion changes: Claude hears it with the person's prompt, once and on a change.
+  on('prompt.submit', async ($, e, next) => {
+    const note = await enforcementContext($, settings).catch(() => undefined)
+    return next(note ? { ...e, context: [...(e.context ?? []), note] } : e)
+  })
 
   on('tool.call', { tool: 'mcp__boomi-dashboard__summary' }, async $ => ({
     result: await summaryNow($, settings).catch(error => `The dashboard couldn't build its summary: ${messageOf(error)}`),
@@ -2363,8 +2515,9 @@ export const register: Register = (on, options) => {
     const isNew = !current.activity.some(a => !a.isRestored)
     const latest = isNew ? undefined : headline(current.activity)
     const needs = attention(current, now, settings.windowMs)
+    const paused = await read($, budgetPaused)
     const welcome = isNew && (await read($, isCompanionFolder)) ? welcomeLine(await read($, tip), (await read($, recap)) ?? undefined, now, tipsFor(await read($, companionPlugins))) : undefined
-    if (!latest && !welcome && needs.length === 0) return next(e)
+    if (!latest && !welcome && needs.length === 0 && !paused) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const count = components(current.activity).length
     const usage = await usageOf($)
@@ -2385,6 +2538,12 @@ export const register: Register = (on, options) => {
             <Text bold color="claude">
               ◆ BC Dashboard{' '}
             </Text>
+            {paused && (
+              <Text color={STATUS.critical.color}>
+                {PAUSED}
+                <Text dimColor>{latest || welcome ? ' │ ' : ''}</Text>
+              </Text>
+            )}
             {latest && (
               <Text>
                 {icon(levelOf(latest))} {describe(latest)} <Text dimColor>{ago(latest.endedAt ?? latest.startedAt, now)}</Text>

@@ -229,3 +229,22 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** it prints every setting by group with its value, and how to change one with `/bc-dashboard config <setting> <value>`. **Fail:** it hangs or prints nothing.
 - [ ] **M4. Theme and size in /config.** *(0.34.0)* Press **Night** in the pane, run `/bc-dashboard size 24`, then open `/config`.
   **Pass:** the boomi-dashboard rows show **Pane colors** `night` and **Pane height (rows)** `24`. Set **Pane colors** back to `day` in `/config`: the pane turns Day. Restart, and the pane is still Day, 24 rows tall. **Fail:** `/config` still shows the old values, or the pane ignores a change made in `/config`.
+
+## N. Budget enforcement
+
+*boomi-dashboard 0.39.0. Use a Companion workspace, and set a session budget a little under what the session has already cost (`/bc-dashboard config budget`), so it's spent.*
+
+- [ ] **N1. Warn stays the default.** With `budgetEnforce` left at `warn`, ask Claude to deploy a process.
+  **Pass:** it deploys; the status line shows the spent budget as before, and nothing asks or refuses. **Fail:** anything is stopped.
+- [ ] **N2. Block refuses changes, not reads.** Set `budgetEnforce` to `block` and ask Claude to deploy, then to list folders and read an execution's log.
+  **Pass:** the deploy doesn't run. Claude says which budget is spent and stops, and doesn't try another way. The step shows `⚠ Blocked by budget` under **Needs attention**. The status line and banner say `⛔ budget reached, Companion changes paused`, and one toast appeared. The listing and the log read work. **Fail:** the deploy runs, a read is refused, or Claude retries with curl or a script.
+- [ ] **N3. Claude knew before trying.** In the same session, send a new prompt asking for a push.
+  **Pass:** Claude says up front that the budget is spent and asks you, rather than attempting the push. **Fail:** it attempts the push without mentioning the budget.
+- [ ] **N4. Confirm asks, and allows.** Set `budgetEnforce` to `confirm`, ask Claude to deploy, and pick **Allow this one**. Ask again and pick **Stop**.
+  **Pass:** the question names the spent budget and the change. The first deploy runs; the second is refused. `/bc-dashboard report` lists the first under **Budget overrides**. **Fail:** no question, or the wrong one runs.
+- [ ] **N5. Allow for the session, and raise the budget.** Pick **Allow for the rest of this session**: no further questions this session. In a new session, pick **Raise the budget** and set the budget above the cost.
+  **Pass:** after the raise, the change runs without another question, and the banner's pause goes away. **Fail:** it keeps asking, or the raise doesn't let the change through.
+- [ ] **N6. The pane's Why? and Run again aren't stopped.** With a failed test under **Needs attention** and `block` on, press **Why?** and **Run again**.
+  **Pass:** both work. **Fail:** either is refused.
+- [ ] **N7. A subagent is held too.** With `block` on, ask Claude to have a subagent deploy a process.
+  **Pass:** the subagent's deploy is refused the same way. **Fail:** it runs.

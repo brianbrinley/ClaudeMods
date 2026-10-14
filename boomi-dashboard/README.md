@@ -165,7 +165,7 @@ Tokens: 412k new (18k in · 44k out · 350k cache writes) · 3.30M cache reads
 
 Spend is the session's cost as `/cost` reports it. On a Claude seat, that's what the same use would cost on the API, not a bill. A step's share is what Claude spent since the previous step; a component's is all its steps.
 
-**Budget:** set `budgetUsd` and the status line, summary and SPEND gauge warn from 80% (`◐ 84% of the $5.00 budget`) and once it's spent, with one toast at each mark. Nothing is stopped.
+**Budget:** set `budgetUsd` and the status line, summary and SPEND gauge warn from 80% (`◐ 84% of the $5.00 budget`) and once it's spent, with one toast at each mark. By default that's all: nothing is stopped. To have a spent budget actually pause or stop Companion's changes, see [Budget enforcement](#budget-enforcement).
 
 ### Your Claude usage limits
 
@@ -179,7 +179,7 @@ On an API key there are no limits to read, so none of this shows.
 
 ### Your own Companion budget
 
-Two optional settings under `/config` give Companion work a budget of its own. Both warn in the status line from 80%, toast at 80% and 100%, and stop nothing.
+Two optional settings under `/config` give Companion work a budget of its own. Both warn in the status line from 80% and toast at 80% and 100%. Under the default `budgetEnforce` (`warn`) they stop nothing. With `confirm` or `block`, a spent budget really does stop Companion's changes: see [Budget enforcement](#budget-enforcement).
 
 **BUDGET** in the pane shows every budget you set, `budgetUsd` included: the fullest one's meter, then a line each, such as `✓ month: $32.10 of $50`, `◐ share, today: 84% of 30%` or `✓ session: $1.25 of $5.00`. Without a budget set, it doesn't show.
 
@@ -190,7 +190,7 @@ The limit is shared, so in a Companion session anything else that uses Claude at
 
 ### Set up a budget
 
-There are three budgets. Set any of them, or none. They only warn: nothing is ever stopped.
+There are three budgets. Set any of them, or none. By default they only warn. With `budgetEnforce` set to `confirm` or `block`, any one of them that's spent pauses or stops Companion's changes, as the next section explains.
 
 | You want to cap | Setting | Works on | Example |
 |---|---|---|---|
@@ -235,6 +235,37 @@ Numbers go in without quotes. The period is `"day"`, `"week"` or `"month"`. Leav
 - No **BUDGET** gauge means no budget is set, or the value isn't a number. Open `/config` again and check.
 
 **When it warns:** at 80%, the status line shows `◐` and the percent, and one toast appears. At 100% you get `✗` and a second toast. Each toast shows once, not on every refresh. To keep working past a budget, raise it or set it to `0`.
+
+### Budget enforcement
+
+> **This is a real blocker when you turn it on.** With `budgetEnforce` set to `confirm` or `block`, the dashboard stops Claude's Boomi Companion changes once a budget is spent. The command never runs: Companion and Boomi never see it. It's off by default (`warn`).
+
+`budgetEnforce` decides what a spent budget does:
+
+| `budgetEnforce` | Once any budget you set reaches 100% (plus `budgetGrace`) |
+|---|---|
+| `warn` (default) | Warns as above. Nothing is stopped. |
+| `confirm` | Before each Companion change, asks you: **Allow this one**, **Allow for the rest of this session**, **Raise the budget** (opens `/bc-dashboard config budget`, then lets the change through if the budget is no longer spent) or **Stop**. Closing the question stops the change. |
+| `block` | Refuses each Companion change outright. |
+
+**What counts as a Companion change:** creating, saving (push), deploying, undeploying and test-executing a component; bc-integration's other changing scripts (creating a folder, creating or deleting a branch, setting extensions, calling a deployed web service, creating Event Streams topics); and the other plugins' subcommands that change something, the same ones the dashboard counts as steps. Also gated:
+- a call straight to the Platform API that changes something: PUT, PATCH, DELETE, or a POST that isn't a query, sent with curl, wget or HTTPie to `api.boomi.com`;
+- a local script that Claude runs (`bash run-all.sh`) and that contains any of the above. The dashboard reads the script first.
+
+**Never stopped:** reads (list, get, query, status, logs, pull, search; the Platform API's GETs and `…/query` POSTs), the dashboard's own tools, and **Why?** and **Run again** when you press them in the pane. A change that's already running when the budget runs out always finishes.
+
+**`budgetGrace`** (percent, default `0`) lets work run a little past a budget before enforcement starts: `10` means at 110%.
+
+**What you see:**
+- A refused change shows as `⚠ Blocked by budget` in Claude's latest steps and under **Needs attention**, naming the budget and how far over it is.
+- The status line and the banner say `⛔ budget reached, Companion changes paused`, and one toast says so when it starts.
+- Every override you grant in `confirm` mode is recorded as a step and listed under **Budget overrides** in `/bc-dashboard report` and the HTML report, as an audit trail.
+
+**What Claude is told:** with your next prompt after enforcement starts (and again when it changes), Claude gets a short note that the budget is spent and changes are paused, so it plans without them. This costs about 80 tokens each time. A refused call tells Claude which budget is spent and by how much, to stop and report to you, and not to work around the block (no curl to the API, no running the script another way).
+
+**Limits:** the gate reads the commands Claude runs through the Bash tool. A change made some other way, such as a script that builds its command at run time, a program in another language, or work you do yourself in a terminal, isn't seen. The deny message tells Claude not to try.
+
+**Set it up:** run `/bc-dashboard config budget` and answer the **When a budget is spent** and **Grace past a budget** questions, or set `budgetEnforce` and `budgetGrace` in `/config`.
 
 ## Watched components
 
@@ -365,6 +396,8 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `companionShare` | `0` | Companion's share of your weekly usage limit, in percent; `0` turns it off. |
 | `companionSharePeriod` | `week` | What the share runs over: `day`, `week` or `month`. |
 | `companionMonthlyUsd` | `0` | A monthly amount for Companion sessions, in US dollars; `0` turns it off. |
+| `budgetEnforce` | `warn` | What a spent budget does: `warn` only warns; `confirm` asks before each Companion change; `block` refuses them. `confirm` and `block` really stop changes. See [Budget enforcement](#budget-enforcement). |
+| `budgetGrace` | `0` | How far past a budget, in percent, before `confirm` or `block` starts. |
 | `updateCheck` | `true` | At the start of a session, say when a newer dashboard is on GitHub (never installs). |
 | `updateCheckHours` | `24` | Hours between update checks; `0` turns them off. |
 | `reportOpen` | `true` | Open `/bc-dashboard report html`'s page in your browser once it's saved. |

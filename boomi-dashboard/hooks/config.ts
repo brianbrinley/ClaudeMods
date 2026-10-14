@@ -41,6 +41,8 @@ export const GROUPS: readonly Group[] = [
       { key: 'companionMonthlyUsd', label: 'Monthly amount for Companion', about: 'What Companion sessions may cost in a calendar month, by Claude Code’s own cost figures; warns at 80% and when it is reached.', kind: 'number', unit: 'usd', default: 0, zero: 'off' },
       { key: 'companionShare', label: 'Companion’s share of your usage limit', about: 'How much of your weekly Claude usage limit Companion work may use; warns at 80% and when it is used. Needs a Claude seat.', kind: 'number', unit: 'percent', default: 0, zero: 'off', presets: [25, 50, 75], max: 100 },
       { key: 'companionSharePeriod', label: 'Period for the share', about: 'What the share runs over: today, the last 7 days, or this calendar month.', kind: 'choice', options: ['day', 'week', 'month'], default: 'week' },
+      { key: 'budgetEnforce', label: 'When a budget is spent', about: 'Warn only warns. Confirm asks you before each Companion change (create, push, deploy, test and the like); block refuses them. Reads are never stopped, and a change already running finishes.', kind: 'choice', options: ['warn', 'confirm', 'block'], default: 'warn' },
+      { key: 'budgetGrace', label: 'Grace past a budget', about: 'How far past a budget, in percent, before confirm or block starts.', kind: 'number', unit: 'percent', default: 0, zero: 'none, at 100%', presets: [5, 10, 20], max: 100 },
     ],
   },
   {

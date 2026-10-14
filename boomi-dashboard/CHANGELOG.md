@@ -2,6 +2,23 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.39.0
+
+- **Budget enforcement, opt in: a spent budget can now really stop Companion.** A new setting, `budgetEnforce`, takes one of three values:
+  - `warn` (the default, no change for anyone today) only warns;
+  - `confirm` asks you before each Companion change once any budget you set is spent: **Allow this one**, **Allow for the rest of this session**, **Raise the budget** or **Stop**;
+  - `block` refuses those changes outright.
+
+  The dashboard stops the command before it runs, so Companion and Boomi never see it. Companion's own files aren't changed.
+- **What's gated:** creates, pushes, deploys, undeploys and test executions; bc-integration's other changing scripts; the other plugins' changing subcommands; changing calls straight to the Platform API (PUT, PATCH, DELETE, or a POST that isn't a query); and local scripts that wrap any of these. Reads, the dashboard's own tools, and **Why?** and **Run again** are never stopped. A change already running finishes.
+- **`budgetGrace`** (percent, default 0) starts enforcement past 100%.
+- **You see it:**
+  - refused steps read `⚠ Blocked by budget`;
+  - the status line and the banner say `⛔ budget reached, Companion changes paused`, with one toast as it starts;
+  - overrides you grant are recorded as steps and listed under **Budget overrides** in both reports.
+- **Claude is told:** once with your next prompt (and again when the state changes), and in every refusal, with which budget is spent and by how much, to stop and report, and not to work around it.
+- `/bc-dashboard config budget` asks about both new settings.
+
 ## 0.38.0
 
 - **Take the components elsewhere, with every ID.** Above the HTML report's Components table:
