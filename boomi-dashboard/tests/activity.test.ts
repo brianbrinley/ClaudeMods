@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import {
   attention,
   rerunArgs,
+  budgetLines,
   closeItem,
   diagnose,
   fixPrompt,
@@ -1144,4 +1145,11 @@ test('shortWhen reads the same on every runtime: a comma between date and time, 
   expect(shortWhen(Date.parse('2026-10-10T09:00:00Z'), 'UTC')).toBe('Oct 10, 09:00')
   expect(shortWhen(Date.parse('2026-10-10T00:05:00Z'), 'UTC')).toBe('Oct 10, 00:05')
   expect(shortWhen(Date.parse('2026-10-10T23:59:00Z'), 'America/New_York')).toBe('Oct 10, 19:59')
+})
+
+test("Companion's share without a weekly limit to take it of is not measured: no status, no percent, and why", () => {
+  const settings = { budgetUsd: 0, companionShare: 30, companionSharePeriod: 'day' as const, companionMonthlyUsd: 0 }
+  expect(budgetLines({}, settings)).toEqual([{ label: 'share', level: 'healthy', percent: 0, detail: 'this login reports no weekly limit', isUnmeasured: true }])
+  const [withLimit] = budgetLines({ limits: [{ kind: 'seven_day', percentUsed: 10 }] }, settings)
+  expect(withLimit).toEqual({ label: 'share', level: 'healthy', percent: 0, detail: 'no Companion work yet' })
 })

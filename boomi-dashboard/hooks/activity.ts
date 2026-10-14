@@ -2623,7 +2623,8 @@ export const monthView = (spent: number, monthlyUsd: number): BudgetView | undef
 }
 
 /** A budget the person set, as the BUDGET gauge lists it: what it is and how full. */
-export type BudgetLine = { label: string; level: Level; percent: number; detail: string }
+/** One budget's line. Unmeasured: set, but there's nothing to measure it by, so it shows no status or percent. */
+export type BudgetLine = { label: string; level: Level; percent: number; detail: string; isUnmeasured?: true }
 
 /**
  * Every budget the person set, for the BUDGET gauge: the session's spend, the
@@ -2644,7 +2645,11 @@ export const budgetLines = (
     const period = settings.companionSharePeriod === 'day' ? 'today' : settings.companionSharePeriod === 'week' ? '7 days' : 'month'
     lines.push({ label: `share, ${period}`, level: share.level, percent: share.percent, detail: `${Math.round(share.percent)}% of ${settings.companionShare}%` })
   } else if (settings.companionShare > 0) {
-    lines.push({ label: 'share', level: 'healthy', percent: 0, detail: usage.limits?.length ? 'no Companion work yet' : 'needs a Claude seat' })
+    lines.push(
+      usage.limits?.length
+        ? { label: 'share', level: 'healthy', percent: 0, detail: 'no Companion work yet' }
+        : { label: 'share', level: 'healthy', percent: 0, detail: 'this login reports no weekly limit', isUnmeasured: true },
+    )
   }
   return lines.sort((a, b) => b.percent - a.percent)
 }
