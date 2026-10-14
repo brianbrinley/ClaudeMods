@@ -35,6 +35,8 @@ import {
 import type { BudgetLine, Level, ReportFacts, Stage } from './activity'
 import { PRODUCT_NAMES } from './products'
 import { mask } from './upgrade'
+import { toCsv, toTsv } from './export'
+import type { Table } from './export'
 
 /** Text made safe for HTML, credential-shaped strings masked first. */
 export const esc = (text: string): string =>
@@ -80,10 +82,10 @@ const badges = (list: readonly Stage[]) =>
 /** A cell that sorts by a number, not its text. */
 const num = (value: number | undefined, shown: string | undefined) => `<td class="n" data-sort="${value ?? -1}">${esc(shown ?? '')}</td>`
 
-const table = (id: string, caption: string, head: string[], rows: string[], cls = '', note = '') =>
+const table = (id: string, caption: string, head: string[], rows: string[], cls = '', note = '', tools = '') =>
   rows.length === 0
     ? ''
-    : `<section id="${id}"><h2>${esc(caption)} <span class="count">${rows.length}</span>${note ? ` <span class="aside">${esc(note)}</span>` : ''}</h2>
+    : `<section id="${id}"><h2>${esc(caption)} <span class="count">${rows.length}</span>${note ? ` <span class="aside">${esc(note)}</span>` : ''}</h2>${tools}
 <div class="scroll"><table class="sortable${cls ? ` ${cls}` : ''}"><thead><tr>${head.map((h, i) => `<th scope="col"><button type="button" data-col="${i}">${esc(h)}</button></th>`).join('')}</tr></thead>
 <tbody>${rows.join('\n')}</tbody></table></div></section>`
 
@@ -452,6 +454,50 @@ export type BoomiFacts = {
 export const boomiLink = (accountId: string, componentId: string): string =>
   `https://platform.boomi.com/AtomSphere.html#build;accountId=${encodeURIComponent(accountId)};components=${encodeURIComponent(componentId)}`
 
+/** A time for a spreadsheet: `2026-10-13 17:15`, in UTC. */
+const sheetTime = (at: number | undefined) => (at === undefined ? '' : new Date(at).toISOString().slice(0, 16).replace('T', ' '))
+
+/**
+ * Every component as a table to take elsewhere: its name, type and folder, its
+ * ID, the version Boomi has, how its last deploy and test went (with when, the
+ * package and the execution), what it cost, and its page in Boomi. One row
+ * each, newest first; a cell the session doesn't know is left empty.
+ */
+export const componentTable = (activity: readonly Activity[], boomi?: BoomiFacts): Table => {
+  const all = spends(activity)
+  const rows = components(activity).map(row => {
+    const d = row.componentId ? boomi?.components[row.componentId] : undefined
+    const deployed = row.deployed
+    const tested = row.tested
+    const deploy = !deployed ? '' : deployed.kind === 'undeploy' ? 'undeployed' : deployed.outcome === 'ok' ? 'deployed' : deployed.outcome
+    const test = !tested
+      ? ''
+      : tested.executionStatus
+        ? tested.executionStatus === 'COMPLETE' ? 'passed' : tested.executionStatus.toLowerCase()
+        : tested.outcome === 'ok' ? 'submitted' : tested.outcome
+    const usd = spendOf(row.ids, all).usd
+    return [
+      row.name,
+      friendlyType(d?.type ?? row.type) ?? d?.type ?? row.type ?? '',
+      d?.folderName ?? '',
+      row.componentId ?? '',
+      d?.version ?? row.saved?.version ?? '',
+      deploy,
+      sheetTime(deployed?.endedAt ?? deployed?.startedAt),
+      (deployed && packageOf(deployed.detail)) ?? '',
+      test,
+      sheetTime(tested?.endedAt ?? tested?.startedAt),
+      tested?.executionId ?? '',
+      usd === undefined ? '' : usd.toFixed(2),
+      row.componentId && boomi?.accountId ? boomiLink(boomi.accountId, row.componentId) : '',
+    ]
+  })
+  return {
+    header: ['Component', 'Type', 'Folder', 'Component ID', 'Version', 'Deploy', 'Deployed (UTC)', 'Package ID', 'Test', 'Tested (UTC)', 'Execution ID', 'Cost (USD)', 'Boomi link'],
+    rows,
+  }
+}
+
 /** The deployment package a deploy made, from its SUCCESS line. */
 export const packageOf = (detail: string): string | undefined => detail.match(/\(package: ([^)\s]+)\)/)?.[1]
 
@@ -674,6 +720,17 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     return `<tr><th scope="row" data-sort="${esc(row.name)}">${esc(row.name)}${about ? `<div class="sub">${about}</div>` : ''}${renamed}${row.recipe ? `<div class="sub">from recipe ${esc(row.recipe)}</div>` : ''}${id}</th>${lane(saveList, row.saved ?? row.edited, inBoomi, 'Not saved in these sessions')}${lane(deployList, row.deployed, pkgText, 'Not deployed in these sessions')}${lane(testList, row.tested, execText, 'Not tested in these sessions')}${num(spent.usd, formatCost(spent.usd))}</tr>`
   })
   const pipelineLine = rows.length > 0 ? `${savedOk} saved · ${deployedOk} deployed · ${passing} passing` : ''
+  // The components as text to take elsewhere: tab-separated to paste into a spreadsheet, CSV to copy or save.
+  const exported = componentTable(dashboard.activity, boomi)
+  const exportData = JSON.stringify({ tsv: toTsv(exported), csv: toCsv(exported), file: `boomi-components-${facts.date}.csv`, rows: exported.rows.length }).replace(/</g, '\\u003c')
+  const exportTools = exported.rows.length === 0
+    ? ''
+    : `<div class="export" role="group" aria-label="Copy or save the components"><span class="export-label">Take this list elsewhere, with every ID:</span>
+<button type="button" data-export="tsv" title="Tab-separated: paste straight into Excel, Google Sheets or Numbers">Copy for a spreadsheet</button>
+<button type="button" data-export="csv">Copy as CSV</button>
+<button type="button" data-export="download">Save as CSV</button>
+<span class="export-done" role="status" aria-live="polite"></span></div>
+<script type="application/json" id="component-export">${exportData}</script>`
 
   const account = boomi && (boomi.accountId || boomi.environmentId)
     ? `<p class="account-line" id="account"><span class="label">Boomi account</span> ${[
@@ -838,7 +895,7 @@ ${
 ${strip ? `<section id="timeline" class="first">${strip}</section>` : ''}
 ${account}
 ${needs.length > 0 ? `<section id="attention"><h2>Needs attention</h2>${attentionList}</section>` : ''}
-${componentRows.length === 0 ? `<section id="components"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Saved', 'Deployed', 'Tested', 'Cost'], componentRows, 'lanes', pipelineLine)}
+${componentRows.length === 0 ? `<section id="components"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Saved', 'Deployed', 'Tested', 'Cost'], componentRows, 'lanes', pipelineLine, exportTools)}
 ${table('connectors', 'Custom connectors', ['Connector', 'Group', 'Where it stands', 'Tokens', 'Cost'], connectorRows)}
 ${table('agents', 'Agentstudio agents', ['Agent', 'Where it stands', 'Tokens', 'Cost'], agentRows)}
 ${quarantine.length === 0 ? '' : `<section id="quarantine"><h2>Data Hub quarantine</h2><ul class="plain">${quarantine.map(q => `<li>${status(q.level, q.text)}</li>`).join('')}</ul></section>`}
@@ -1030,6 +1087,7 @@ footer .maker{width:.75rem;height:1rem;vertical-align:-.2rem;margin-right:.5rem;
 .note{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.35rem 0}.note .na-how{display:block;margin-top:.2rem}
 .account-line{font-size:.875rem;margin:1.25rem 0 0;color:var(--exo-color-font-secondary)}.account-line strong{color:var(--exo-color-font);font-weight:600}.account-line .label{font-weight:600;margin-right:.35rem}
 table.lanes td.lane{min-width:11rem}table.lanes tbody th{min-width:16rem}table.lanes td.lane .status{display:inline-block;margin:.05rem 0}
+.export{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .5rem;margin:0 0 .75rem}.export-label{font-size:.813rem;color:var(--exo-color-font-secondary);margin-right:.25rem}.export button{background:var(--exo-color-background);color:var(--exo-color-font);border:1px solid var(--exo-color-border);border-radius:var(--exo-radius-x-large,1.5625rem);padding:.25rem .875rem;font:600 .813rem/1.4 var(--exo-font-family);cursor:pointer}.export button:hover{border-color:var(--exo-color-background-selected)}.export-done{font-size:.813rem;color:var(--exo-color-font-secondary)}
 code.copy{cursor:copy}td a,th a,.sub a{white-space:nowrap}code.copy.copied{outline:1px solid var(--exo-color-background-success-strong);outline-offset:1px;border-radius:2px}
 .why{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.15rem 0 0 1.4rem}
 svg.maker{display:inline-block}
@@ -1086,7 +1144,7 @@ const PRINT_STYLE = `
 html,body{background:#fff !important}
 html{font-size:11.5px}
 .masthead{position:static;background:none;color:var(--exo-color-font);border-bottom:1px solid var(--exo-color-border-secondary)}
-.masthead nav,.theme,.print,.controls,details.data,.copy-hint,.screen-only{display:none !important}
+.masthead nav,.theme,.print,.controls,details.data,.copy-hint,.screen-only,.export{display:none !important}
 .bar,.band-inner,main,footer{max-width:none;padding-left:0;padding-right:0}
 .band{background:none !important;color:var(--exo-color-font);border-bottom:1px solid var(--exo-color-border-secondary)}
 .opening{grid-template-columns:minmax(0,1fr) 15rem}
@@ -1170,6 +1228,17 @@ const SCRIPT = `
   var folded=[];
   window.addEventListener('beforeprint',function(){folded=[];document.querySelectorAll('details.step-group:not([open])').forEach(function(g){folded.push(g);g.open=true})});
   window.addEventListener('afterprint',function(){folded.forEach(function(g){g.open=false});folded=[]});
+  // The components, copied or saved for a spreadsheet: with the clipboard where the browser allows it, else a selected text box.
+  var exportEl=document.getElementById('component-export');
+  if(exportEl){var data=JSON.parse(exportEl.textContent);var said=document.querySelector('.export-done');
+    function say(t){if(!said)return;said.textContent=t;clearTimeout(say.t);say.t=setTimeout(function(){said.textContent=''},2500)}
+    function fallback(text){var box=document.createElement('textarea');box.value=text;box.setAttribute('readonly','');box.style.position='fixed';box.style.opacity='0';document.body.appendChild(box);box.select();var ok=false;try{ok=document.execCommand('copy')}catch(e){}document.body.removeChild(box);return ok}
+    function copy(text,what){var done=function(){say('Copied '+data.rows+' component'+(data.rows===1?'':'s')+' '+what+'.')};var failed=function(){if(fallback(text))done();else say('Your browser blocked copying. Use Save as CSV instead.')};
+      if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(text).then(done,failed);else failed()}
+    document.querySelectorAll('[data-export]').forEach(function(b){b.addEventListener('click',function(){var kind=b.getAttribute('data-export');
+      if(kind==='tsv')copy(data.tsv,'for a spreadsheet: paste into the first cell');
+      else if(kind==='csv')copy(data.csv,'as CSV');
+      else{var a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\\ufeff'+data.csv],{type:'text/csv;charset=utf-8'}));a.download=data.file;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},0);say('Saved '+data.file+'.')}})})}
   var printer=document.querySelector('[data-print]');if(printer)printer.addEventListener('click',function(){window.print()});
   document.querySelectorAll('.ledger-link,.session-pick').forEach(function(l){l.addEventListener('click',function(){
     var g=document.querySelector(l.getAttribute('href'));if(g&&g.tagName==='DETAILS')g.open=true})});

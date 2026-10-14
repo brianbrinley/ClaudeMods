@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Activity, Dashboard } from '../types'
-import { assignSessions, boomiLink, hasEarlierSteps, packageOf, reportHtml, scoped, sessionLabel, sessionSummaries, sessionsCost, notDone, notSet, sessionLedger, stepsToMatch, transcriptsFolder, unavailable, workSentence } from '../hooks/report-html'
+import { assignSessions, boomiLink, componentTable, hasEarlierSteps, packageOf, reportHtml, scoped, sessionLabel, sessionSummaries, sessionsCost, notDone, notSet, sessionLedger, stepsToMatch, transcriptsFolder, unavailable, workSentence } from '../hooks/report-html'
 import { repaired, withoutEchoes } from '../hooks/activity'
 import { platformClient } from '../hooks/platform'
 
@@ -332,7 +332,7 @@ test('the report prints: light whatever the screen shows, every session unfolded
   // The light theme's tokens, made to win over a dark choice.
   expect(print).toContain('--exo-color-font:#1f1f1f !important')
   expect(print).toContain('details.step-group::details-content{content-visibility:visible;display:block}')
-  expect(print).toContain(".masthead nav,.theme,.print,.controls,details.data,.copy-hint,.screen-only{display:none !important}")
+  expect(print).toContain(".masthead nav,.theme,.print,.controls,details.data,.copy-hint,.screen-only,.export{display:none !important}")
   expect(print).toContain('a[href^="http"]::after{content:attr(href)')
   expect(page).toContain('@top-left{content:"oracle · Companion sessions · 2026-10-14"')
   expect(page).toContain('@bottom-right{content:"Page " counter(page) " of " counter(pages)')
@@ -341,4 +341,26 @@ test('the report prints: light whatever the screen shows, every session unfolded
   // Valence prints in its Day theme.
   const deco = reportHtml(scoped(DASHBOARD, 'all'), { ...facts, style: 'expressive' }, NOW, 24 * HOUR)
   expect(deco).toContain('--exo-color-page:#FBF6EE !important')
+})
+
+test("every component as a table to take elsewhere: IDs, Boomi's version and folder, the last deploy and test, cost, and its page", () => {
+  const table = componentTable(scoped(DASHBOARD, 'all').activity, BOOMI)
+  expect(table.header).toEqual(['Component', 'Type', 'Folder', 'Component ID', 'Version', 'Deploy', 'Deployed (UTC)', 'Package ID', 'Test', 'Tested (UTC)', 'Execution ID', 'Cost (USD)', 'Boomi link'])
+  const oracle = table.rows.find(r => r[3] === 'cfdbd5f3-3802-4629-8abb-9bb27ab3c5e1')!
+  expect(oracle[2]).toBe('Magic8Ball-RandomOracle')
+  expect(oracle[4]).toBe('2')
+  expect(oracle[12]).toBe(boomiLink('boomi_me-D1R00U', 'cfdbd5f3-3802-4629-8abb-9bb27ab3c5e1'))
+  for (const row of table.rows) expect(row).toHaveLength(table.header.length)
+  // The report carries it, ready for its Copy and Save buttons.
+  const page = reportHtml(scoped(DASHBOARD, 'all'), { session: 'c', sessionId: 'c', date: '2026-10-14', usage: USAGE, scope: 'all', boomi: BOOMI }, NOW, 24 * HOUR)
+  expect(page).toContain('<button type="button" data-export="tsv"')
+  expect(page).toContain('<button type="button" data-export="download">Save as CSV</button>')
+  const json = page.match(/<script type="application\/json" id="component-export">([^<]*)<\/script>/)![1]!
+  const data = JSON.parse(json) as { tsv: string; csv: string; file: string; rows: number }
+  expect(data.file).toBe('boomi-components-2026-10-14.csv')
+  expect(data.rows).toBe(table.rows.length)
+  expect(data.tsv.split('\n')[0]).toBe(table.header.join('\t'))
+  // A name with a closing script tag can't end the data early.
+  const tricky = reportHtml({ ...DASHBOARD, activity: [step(1, { kind: 'create', subject: '</script><b>x', componentId: 'c-9' })] }, { session: 'c', sessionId: 'c', date: '2026-10-14', usage: USAGE }, NOW, 24 * HOUR)
+  expect(JSON.parse(tricky.match(/id="component-export">([^<]*)<\/script>/)![1]!).tsv).toContain('</script><b>x')
 })

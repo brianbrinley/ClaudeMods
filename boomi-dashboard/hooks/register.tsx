@@ -110,7 +110,8 @@ import {
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
-import { hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
+import { componentTable, hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
+import { toCsv, toTsv } from './export'
 import type { BoomiFacts, ReportScope, ReportStyle } from './report-html'
 import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, listing, menuQuestion, parseValue, pastSpend, questionFor, show, valueOf } from './config'
 import type { Group, PastSpend, Value } from './config'
@@ -1709,6 +1710,7 @@ const USAGE = [
   '/bc-dashboard why [n]         read the log of a failed test or run (no number: pick one)',
   '/bc-dashboard rerun [n]       run a failed test again, the same way Claude ran it (no number: pick one)',
   '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
+  '/bc-dashboard components      copy every component with its IDs for a spreadsheet (csv: as CSV; save: also write a .csv file)',
   '/bc-dashboard report html     the session as a web page to open in a browser or share: one file, sortable and filterable (--style expressive for the Valence look)',
   '/bc-dashboard history         past Companion sessions on this machine and what each cost',
   '/bc-dashboard resume [n]      copy the command that reopens a past session in a new terminal',
@@ -1789,6 +1791,8 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return reportCommand($, settings, target)
     case 'history':
       return historyCommand($, settings)
+    case 'components':
+      return componentsCommand($, settings, target)
     case 'resume':
       return resumeCommandFor($, settings, target)
     case 'review':
@@ -1812,6 +1816,40 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
     default:
       return USAGE
   }
+}
+
+// --- Components, to take elsewhere -------------------------------------------------
+
+/**
+ * /bc-dashboard components [csv] [save]: every component this folder's
+ * sessions touched, with its IDs, copied to the clipboard as tab-separated
+ * text (pastes into a spreadsheet's cells), or as CSV; save also writes the
+ * CSV into the workspace. Boomi's details (folder, version) where the Platform
+ * API credentials are there.
+ */
+const componentsCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const words = target.toLowerCase().split(/\s+/).filter(Boolean)
+  const view = scoped(await read($, dashboard), 'all')
+  const table = componentTable(view.activity, await boomiFacts($, settings, view))
+  if (table.rows.length === 0) return 'No components yet: they show up once Claude creates, saves, deploys or tests one.'
+  const isCsv = words.includes('csv')
+  const copied = await $.ui.copy({ text: isCsv ? toCsv(table) : toTsv(table) }).catch(() => ({ isCopied: false as const }))
+  let saved: string | undefined
+  if (words.includes('save')) {
+    const now = await $.clock.now()
+    saved = `${await $.session.cwd()}/boomi-components-${new Date(now).toISOString().slice(0, 16).replace(/[-:T]/g, '')}.csv`
+    await $.fs.write(saved, `\ufeff${toCsv(table)}`)
+  }
+  const n = table.rows.length
+  return [
+    copied.isCopied
+      ? `Copied ${n} component${n === 1 ? '' : 's'} ${isCsv ? 'as CSV' : 'for a spreadsheet: paste into the first cell'}. Columns: ${table.header.join(', ')}.`
+      : `Couldn't reach the clipboard here.${saved ? '' : ' Run /bc-dashboard components save to write a CSV file instead.'}`,
+    saved ? `Saved them as ${saved}.` : '',
+    ...table.rows.map(row => `  ${row[0]}${row[3] ? `  ${row[3]}` : '  (not in Boomi yet)'}`),
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 // --- Settings -------------------------------------------------------------------
@@ -2119,7 +2157,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save|html [session|all] [--no-open] [--style exosphere|expressive]] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | config [budget|pane|data|list|<setting> <value>] | upgrade [--check] [--yes] [--rollback]',
+      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | components [csv] [save] | resume [n] | review [n] | report [save|html [session|all] [--no-open] [--style exosphere|expressive]] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | config [budget|pane|data|list|<setting> <value>] | upgrade [--check] [--yes] [--rollback]',
     })
     await $.tool.register({
       name: 'summary',

@@ -296,6 +296,13 @@ It follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system: its 
 - **Charts** appear only when they add something: outcomes and spend by product when the work spans two products or more, cost over the session in a one-session report, and in an all-sessions report with two sessions or more, each session's cost and how its steps went (click a session to open its steps). Each has hover details and a **Show the data** table, and products keep the same color in every chart.
 - **Tables** of custom connectors and Agentstudio agents, sorted by clicking a column.
 
+**To take the components elsewhere,** use the buttons above the Components table:
+- **Copy for a spreadsheet** copies tab-separated text. Paste it into the first cell in Excel, Google Sheets or Numbers.
+- **Copy as CSV** copies the same table as CSV.
+- **Save as CSV** downloads it as a file.
+
+Each row has the component's name, type, folder, ID and version in Boomi; its last deploy (how it went, when, and the package ID); its last test (how it went, when, and the execution ID); its cost; and its link in Boomi. In Claude Code, `/bc-dashboard components` copies the same table, `components csv` copies it as CSV, and `components save` also writes a `.csv` file into the workspace. A name that a spreadsheet would read as a formula is pasted as text.
+
 **To print it or keep it as a PDF,** press **Print or save as PDF** at the top of the page, or use your browser's Print, and pick **Save as PDF** to keep a copy. The printout:
 - is always in the light theme, whatever the screen shows;
 - has every session's steps unfolded, though each step's details stay closed (a failure's reason shows anyway);
@@ -327,6 +334,7 @@ With a connection it loads its fonts from Google Fonts; offline it falls back to
 | `/bc-dashboard resume [n]` | | Copies the command that reopens a past session in a new terminal; without a number, asks which. |
 | `/bc-dashboard review [n]` | | What drove a past session's cost, and what to change next time; without a number, asks which of the costliest. |
 | `/bc-dashboard theme [name]` | | Picks the pane's theme, or lists them. |
+| `/bc-dashboard components [csv] [save]` | | Copies every component with its IDs, tab-separated for a spreadsheet (`csv`: as CSV; `save`: also writes a `.csv` file). |
 | `/bc-dashboard config [budget\|pane\|data]` | | Walks through the dashboard's settings a question at a time, or one group of them. `config <setting> <value>` sets one, such as `config budgetUsd 5`. `config list` shows them all. |
 | `/bc-dashboard banner` | | Shows the banner again after **Hide**. |
 

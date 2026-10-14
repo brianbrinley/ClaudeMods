@@ -2270,3 +2270,30 @@ test("Why? on a BDI run says plainly when bc-bdi's script can't read the log", a
   await failedBdiRun($, on, { 'logs orders-flow r-77': { stdout: 'ERROR: BDI_API_KEY is not set', exitCode: 1 } })
   expect((await $.command.run(dashboard('why'))).text).toBe("Couldn't read the log of BDI run r-77: ERROR: BDI_API_KEY is not set")
 })
+
+test('/bc-dashboard components copies every component with its IDs, for a spreadsheet or as CSV, and can save a CSV', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  mock.store(on)
+  shell(on, `SUCCESS: Pushed component 'Orders Sync' — now version 4`)
+  const copies: string[] = []
+  on('ui.copy', async (_$, e) => {
+    copies.push(e.text)
+    return { value: { isCopied: true as const } }
+  })
+  const written: Record<string, string> = {}
+  on('fs.write', async (_$, e) => {
+    written[e.path] = e.text
+    return { value: undefined } as never
+  })
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-component-push.sh ${FILE}` })
+  const tsv = (await $.command.run(dashboard('components'))).text ?? ''
+  expect(tsv).toMatch(/^Copied 1 component for a spreadsheet: paste into the first cell\. Columns: Component, Type, Folder, Component ID,/)
+  expect(tsv).toContain(`  Orders Sync  ${ID}`)
+  expect(copies[0]!.split('\n')[1]!.split('\t').slice(0, 5)).toEqual(['Orders Sync', 'process', '', ID, '4'])
+  const csv = (await $.command.run(dashboard('components csv save'))).text ?? ''
+  expect(csv).toContain('Copied 1 component as CSV.')
+  const path = Object.keys(written).find(p => p.endsWith('.csv'))!
+  expect(csv).toContain(`Saved them as ${path}.`)
+  expect(written[path]!.startsWith('﻿Component,Type,Folder,Component ID')).toBe(true)
+  expect(copies[1]).toContain('\r\nOrders Sync,process,,')
+})
