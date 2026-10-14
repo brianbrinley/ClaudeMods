@@ -2,6 +2,21 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.30.0
+
+- **The sessions as a ledger, in place of the timeline's bands.** Each session gets a row:
+  - when it ran and for how long, and how long after the one before;
+  - what it did in words ("Orders Sync: created, deployed, tested (1 failed) · and 3 housekeeping steps");
+  - how its steps went, each status with its icon and count;
+  - what it cost, and its share of the session budget.
+
+  Click a row for that session's steps.
+- **Steps fold by session:** only the newest session that did real work starts open. A search or filter opens the sessions that hold what it found. Housekeeping steps read quieter than the work.
+- **Steps recorded by older versions read properly.** A test that took another script's `SUCCESS:` line says it had no result of its own, and "a component" takes the component's name when its ID is known. This applies in the pane too.
+- **Unnamed earlier sessions are split after two quiet hours,** not only where the running cost drops, so a morning check and an evening one are no longer counted as one session.
+- **The summary says when failures were dealt with** ("5 of which failed or were blocked … None of them still needs attention").
+- Fixed: "Open in Boomi" no longer breaks across two lines.
+
 ## 0.29.0
 
 - **Budgets in the report.** Each budget you set gets a meter beside the summary: the session's spend (`budgetUsd`), the month's Companion spend (`companionMonthlyUsd`), and Companion's share of your limit (`companionShare`). Each is marked past 80% and when it's spent. An all-sessions report holds every session against the session budget, on its timeline band and in the summary. With no budget set, the report says how to set one.

@@ -28,6 +28,7 @@ import {
   spendOf,
   spends,
   shortWhen,
+  repaired,
   stages,
   withoutEchoes,
 } from './activity'
@@ -192,12 +193,12 @@ export type ReportScope = 'session' | 'all'
  * every step this folder kept (the window's and the earlier ones), in order.
  */
 export const scoped = (dashboard: Dashboard, scope: ReportScope): Dashboard => {
-  if (scope === 'session') return { ...dashboard, activity: withoutEchoes(dashboard.activity.filter(a => !a.isRestored && !a.isEarlier)), earlier: [], restored: 0 }
+  if (scope === 'session') return { ...dashboard, activity: repaired(withoutEchoes(dashboard.activity.filter(a => !a.isRestored && !a.isEarlier))), earlier: [], restored: 0 }
   const seen = new Set<number>()
   const activity = [...(dashboard.earlier ?? []), ...dashboard.activity]
     .filter(a => (seen.has(a.id) ? false : (seen.add(a.id), true)))
     .sort((a, b) => a.startedAt - b.startedAt)
-  return { ...dashboard, activity: withoutEchoes(activity), earlier: [] }
+  return { ...dashboard, activity: repaired(withoutEchoes(activity)), earlier: [] }
 }
 
 /** Whether there's anything from earlier sessions, so asking which steps to cover means something. */
@@ -224,6 +225,9 @@ export type SessionSummary = {
   project?: string
 }
 
+/** A quiet spell this long between unnamed steps starts another session. */
+const QUIET_MS = 2 * 3_600_000
+
 /** How far outside a past session's start and end a step still counts as its own. */
 const SESSION_SLACK_MS = 60_000
 
@@ -232,13 +236,14 @@ const SESSION_SLACK_MS = 60_000
  * session for a step that wasn't brought back; else the past session (from
  * Claude Code's transcripts, in this folder) whose time covers it; else an
  * `earlier-<n>`, a new one wherever the running cost goes down, as it does
- * when a new session starts.
+ * when a new session starts, or after two quiet hours.
  */
 export const assignSessions = (activity: readonly Activity[], current: string | undefined, past: readonly PastSession[] = [], folder?: string): Map<number, string> => {
   const out = new Map<number, string>()
   const here = past.filter(p => !folder || !p.project || p.project === folder)
   let n = 0
   let lastUsd: number | undefined
+  let lastAt: number | undefined
   for (const a of [...activity].sort((x, y) => x.startedAt - y.startedAt)) {
     if (a.session) {
       out.set(a.id, a.session)
@@ -257,8 +262,13 @@ export const assignSessions = (activity: readonly Activity[], current: string | 
       out.set(a.id, covering.id)
       continue
     }
-    if (n === 0 || (a.usdAt !== undefined && lastUsd !== undefined && a.usdAt < lastUsd)) n++
+    const isQuiet = lastAt !== undefined && a.startedAt - lastAt > QUIET_MS
+    if (n === 0 || isQuiet || (a.usdAt !== undefined && lastUsd !== undefined && a.usdAt < lastUsd)) {
+      n++
+      lastUsd = undefined
+    }
     if (a.usdAt !== undefined) lastUsd = a.usdAt
+    lastAt = a.endedAt ?? a.startedAt
     out.set(a.id, `earlier-${n}`)
   }
   return out
@@ -366,45 +376,87 @@ export const packageOf = (detail: string): string | undefined => detail.match(/\
 /** A session's anchor on the page: its steps' heading. */
 const sessionAnchor = (id: string) => `s-${id.replace(/[^A-Za-z0-9-]/g, '')}`
 
+/** What a step did to its subject, as a past-tense verb. */
+const VERBS: Partial<Record<Activity['kind'], string>> = {
+  edit: 'edited',
+  create: 'created',
+  push: 'saved',
+  pull: 'pulled',
+  deploy: 'deployed',
+  undeploy: 'undeployed',
+  test: 'tested',
+}
+
+/** Housekeeping: a connection check, a listing, a read of results. It went fine and changed nothing. */
+const isChoreStep = (a: Activity) => a.kind === 'other' && !a.product && levelOf(a) === 'healthy'
+
 /**
- * The sessions on one strip, oldest first: each a band as wide as the square
- * root of its length (a two-hour session doesn't crowd out a ten-minute one),
- * the idle time between them a short gap that says how long it was, each step
- * a tick at its moment, and anything that didn't go well marked above the band
- * with its icon. A band's heading goes to that session's steps. `costs` is
- * markup, each session's cost already escaped.
+ * What a session did, in words: each thing it worked on and what happened to
+ * it, in order ("Orders Sync: created, deployed, tested (1 failed)"), then how
+ * many housekeeping steps it took. Markup, escaped.
  */
-export const timeline = (steps: readonly Activity[], sessionOf: (a: Activity) => string, label: (id: string) => string, costs: ReadonlyMap<string, string>): string => {
+export const workSentence = (list: readonly Activity[]): string => {
+  const things = new Map<string, { verbs: string[]; failed: Map<string, number>; blocked: Map<string, number> }>()
+  let chores = 0
+  const troubles: string[] = []
+  for (const a of [...list].sort((x, y) => x.startedAt - y.startedAt)) {
+    if (isChoreStep(a)) {
+      chores++
+      continue
+    }
+    if (a.kind === 'other' && !a.product) {
+      troubles.push(`${a.script ?? 'a script'} ${a.outcome === 'ok' ? 'warned' : a.outcome}`)
+      continue
+    }
+    const thing = a.subject === 'a component' ? 'another component' : a.subject
+    const verb = a.product ? (a.verb ? `${a.verb}${/e$/.test(a.verb) ? 'd' : 'ed'}` : 'ran') : (VERBS[a.kind] ?? a.kind)
+    const t = things.get(thing) ?? { verbs: [] as string[], failed: new Map<string, number>(), blocked: new Map<string, number>() }
+    if (!t.verbs.includes(verb)) t.verbs.push(verb)
+    if (a.outcome === 'failed') t.failed.set(verb, (t.failed.get(verb) ?? 0) + 1)
+    if (a.outcome === 'blocked') t.blocked.set(verb, (t.blocked.get(verb) ?? 0) + 1)
+    things.set(thing, t)
+  }
+  const parts = [...things.entries()].map(([thing, t]) => {
+    const verbs = t.verbs.map(v => {
+      const notes = [t.failed.get(v) ? `${t.failed.get(v)} failed` : '', t.blocked.get(v) ? `${t.blocked.get(v)} blocked` : ''].filter(Boolean).join(', ')
+      return notes ? `${v} (${notes})` : v
+    })
+    return `<strong>${esc(thing)}</strong>: ${esc(verbs.join(', '))}`
+  })
+  const choreText = chores > 0 ? `${parts.length > 0 ? 'and ' : ''}${chores} housekeeping step${chores === 1 ? '' : 's'}` : ''
+  return [...parts, ...troubles.map(t => esc(t)), choreText].filter(Boolean).join(' · ') || 'Nothing recorded'
+}
+
+/**
+ * The sessions as a ledger, oldest first: a row each saying when it ran, what
+ * it did in words, how its steps went (each status with its icon) and what it
+ * cost, linked to its steps, with the idle time since the session before. `costs` is markup, each session's cost already escaped.
+ */
+export const sessionLedger = (steps: readonly Activity[], sessionOf: (a: Activity) => string, label: (id: string) => string, costs: ReadonlyMap<string, string>): string => {
   if (steps.length === 0) return ''
   const groups = new Map<string, Activity[]>()
   for (const a of steps) groups.set(sessionOf(a), [...(groups.get(sessionOf(a)) ?? []), a])
-  const bands = [...groups.entries()]
+  const rows = [...groups.entries()]
     .map(([id, list]) => ({ id, list, first: Math.min(...list.map(a => a.startedAt)), last: Math.max(...list.map(a => a.endedAt ?? a.startedAt)) }))
     .sort((a, b) => a.first - b.first)
   const clock = (t: number) => new Date(t).toISOString().slice(11, 16)
-  const day = (t: number) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  const date = (t: number) => new Date(t).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
   const parts: string[] = []
-  bands.forEach((b, i) => {
-    if (i > 0) parts.push(`<li class="tl-gap" aria-hidden="true"><span>${esc(duration(b.first - bands[i - 1]!.last))}</span></li>`)
-    const span = Math.max(b.last - b.first, 60_000)
-    const ticks = [...b.list]
-      .sort((x, y) => x.startedAt - y.startedAt)
-      .map(a => {
-        const level = levelOf(a)
-        const at = b.last === b.first ? 50 : 1.5 + ((a.startedAt - b.first) / span) * 97
-        const tip = `${clock(a.startedAt)} UTC · ${LABEL[level]}: ${describe(a)}`
-        return `<button type="button" class="tl-tick tick-${level}" style="left:${at.toFixed(2)}%" data-tip="${esc(tip)}" data-step="${a.id}" aria-label="${esc(tip)}">${level === 'healthy' ? '' : icon(level)}</button>`
-      })
-      .join('')
-    const failed = b.list.filter(a => levelOf(a) !== 'healthy').length
-    const facts = [esc(`${b.list.length} step${b.list.length === 1 ? '' : 's'}`), failed ? esc(`${failed} not healthy`) : undefined, costs.get(b.id)].filter(Boolean).join(' · ')
+  rows.forEach((r, i) => {
+    const idle = i > 0 ? r.first - rows[i - 1]!.last : 0
+    const after = idle > 60_000 ? ` · ${duration(idle)} later` : ''
+    const counts = LEVELS.map(l => [l, r.list.filter(a => levelOf(a) === l).length] as const).filter(([, n]) => n > 0)
+    const how = counts.map(([l, n]) => status(l, String(n))).join(' ')
+    const span = r.last - r.first
     parts.push(
-      `<li class="tl-session" style="flex-grow:${Math.sqrt(span / 60_000).toFixed(2)}"><a class="tl-head" href="#${sessionAnchor(b.id)}" title="${esc(b.id === 'this' || isUnnamed(b.id) ? label(b.id) : b.id)}"><span class="tl-name">${esc(label(b.id))}</span><span class="tl-when">${esc(`${day(b.first)}, ${clock(b.first)}–${clock(b.last)}`)}</span></a><div class="tl-band">${ticks}</div><div class="tl-foot">${facts}</div></li>`,
+      `<li class="ledger-row"><a class="ledger-link" href="#${sessionAnchor(r.id)}" title="${esc(r.id === 'this' || isUnnamed(r.id) ? label(r.id) : r.id)}">` +
+        `<span class="l-when"><strong>${esc(date(r.first))}</strong><span>${esc(`${clock(r.first)}–${clock(r.last)} UTC${span >= 60_000 ? ` · ${duration(span)}` : ''}`)}</span><span class="l-id">${esc(label(r.id) + after)}</span></span>` +
+        `<span class="l-what">${workSentence(r.list)}</span>` +
+        `<span class="l-how">${how}<span class="l-steps">${esc(`${r.list.length} step${r.list.length === 1 ? '' : 's'}`)}</span></span>` +
+        `<span class="l-cost">${costs.get(r.id) ?? '<span class="muted">not recorded</span>'}</span></a></li>`,
     )
   })
-  return `<figure class="timeline" aria-label="The sessions over time"><ol class="tl" data-ticks>${parts.join('')}</ol>
-<div class="tl-key">${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], level: l })))}<p class="note">Each tick is a step; arrow keys move between them, Enter opens one. “Not healthy” counts warned, blocked and failed steps.</p></div>
-${dataTable(['Session', 'From (UTC)', 'To (UTC)', 'Steps', 'Not healthy'], bands.map(b => [label(b.id), `${day(b.first)} ${clock(b.first)}`, `${day(b.last)} ${clock(b.last)}`, b.list.length, b.list.filter(a => levelOf(a) !== 'healthy').length]))}</figure>`
+  return `<div class="ledger-wrap"><h2 class="ledger-title">${rows.length === 1 ? 'The session' : 'The sessions'}</h2><ol class="ledger">${parts.join('')}</ol></div>`
 }
 
 /** What the HTML report needs beyond the Markdown one: the dashboard's own version, what it covers, the sessions and the Boomi account. */
@@ -477,7 +529,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   }
   lede.push(
     needs.length === 0
-      ? `${status('healthy', 'Nothing needs attention')}${closed ? ` (${closed} closed)` : ''}.`
+      ? `${status('healthy', failed > 0 ? `None of ${failed === 1 ? 'it' : 'them'} still needs attention` : 'Nothing needs attention')}${closed ? ` (${closed} closed)` : ''}.`
       : `${status(needs.some(n => n.level === 'critical') ? 'critical' : 'warning', needs.length === 1 ? `1 thing needs attention: ${needs[0]!.title}` : `${needs.length} things need attention`)}.`,
   )
   const dateline = [
@@ -569,22 +621,27 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     const at = isAll ? `${when(a.startedAt)} UTC` : `${new Date(a.startedAt).toISOString().slice(11, 16)} UTC`
     // A failure says what went wrong without being opened.
     const why = level === 'critical' || level === 'serious' ? `<div class="why">${esc(a.detail)}${a.executionId ? ` · execution ${idCode(a.executionId)}` : ''}</div>` : ''
-    return `<li id="step-${a.id}" data-level="${level}" data-product="${esc(product)}"${isRelease(a) ? ' data-kind="release"' : ''} data-at="${a.startedAt}"><details><summary><time datetime="${new Date(a.startedAt).toISOString()}">${esc(at)}</time> ${status(level, describe(a))} <span class="tag tag-${slot(productKey(a))}">${esc(product)}</span>${aside ? ` <span class="aside">${esc(aside)}</span>` : ''}${why}</summary><dl>${detail}</dl></details></li>`
+    const isChore = !isWork(a)
+    return `<li id="step-${a.id}"${isChore ? ' class="chore"' : ''} data-level="${level}" data-product="${esc(product)}"${isRelease(a) ? ' data-kind="release"' : ''} data-at="${a.startedAt}"><details><summary><time datetime="${new Date(a.startedAt).toISOString()}">${esc(at)}</time> ${status(level, describe(a))} <span class="tag tag-${slot(productKey(a))}">${esc(product)}</span>${aside ? ` <span class="aside">${esc(aside)}</span>` : ''}${why}</summary><dl>${detail}</dl></details></li>`
   }
   // The steps by session, newest first (the page's Oldest first turns both around); one report's session needs no heading.
   const groups = new Map<string, Activity[]>()
   for (const a of steps) groups.set(isAll ? sessionOf(a) : 'this', [...(groups.get(isAll ? sessionOf(a) : 'this') ?? []), a])
-  const stepGroups = [...groups.entries()]
+  const sortedGroups = [...groups.entries()]
     .map(([id, list]) => ({ id, list, firstAt: Math.min(...list.map(a => a.startedAt)), lastAt: Math.max(...list.map(a => a.endedAt ?? a.startedAt)) }))
     .sort((a, b) => b.firstAt - a.firstAt)
+  const isWork = (a: Activity) => !isChoreStep(a)
+  const openFirst = sortedGroups.find(g => g.list.some(isWork)) ?? sortedGroups[0]
+  const stepGroups = sortedGroups
     .map(g => {
       const summary = sessions.find(s => s.id === g.id)
       const cost = summary?.usd === undefined ? undefined : `${summary.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(summary.usd) ?? '$0'}`
       const name = isUnnamed(g.id) ? esc(sessionLabel(g.id)) : `Session ${idCode(g.id)}`
       const facts = [`${esc(when(g.firstAt))} – ${esc(when(g.lastAt).slice(11))} UTC`, esc(`${g.list.length} step${g.list.length === 1 ? '' : 's'}`), cost && esc(cost)].filter(Boolean).join(' · ')
-      const head = isAll ? `<h3 class="group-head">${name}${summary?.isCurrent ? ' <span class="tag tag-1">this session</span>' : ''} <span class="aside">${facts}</span></h3>` : ''
       const items = [...g.list].sort((a, b) => b.startedAt - a.startedAt).map(stepItem).join('\n')
-      return `<div class="step-group" id="${sessionAnchor(g.id)}" data-at="${g.firstAt}">${head}<ol class="steps">${items}</ol></div>`
+      if (!isAll) return `<div class="step-group" id="${sessionAnchor(g.id)}" data-at="${g.firstAt}"><ol class="steps">${items}</ol></div>`
+      const head = `<summary class="group-head">${name}${summary?.isCurrent ? ' <span class="tag tag-1">this session</span>' : ''} <span class="aside">${facts}</span></summary>`
+      return `<details class="step-group" id="${sessionAnchor(g.id)}" data-at="${g.firstAt}"${g === openFirst ? ' open' : ''}>${head}<ol class="steps">${items}</ol></details>`
     })
     .join('\n')
 
@@ -613,11 +670,11 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     if (!facts.sessionBudgetUsd) return ''
     const pct = Math.round((usd / facts.sessionBudgetUsd) * 100)
     const level: Level = pct >= 100 ? 'critical' : pct >= 80 ? 'warning' : 'healthy'
-    return ` · ${level === 'healthy' ? esc(`${pct}% of budget`) : status(level, `${pct}% of budget`)}`
+    return `<br><span class="l-budget">${level === 'healthy' ? esc(`${pct}% of budget`) : status(level, `${pct}% of budget`)}</span>`
   }
   const costs = new Map(sessions.flatMap(s => (s.usd === undefined ? [] : [[s.id, `${esc(`${s.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(s.usd) ?? '$0'}`)}${ofBudget(s.usd)}`] as [string, string]])))
   if (!isAll && u.usd !== undefined) costs.set('this', `${esc(formatCost(u.usd) ?? '$0')}${ofBudget(u.usd)}`)
-  const strip = timeline(steps, a => (isAll ? sessionOf(a) : 'this'), id => (id === 'this' ? 'This session' : isUnnamed(id) ? `Earlier ${id.slice(8)}` : id === facts.sessionId ? 'This session' : `Session ${id.slice(0, 8)}`), costs)
+  const strip = sessionLedger(steps, a => (isAll ? sessionOf(a) : 'this'), id => (id === 'this' ? 'This session' : isUnnamed(id) ? `Earlier ${id.slice(8)}` : id === facts.sessionId ? 'This session' : `Session ${id.slice(0, 8)}`), costs)
   // A product chart only says something with two products or more.
   const charts = [products.length > 1 ? outcomesByProduct(steps) : '', isAll ? '' : costOverTime(dashboard.activity, u.usd, now), products.length > 1 ? spendByProduct(dashboard.activity, all) : ''].filter(Boolean)
 
@@ -798,26 +855,12 @@ button{font:inherit}
 .controls{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin-bottom:.75rem}
 .filters{display:flex;flex-wrap:wrap;gap:.5rem}
 .search input{background:var(--exo-color-background);color:var(--exo-color-font);border:1px solid var(--exo-color-border);border-radius:var(--exo-radius-standard);padding:.4rem .75rem;min-width:240px;font:inherit}
-.timeline{margin:1.75rem 0 0}
-.tl{display:flex;align-items:stretch;gap:0;list-style:none;margin:0;padding:0}
-.tl-session{flex-basis:0;min-width:9rem;display:flex;flex-direction:column}
-.tl-head{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;color:inherit;text-decoration:none;font-size:.813rem;padding:0 .1rem .35rem;white-space:nowrap;overflow:hidden}
-.tl-head:hover .tl-name{text-decoration:underline}.tl-name{font-weight:600}.tl-when{color:var(--exo-color-font-secondary);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
-.tl-band{position:relative;height:2.25rem;background:var(--exo-color-background);border:1px solid var(--exo-color-border-secondary);border-radius:var(--exo-radius-standard)}
-.tl-tick{position:absolute;top:.35rem;bottom:.35rem;width:3px;margin-left:-1.5px;border-radius:2px;cursor:default}
-.tl-tick .i{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);margin:0;width:1rem;height:1rem;background:var(--exo-color-background);border-radius:50%}
-.tick-healthy{background:var(--exo-color-background-success-strong)}.tick-warning{background:var(--exo-color-background-warning-strong);color:var(--exo-color-background-warning-strong)}
-.tick-serious{background:var(--exo-color-background-highlight);color:var(--exo-color-background-highlight)}.tick-critical{background:var(--exo-color-background-danger-strong);color:var(--exo-color-background-danger-strong)}
-.tl-foot{font-size:.75rem;color:var(--exo-color-font-secondary);padding:.35rem .1rem 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tl-gap{flex:0 0 3.25rem;display:flex;align-items:center;justify-content:center;position:relative}
-.tl-gap::before{content:"";position:absolute;left:.4rem;right:.4rem;top:50%;border-top:1px dashed var(--exo-color-border)}
-.tl-gap span{position:relative;background:var(--exo-color-body);padding:0 .25rem;font-size:.7rem;color:var(--exo-color-font-secondary);white-space:nowrap}
 .timeline .legend{margin-top:.75rem}
 .rail{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.25rem 1rem}
 .rail .badge{background:none;border:0;padding:0;margin:0;font-size:.813rem;line-height:1.5}
 .badge-critical{color:var(--exo-color-background-danger-strong)}.badge-serious{color:var(--exo-color-background-highlight)}
 footer .maker{width:.75rem;height:1rem;vertical-align:-.2rem;margin-right:.5rem;fill:var(--exo-color-font-secondary)}
-@media (max-width:640px){.tl{flex-direction:column;gap:.25rem}.tl-session{min-width:0}.tl-gap{flex-basis:1.5rem}.tl-gap::before{left:50%;right:auto;top:0;bottom:0;border-top:0;border-left:1px dashed var(--exo-color-border)}}
+
 .band{--band-bg:#072b55;background:var(--band-bg);color:#ffffff;
 --exo-color-font:#ffffff;--exo-color-font-secondary:#cccccc;--exo-color-background:rgba(255,255,255,.07);--exo-color-body:#0d3664;--exo-color-border:rgba(255,255,255,.35);--exo-color-border-secondary:rgba(255,255,255,.18);--exo-color-font-link:#66b6f6;
 --exo-color-background-success-strong:#3ecfa2;--exo-color-background-warning-strong:#ec9932;--exo-color-background-danger-strong:#ff5c6c;--exo-color-background-highlight:#ff8a75;--exo-color-background-selected:#66b6f6}
@@ -825,9 +868,7 @@ footer .maker{width:.75rem;height:1rem;vertical-align:-.2rem;margin-right:.5rem;
 @media (prefers-color-scheme:dark){:root:not(.ex-theme-light) .band{--band-bg:#262626;--exo-color-body:#2b2b2b}}
 .band-inner{max-width:1440px;margin:0 auto;padding:2rem var(--exo-spacing-large) 1.75rem}
 .band .opening{margin-top:0;align-items:start}
-.band .timeline{margin-top:1.75rem}
 .band .legend,.band .note{color:var(--exo-color-font-secondary)}
-.band .tl-tick .i{background:var(--exo-color-body)}
 .band details.data summary{color:var(--exo-color-font-link)}.band details.data table{background:rgba(0,0,0,.2)}
 .budgets h2{font:600 .813rem/1.4 var(--exo-font-family);color:var(--exo-color-font-secondary);margin:0 0 .6rem;letter-spacing:.02em}
 .budgets{padding-left:1.5rem;border-left:1px solid var(--exo-color-border-secondary)}
@@ -835,20 +876,26 @@ footer .maker{width:.75rem;height:1rem;vertical-align:-.2rem;margin-right:.5rem;
 .meter-bar{height:.5rem;border-radius:.25rem;background:var(--exo-color-background);margin:.35rem 0 .25rem;overflow:hidden;box-shadow:inset 0 0 0 1px var(--exo-color-border-secondary)}
 .meter-bar span{display:block;height:100%;border-radius:.25rem;background:var(--exo-color-background-success-strong)}
 .meter-warning .meter-bar span{background:var(--exo-color-background-warning-strong)}.meter-critical .meter-bar span{background:var(--exo-color-background-danger-strong)}
-.tl-key{display:flex;flex-wrap:wrap;gap:.25rem 1.5rem;align-items:baseline;margin-top:.75rem}.tl-key .legend{margin:0}.tl-key .note{margin:0;font-size:.75rem}
 .note{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.35rem 0}
-button.tl-tick{appearance:none;border:0;padding:0;font:inherit;cursor:pointer}
-button.tl-tick::after{content:"";position:absolute;inset:-.35rem -.65rem}
-button.tl-tick:focus-visible{outline:2px solid var(--exo-color-background-selected);outline-offset:3px}
 .account-line{font-size:.875rem;margin:1.25rem 0 0;color:var(--exo-color-font-secondary)}.account-line strong{color:var(--exo-color-font);font-weight:600}.account-line .label{font-weight:600;margin-right:.35rem}
 table.lanes td.lane{min-width:11rem}table.lanes tbody th{min-width:16rem}table.lanes td.lane .status{display:inline-block;margin:.05rem 0}
-code.copy{cursor:copy}code.copy.copied{outline:1px solid var(--exo-color-background-success-strong);outline-offset:1px;border-radius:2px}
+code.copy{cursor:copy}td a,th a,.sub a{white-space:nowrap}code.copy.copied{outline:1px solid var(--exo-color-background-success-strong);outline-offset:1px;border-radius:2px}
 .why{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.15rem 0 0 1.4rem}
 svg.maker{display:inline-block}
 @media (max-width:900px){.budgets{padding-left:0;border-left:0;padding-top:1rem;border-top:1px solid var(--exo-color-border-secondary)}}
 @media print{.band{background:none;color:inherit}}
+.ledger-wrap{margin-top:1.75rem}
+.ledger-title{font:600 .813rem/1.4 var(--exo-font-family);color:var(--exo-color-font-secondary);margin:0 0 .5rem;letter-spacing:.02em}
+.ledger{list-style:none;margin:0;padding:0;border-top:1px solid var(--exo-color-border-secondary)}
+.ledger-link{display:grid;grid-template-columns:13rem minmax(0,1fr) 11rem 8rem;gap:.25rem 1.5rem;align-items:baseline;padding:.6rem .5rem;color:inherit;text-decoration:none;border-bottom:1px solid var(--exo-color-border-secondary);border-radius:var(--exo-radius-standard)}
+.ledger-link:hover{background:var(--exo-color-background)}.ledger-link:hover .l-id{text-decoration:underline}
+.l-when{display:flex;flex-direction:column;font-size:.875rem;line-height:1.4}.l-when span{color:var(--exo-color-font-secondary);font-size:.813rem;font-variant-numeric:tabular-nums}.l-when .l-id{font-size:.75rem}
+.l-what{font-size:.938rem;line-height:1.55}.l-what strong{font-weight:600}
+.l-how{display:flex;flex-wrap:wrap;gap:.15rem .75rem;font-size:.875rem;font-variant-numeric:tabular-nums}.l-steps{flex-basis:100%;font-size:.75rem;color:var(--exo-color-font-secondary)}
+.l-cost{text-align:right;font-size:.938rem;font-variant-numeric:tabular-nums}.l-budget{font-size:.75rem;color:var(--exo-color-font-secondary)}
+@media (max-width:900px){.ledger-link{grid-template-columns:minmax(0,1fr) auto}.l-what{grid-column:1/-1}.l-how{grid-column:1}.l-cost{grid-row:1;grid-column:2}}
 ol.steps{list-style:none;padding:0;margin:0}
-.step-group+.step-group{margin-top:1.75rem}.group-head{font:600 .95rem/1.4 var(--exo-font-family);margin:0 0 .25rem;padding-bottom:.4rem;border-bottom:1px solid var(--exo-color-border)}.group-head .aside{font-weight:400;font-size:.813rem;margin-left:.35em}
+.step-group+.step-group{margin-top:1rem}details.step-group>summary.group-head{cursor:pointer;list-style-position:outside}details.step-group:not([open])>summary.group-head{border-bottom-color:var(--exo-color-border-secondary)}li.chore summary{color:var(--exo-color-font-secondary)}.group-head{font:600 .95rem/1.4 var(--exo-font-family);margin:0 0 .25rem;padding-bottom:.4rem;border-bottom:1px solid var(--exo-color-border)}.group-head .aside{font-weight:400;font-size:.813rem;margin-left:.35em}
 .order{margin-left:auto}
 ol.steps li{border-bottom:1px solid var(--exo-color-border-secondary)}
 ol.steps summary{cursor:pointer;padding:.5rem .25rem}
@@ -904,7 +951,7 @@ const SCRIPT = `
     var lv=li.getAttribute('data-level'),pr='product:'+li.getAttribute('data-product');
     var ok=(filter==='all'||(filter==='issues'&&lv!=='healthy')||filter===pr||(filter==='kind:release'&&li.getAttribute('data-kind')==='release'))&&(!q||li.textContent.toLowerCase().indexOf(q)>=0);
     li.hidden=!ok;if(ok)n++});
-    groups.forEach(function(g){g.hidden=!g.querySelector('ol.steps > li:not([hidden])')});
+    groups.forEach(function(g){g.hidden=!g.querySelector('ol.steps > li:not([hidden])');if((q||filter!=='all')&&!g.hidden&&g.tagName==='DETAILS')g.open=true});
     shown.textContent=n===items.length?'':n+' of '+items.length+' shown'}
   function order(dir){var by=function(a,b){var x=+a.getAttribute('data-at'),y=+b.getAttribute('data-at');return dir==='asc'?x-y:y-x};
     groups.sort(by).forEach(function(g){box.appendChild(g);var ol=g.querySelector('ol.steps');Array.prototype.slice.call(ol.children).sort(by).forEach(function(li){ol.appendChild(li)})});
@@ -921,17 +968,11 @@ const SCRIPT = `
   search.addEventListener('input',apply);
   var expand=document.querySelector('[data-expand]');
   if(expand)expand.addEventListener('click',function(){var open=expand.getAttribute('aria-pressed')!=='true';
-    items.forEach(function(li){var d=li.querySelector('details');if(d)d.open=open});expand.setAttribute('aria-pressed',String(open));expand.textContent=open?'Collapse all':'Expand all'});
+    items.forEach(function(li){var d=li.querySelector('details');if(d)d.open=open});if(open)groups.forEach(function(g){if(g.tagName==='DETAILS')g.open=true});expand.setAttribute('aria-pressed',String(open));expand.textContent=open?'Collapse all':'Expand all'});
   document.addEventListener('click',function(e){var c=e.target.closest&&e.target.closest('[data-copy]');if(!c)return;e.preventDefault();
     var done=function(){c.classList.add('copied');c.title='Copied';setTimeout(function(){c.classList.remove('copied');c.title='Copy'},1200)};
     if(navigator.clipboard)navigator.clipboard.writeText(c.getAttribute('data-copy')).then(done,function(){});});
-  var ticks=Array.prototype.slice.call(document.querySelectorAll('[data-ticks] button.tl-tick'));
-  ticks.forEach(function(t,i){
-    t.addEventListener('click',function(){var li=document.getElementById('step-'+t.getAttribute('data-step'));if(!li)return;
-      if(li.hidden){setFilter('all');search.value='';apply()}var d=li.querySelector('details');if(d)d.open=true;li.scrollIntoView({behavior:'smooth',block:'center'});var s=li.querySelector('summary');if(s)s.focus({preventScroll:true})});
-    t.addEventListener('keydown',function(e){var n=e.key==='ArrowRight'?i+1:e.key==='ArrowLeft'?i-1:e.key==='Home'?0:e.key==='End'?ticks.length-1:-1;
-      if(n<0||n>=ticks.length)return;e.preventDefault();ticks[n].focus()});
-    t.tabIndex=i===0?0:-1;t.addEventListener('focus',function(){ticks.forEach(function(x){x.tabIndex=x===t?0:-1})});
-  });
+  document.querySelectorAll('.ledger-link').forEach(function(l){l.addEventListener('click',function(){
+    var g=document.querySelector(l.getAttribute('href'));if(g&&g.tagName==='DETAILS')g.open=true})});
 })();
 `

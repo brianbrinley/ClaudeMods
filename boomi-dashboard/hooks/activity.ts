@@ -455,7 +455,23 @@ export const assignResults = (
 export const unclaimedReading = (isError: boolean): Reading =>
   isError
     ? { outcome: 'failed', detail: 'ERROR: the command failed before this script printed a result' }
-    : { outcome: 'ok', detail: 'no result of its own in the output (it ran in a command with other scripts)' }
+    : { outcome: 'ok', detail: 'no result of its own (it ran in a command with other scripts)' }
+
+/**
+ * Steps recorded by older versions, made readable: "a component" gets the name
+ * its component ID has in another step, and a test that took another script's
+ * SUCCESS line (before 0.26.0) says it had no result of its own.
+ */
+export const repaired = (activity: readonly Activity[]): Activity[] => {
+  const names = new Map<string, string>()
+  for (const a of activity) if (a.componentId && a.subject !== 'a component' && !/\.xml$/.test(a.subject)) names.set(a.componentId, a.subject)
+  return activity.map(a => {
+    let b = a
+    if (b.subject === 'a component' && b.componentId && names.has(b.componentId)) b = { ...b, subject: names.get(b.componentId)! }
+    if (b.kind === 'test' && !b.executionStatus && /^SUCCESS:/.test(b.detail)) b = { ...b, detail: 'no result of its own (it ran in a command with other scripts)' }
+    return b
+  })
+}
 
 /** What makes a step the same as another: a test's execution, a deploy's package, a save's own line. */
 const echoKey = (a: Activity): string | undefined => {
@@ -664,7 +680,11 @@ export const describe = (a: Activity): string => {
     case 'undeploy':
       return `Undeployed ${a.subject}`
     case 'test':
-      return a.executionStatus ? `Test of ${a.subject} ${a.executionStatus === 'COMPLETE' ? 'passed' : `ended ${a.executionStatus}`}` : `Test of ${a.subject} ${a.detail}`
+      return a.executionStatus
+        ? `Test of ${a.subject} ${a.executionStatus === 'COMPLETE' ? 'passed' : `ended ${a.executionStatus}`}`
+        : /^submitted/.test(a.detail)
+          ? `Test of ${a.subject} ${a.detail}`
+          : `Test of ${a.subject}: ${a.detail}`
     case 'other':
       return SCRIPT_WORDS[a.script ?? ''] ?? `Ran boomi-${a.script}`
   }
