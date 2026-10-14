@@ -5,7 +5,8 @@
 // tables and a filterable list of steps. Plain functions: nothing here touches
 // the engine.
 
-import type { Activity, Dashboard, Product } from '../types'
+import type { Activity, Dashboard, PastSession, Product } from '../types'
+import type { ComponentDetails } from './platform'
 import {
   STATUS,
   agentStages,
@@ -50,11 +51,11 @@ const badges = (list: readonly Stage[]) =>
 /** A cell that sorts by a number, not its text. */
 const num = (value: number | undefined, shown: string | undefined) => `<td class="n" data-sort="${value ?? -1}">${esc(shown ?? '')}</td>`
 
-const table = (id: string, caption: string, head: string[], rows: string[]) =>
+const table = (id: string, caption: string, head: string[], rows: string[], cls = '') =>
   rows.length === 0
     ? ''
     : `<section id="${id}" class="card"><h2>${esc(caption)} <span class="count">${rows.length}</span></h2>
-<div class="scroll"><table class="sortable"><thead><tr>${head.map((h, i) => `<th scope="col"><button type="button" data-col="${i}">${esc(h)}</button></th>`).join('')}</tr></thead>
+<div class="scroll"><table class="sortable${cls ? ` ${cls}` : ''}"><thead><tr>${head.map((h, i) => `<th scope="col"><button type="button" data-col="${i}">${esc(h)}</button></th>`).join('')}</tr></thead>
 <tbody>${rows.join('\n')}</tbody></table></div></section>`
 
 /** Each product's fixed slot in the categorical palette: color follows the product, never its rank. */
@@ -85,7 +86,7 @@ const vbar = (x: number, y: number, w: number, h: number, r = 4) => {
 const BUCKETS = [5, 10, 15, 30, 60, 120, 240, 480, 1440].map(m => m * 60_000)
 
 /** Steps over the session, a column per time span stacked by how they went. */
-const stepsOverTime = (steps: readonly Activity[]): string => {
+const stepsOverTime = (steps: readonly Activity[], isAll = false): string => {
   if (steps.length < 2) return ''
   const t0 = Math.min(...steps.map(a => a.startedAt))
   const t1 = Math.max(...steps.map(a => a.startedAt))
@@ -124,7 +125,7 @@ const stepsOverTime = (steps: readonly Activity[]): string => {
   const ticks = cols
     .map((c, i) => (i % Math.ceil(n / 6) === 0 ? `<text x="${(left + i * colW + colW / 2).toFixed(1)}" y="${H - 6}" class="axis" text-anchor="middle">${label(c.at)}</text>` : ''))
     .join('')
-  return `<figure class="card chart"><figcaption><h3>Steps over the session</h3><span class="sub">per ${Math.round(size / 60_000)} minutes, UTC</span></figcaption>
+  return `<figure class="card chart"><figcaption><h3>${isAll ? 'Steps over time' : 'Steps over the session'}</h3><span class="sub">per ${Math.round(size / 60_000)} minutes, UTC</span></figcaption>
 ${legend(LEVELS.map(l => ({ cls: `fill-${l}`, label: LABEL[l], icon: STATUS[l].icon })))}
 <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Steps over the session, stacked by outcome">
 <line x1="${left}" y1="${y(0)}" x2="${W - 8}" y2="${y(0)}" class="baseline"/><text x="${left - 6}" y="${y(max) + 4}" class="axis" text-anchor="end">${max}</text>
@@ -223,7 +224,7 @@ ${dataTable(['Time (UTC)', 'Cost so far'], points.map(p => [new Date(p.at).toISO
 }
 
 /** How far the session's components got: touched, saved in Boomi, deployed, tested and passing. */
-const pipeline = (dashboard: Dashboard): string => {
+const pipeline = (dashboard: Dashboard, isAll = false): string => {
   const rows = components(dashboard.activity)
   if (rows.length === 0) return ''
   const ok = (a: Activity | undefined) => a?.outcome === 'ok'
@@ -243,13 +244,113 @@ const pipeline = (dashboard: Dashboard): string => {
 <text x="0" y="${i * rowH + 19}" class="label">${esc(s.name)}</text><path d="${hbar(left, i * rowH + 6, s.n === 0 ? 2 : w, 18)}" class="seq"/><text x="${(left + (s.n === 0 ? 2 : w) + 6).toFixed(1)}" y="${i * rowH + 19}" class="value">${s.n}</text></g>`
     })
     .join('')
-  return `<figure class="card chart"><figcaption><h3>Component pipeline</h3><span class="sub">how far this session's components got</span></figcaption>
+  return `<figure class="card chart"><figcaption><h3>Component pipeline</h3><span class="sub">how far ${isAll ? 'these sessions\'' : 'this session\'s'} components got</span></figcaption>
 <svg viewBox="0 0 560 ${steps.length * rowH}" role="img" aria-label="Component pipeline">${marks}</svg>
 ${dataTable(['Stage', 'Components'], steps.map(s => [s.name, s.n]))}</figure>`
 }
 
-/** What the HTML report needs beyond the Markdown one: the dashboard's own version. */
-export type HtmlFacts = ReportFacts & { version?: string }
+/** Which steps a report covers: this Claude Code session's, or every session's this folder kept. */
+export type ReportScope = 'session' | 'all'
+
+/**
+ * The dashboard as a report of `scope` sees it: this session's own steps, or
+ * every step this folder kept (the window's and the earlier ones), in order.
+ */
+export const scoped = (dashboard: Dashboard, scope: ReportScope): Dashboard => {
+  if (scope === 'session') return { ...dashboard, activity: dashboard.activity.filter(a => !a.isRestored && !a.isEarlier), earlier: [], restored: 0 }
+  const seen = new Set<number>()
+  const activity = [...(dashboard.earlier ?? []), ...dashboard.activity]
+    .filter(a => (seen.has(a.id) ? false : (seen.add(a.id), true)))
+    .sort((a, b) => a.startedAt - b.startedAt)
+  return { ...dashboard, activity, earlier: [] }
+}
+
+/** Whether there's anything from earlier sessions, so asking which steps to cover means something. */
+export const hasEarlierSteps = (dashboard: Dashboard): boolean =>
+  dashboard.activity.some(a => a.isRestored) || (dashboard.earlier?.length ?? 0) > 0
+
+/** One Claude Code session in an all-sessions report. */
+export type SessionSummary = {
+  /** Its Claude Code session ID, or `earlier` for steps kept before steps named their session. */
+  id: string
+  isCurrent: boolean
+  firstAt: number
+  lastAt: number
+  steps: number
+  failed: number
+  components: number
+  /** Claude Code's own cost for it: this session's from its usage, an earlier one's from Past Companion sessions. */
+  usd?: number
+  /** Where usd came from: `exact`, or `atLeast` (what it had cost by its last Companion step). */
+  usdIs?: 'exact' | 'atLeast'
+  project?: string
+}
+
+/** The session a step belongs to: its own, else this session's when it isn't restored, else `earlier`. */
+export const sessionOfStep = (a: Activity, current: string | undefined): string => a.session ?? (a.isRestored || a.isEarlier ? 'earlier' : (current ?? 'this'))
+
+/**
+ * Each session the steps came from, newest first: when, how many steps and
+ * failures, the components it touched, and what it cost (this session's from
+ * its usage; an earlier one's from a transcript scan when there was one, else
+ * at least what it had cost by its last step).
+ */
+export const sessionSummaries = (activity: readonly Activity[], current: string | undefined, currentUsd: number | undefined, past: readonly PastSession[] = []): SessionSummary[] => {
+  const groups = new Map<string, Activity[]>()
+  for (const a of activity) groups.set(sessionOfStep(a, current), [...(groups.get(sessionOfStep(a, current)) ?? []), a])
+  return [...groups.entries()]
+    .map(([id, steps]): SessionSummary => {
+      const isCurrent = id === current || id === 'this'
+      const scanned = past.find(p => p.id === id)
+      const lastUsd = Math.max(...steps.map(a => a.usdAt ?? -1))
+      const usd = isCurrent ? currentUsd : (scanned?.costUsd ?? (lastUsd >= 0 && id !== 'earlier' ? lastUsd : undefined))
+      const usdIs = usd === undefined ? undefined : isCurrent || scanned?.costUsd !== undefined ? 'exact' : 'atLeast'
+      return {
+        id,
+        isCurrent,
+        firstAt: Math.min(...steps.map(a => a.startedAt)),
+        lastAt: Math.max(...steps.map(a => a.endedAt ?? a.startedAt)),
+        steps: steps.filter(a => !a.recipe).length,
+        failed: steps.filter(a => a.outcome === 'failed' || a.outcome === 'blocked').length,
+        components: components(steps).length,
+        ...(usd !== undefined ? { usd, usdIs } : {}),
+        ...(scanned?.project ? { project: scanned.project } : {}),
+      }
+    })
+    .sort((a, b) => b.lastAt - a.lastAt)
+}
+
+/** The Boomi account the session worked in, and its components as Boomi has them now. */
+export type BoomiFacts = {
+  accountId?: string
+  accountName?: string
+  environmentId?: string
+  /** The Platform API host, without credentials. */
+  apiHost?: string
+  components: Record<string, ComponentDetails>
+  /** Why Boomi's own details are missing, when they are. */
+  note?: string
+}
+
+/** A component's page in Boomi's build console. */
+export const boomiLink = (accountId: string, componentId: string): string =>
+  `https://platform.boomi.com/AtomSphere.html#build;accountId=${encodeURIComponent(accountId)};components=${encodeURIComponent(componentId)}`
+
+/** The deployment package a deploy made, from its SUCCESS line. */
+export const packageOf = (detail: string): string | undefined => detail.match(/\(package: ([^)\s]+)\)/)?.[1]
+
+/** What the HTML report needs beyond the Markdown one: the dashboard's own version, what it covers, the sessions and the Boomi account. */
+export type HtmlFacts = ReportFacts & {
+  version?: string
+  scope?: ReportScope
+  /** This Claude Code session's ID, whole. */
+  sessionId?: string
+  /** Every session's summary, for an all-sessions report. */
+  sessions?: SessionSummary[]
+  boomi?: BoomiFacts
+  /** The workspace folder's name (not its path). */
+  folder?: string
+}
 
 /** The session report as one HTML page, styles and scripts inside it. */
 export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, windowMs: number): string => {
@@ -261,15 +362,31 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   const steps = dashboard.activity.filter(a => !a.recipe)
   const failed = steps.filter(a => a.outcome === 'failed' || a.outcome === 'blocked').length
   const rows = components(dashboard.activity)
+  const isAll = facts.scope === 'all'
+  const sessions = isAll ? (facts.sessions ?? []) : []
+  const boomi = facts.boomi
+  const shortSession = (id: string) => (id === 'earlier' ? 'earlier' : id.slice(0, 8))
+  const sessionOf = (a: Activity) => sessionOfStep(a, facts.sessionId)
+  const when = (t: number) => new Date(t).toISOString().replace('T', ' ').slice(0, 16)
 
-  const meta = [`Session ${facts.session}`, facts.date, u.startedAt === undefined ? undefined : duration(now - u.startedAt), u.model].filter(Boolean) as string[]
+  const meta = (
+    isAll
+      ? [`All sessions in ${facts.folder ?? 'this folder'}`, `${sessions.length} session${sessions.length === 1 ? '' : 's'}`, steps.length > 0 ? `${when(steps[0]!.startedAt)} to ${when(steps[steps.length - 1]!.startedAt)} UTC` : undefined]
+      : [`Session ${facts.session}`, facts.date, u.startedAt === undefined ? undefined : duration(now - u.startedAt), u.model]
+  ).filter(Boolean) as string[]
 
   const tile = (label: string, value: string, note?: string, level?: Level) =>
     `<div class="card tile"><div class="label">${esc(label)}</div><div class="value">${level ? status(level, value) : esc(value)}</div>${note ? `<div class="note">${esc(note)}</div>` : ''}</div>`
   const budgetPct = u.budgetUsd && u.usd !== undefined ? Math.round((u.usd / u.budgetUsd) * 100) : undefined
+  const allUsd = sessions.reduce((sum, s) => sum + (s.usd ?? 0), 0)
+  const atLeast = sessions.some(s => s.usdIs === 'atLeast' || s.usd === undefined)
   const tiles = [
-    tile('Cost', formatCost(u.usd) ?? '—', u.budgetUsd ? `${budgetPct}% of the ${formatCost(u.budgetUsd)} budget` : undefined, budgetPct === undefined ? undefined : budgetPct >= 100 ? 'critical' : budgetPct >= 80 ? 'warning' : undefined),
-    tile('Tokens', u.tokens !== undefined ? formatTokens(u.tokens) : '—', u.cached ? `and ${formatTokens(u.cached)} cache reads` : undefined),
+    isAll
+      ? tile('Cost', formatCost(allUsd) ?? '—', atLeast ? 'at least: Scan under Past Companion sessions for exact costs' : 'across the sessions')
+      : tile('Cost', formatCost(u.usd) ?? '—', u.budgetUsd ? `${budgetPct}% of the ${formatCost(u.budgetUsd)} budget` : undefined, budgetPct === undefined ? undefined : budgetPct >= 100 ? 'critical' : budgetPct >= 80 ? 'warning' : undefined),
+    isAll
+      ? tile('Sessions', String(sessions.length), sessions.length > 0 ? `the latest ${when(sessions[0]!.lastAt)} UTC` : undefined)
+      : tile('Tokens', u.tokens !== undefined ? formatTokens(u.tokens) : '—', u.cached ? `and ${formatTokens(u.cached)} cache reads` : undefined),
     tile('Components', String(rows.length), `${steps.length} step${steps.length === 1 ? '' : 's'}${failed ? `, ${failed} failed or blocked` : ''}`),
     tile('Needs attention', String(needs.length), closed ? `${closed} closed` : needs.length === 0 ? 'all clear' : undefined, needs.length === 0 ? 'healthy' : needs.some(n => n.level === 'critical') ? 'critical' : 'warning'),
   ].join('')
@@ -281,8 +398,40 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
 
   const componentRows = rows.map(row => {
     const spent = spendOf(row.ids, all)
-    return `<tr><th scope="row">${esc(row.name)}</th><td>${esc(friendlyType(row.type) ?? '')}</td><td>${badges(stages(row, runs))}</td>${num(spent.tokens, spent.tokens ? formatTokens(spent.tokens) : '')}${num(spent.usd, formatCost(spent.usd))}</tr>`
+    const d = row.componentId ? boomi?.components[row.componentId] : undefined
+    const renamed = d?.name && d.name !== row.name ? `<div class="sub">In Boomi now: ${esc(d.name)}</div>` : ''
+    const type = friendlyType(d?.type ?? row.type) ?? d?.type ?? row.type ?? ''
+    const link = row.componentId && boomi?.accountId ? ` <a href="${esc(boomiLink(boomi.accountId, row.componentId))}" target="_blank" rel="noopener">Open in Boomi</a>` : ''
+    const id = row.componentId ? `<code>${esc(row.componentId)}</code>${link}` : '<span class="muted">not created in Boomi</span>'
+    const version = d?.version ?? row.saved?.version
+    const changed = d?.modifiedDate ? `${esc(d.modifiedDate.replace('T', ' ').slice(0, 16))}${d.modifiedBy ? `<div class="sub">${esc(d.modifiedBy)}</div>` : ''}` : ''
+    return `<tr><th scope="row">${esc(row.name)}${renamed}${row.recipe ? `<div class="sub">from recipe ${esc(row.recipe)}</div>` : ''}</th><td>${esc(type)}</td><td>${esc(d?.folderName ?? '')}</td><td class="id">${id}</td>${num(version === undefined ? undefined : Number(version), version === undefined ? '' : `v${version}`)}<td>${changed}</td><td>${badges(stages(row, runs))}</td>${num(spent.tokens, spent.tokens ? formatTokens(spent.tokens) : '')}${num(spent.usd, formatCost(spent.usd))}</tr>`
   })
+
+  // Every deploy and test with the ID to find it by in Boomi: the package, or the execution.
+  const releaseRows = steps
+    .filter(a => !a.product && (a.kind === 'deploy' || a.kind === 'undeploy' || a.kind === 'test') && a.outcome !== 'running')
+    .reverse()
+    .map(a => {
+      const id = a.kind === 'test' ? a.executionId : (packageOf(a.detail) ?? a.deploymentId)
+      const what = a.kind === 'test' ? (a.executionId ? 'execution' : '') : a.kind === 'deploy' ? 'package' : 'deployment'
+      return `<tr><td data-sort="${a.startedAt}"><time datetime="${new Date(a.startedAt).toISOString()}">${esc(when(a.startedAt))} UTC</time></td><th scope="row">${status(levelOf(a), describe(a))}</th><td>${id ? `<span class="muted">${what}</span> <code>${esc(id)}</code>` : ''}</td>${a.kind === 'test' ? `<td>${esc(a.executionStatus ?? '')}</td>` : '<td></td>'}${isAll ? `<td><code>${esc(shortSession(sessionOf(a)))}</code></td>` : ''}</tr>`
+    })
+
+  const sessionRows = sessions.map(s => {
+    const cost = s.usd === undefined ? '' : `${s.usdIs === 'atLeast' ? 'at least ' : ''}${formatCost(s.usd) ?? '$0'}`
+    const label = s.id === 'earlier' ? 'Earlier (before steps named their session)' : s.id
+    return `<tr><th scope="row"><code>${esc(label)}</code>${s.isCurrent ? ' <span class="tag tag-1">this session</span>' : ''}</th><td data-sort="${s.firstAt}">${esc(when(s.firstAt))} UTC</td><td data-sort="${s.lastAt}">${esc(when(s.lastAt))} UTC</td>${num(s.steps, String(s.steps))}${num(s.failed, String(s.failed))}${num(s.components, String(s.components))}${num(s.usd, cost)}</tr>`
+  })
+
+  const account = boomi && (boomi.accountId || boomi.environmentId)
+    ? `<section id="account" class="card"><h2>Boomi account</h2><dl class="facts">${[
+        boomi.accountName && `<dt>Account</dt><dd>${esc(boomi.accountName)}</dd>`,
+        boomi.accountId && `<dt>Account ID</dt><dd><code>${esc(boomi.accountId)}</code></dd>`,
+        boomi.environmentId && `<dt>Environment ID</dt><dd><code>${esc(boomi.environmentId)}</code></dd>`,
+        boomi.apiHost && `<dt>Platform API</dt><dd>${esc(boomi.apiHost)}</dd>`,
+      ].filter(Boolean).join('')}</dl>${boomi.note ? `<p class="muted">${esc(boomi.note)}</p>` : ''}</section>`
+    : ''
   const connectorRows = connectors(dashboard.activity).map(row => {
     const spent = spendOf(row.ids, all)
     return `<tr><th scope="row">${esc(row.name)}</th><td>${esc(row.group ?? '')}</td><td>${badges(connectorStages(row))}</td>${num(spent.tokens, spent.tokens ? formatTokens(spent.tokens) : '')}${num(spent.usd, formatCost(spent.usd))}</tr>`
@@ -301,16 +450,24 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
       const product = productName(productKey(a))
       const spent = all.get(a.id)
       const aside = [spent?.tokens ? `${formatTokens(spent.tokens)} tokens` : '', formatCost(spent?.usd) ?? '', a.source === 'log' ? "from Companion's log" : ''].filter(Boolean).join(' · ')
+      const pkg = a.kind === 'deploy' ? packageOf(a.detail) : undefined
+      const took = a.endedAt !== undefined && a.endedAt > a.startedAt ? duration(a.endedAt - a.startedAt) : undefined
       const detail = [
         a.detail && `<dt>Result</dt><dd>${esc(a.detail)}</dd>`,
-        a.componentId && `<dt>Component</dt><dd><code>${esc(a.componentId)}</code></dd>`,
+        a.componentId && `<dt>Component</dt><dd><code>${esc(a.componentId)}</code>${boomi?.accountId ? ` <a href="${esc(boomiLink(boomi.accountId, a.componentId))}" target="_blank" rel="noopener">Open in Boomi</a>` : ''}</dd>`,
+        a.version && `<dt>Version</dt><dd>v${esc(a.version)}</dd>`,
+        pkg && `<dt>Package</dt><dd><code>${esc(pkg)}</code></dd>`,
         a.executionId && `<dt>Execution</dt><dd><code>${esc(a.executionId)}</code></dd>`,
         a.ref && `<dt>Acts on</dt><dd><code>${esc(a.ref)}</code></dd>`,
         a.file && `<dt>File</dt><dd><code>${esc(a.file)}</code></dd>`,
+        took && `<dt>Took</dt><dd>${esc(took)}</dd>`,
+        `<dt>Seen in</dt><dd>${a.source === 'log' ? "Companion's activity log" : "Claude's tool call"}</dd>`,
+        isAll && `<dt>Session</dt><dd><code>${esc(sessionOf(a))}</code></dd>`,
       ]
         .filter(Boolean)
         .join('')
-      return `<li data-level="${level}" data-product="${esc(product)}"><details><summary><time datetime="${new Date(a.startedAt).toISOString()}">${new Date(a.startedAt).toISOString().slice(11, 16)} UTC</time> ${status(level, describe(a))} <span class="tag tag-${slot(productKey(a))}">${esc(product)}</span>${aside ? ` <span class="aside">${esc(aside)}</span>` : ''}</summary><dl>${detail}</dl></details></li>`
+      const at = isAll ? `${when(a.startedAt)} UTC` : `${new Date(a.startedAt).toISOString().slice(11, 16)} UTC`
+      return `<li data-level="${level}" data-product="${esc(product)}"><details><summary><time datetime="${new Date(a.startedAt).toISOString()}">${esc(at)}</time> ${status(level, describe(a))} <span class="tag tag-${slot(productKey(a))}">${esc(product)}</span>${aside ? ` <span class="aside">${esc(aside)}</span>` : ''}</summary><dl>${detail}</dl></details></li>`
     })
     .join('\n')
 
@@ -321,7 +478,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     ...(u.modelSplits ?? []).map(line => `<li class="sub">${esc(line)}</li>`),
   ].join('')
 
-  const charts = [stepsOverTime(steps), outcomesByProduct(steps), costOverTime(dashboard.activity, u.usd, now), spendByProduct(dashboard.activity, all), pipeline(dashboard)].filter(Boolean)
+  const charts = [stepsOverTime(steps, isAll), outcomesByProduct(steps), isAll ? '' : costOverTime(dashboard.activity, u.usd, now), spendByProduct(dashboard.activity, all), pipeline(dashboard, isAll)].filter(Boolean)
 
   return `<!doctype html>
 <html lang="en">
@@ -329,26 +486,29 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="boomi-dashboard${facts.version ? ` ${esc(facts.version)}` : ''}">
-<title>Companion Session Report</title>
+<title>${isAll ? 'Companion Sessions Report' : 'Companion Session Report'}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Noto+Sans:wght@400;600;700&family=Fira+Mono&display=swap">
 <style>${STYLE}</style>
 </head>
-<body>
+<body${isAll ? ' data-days' : ''}>
 <header class="masthead">
-  <div class="brand">Boomi Companion <span>Session report</span></div>
+  <div class="brand">Boomi Companion <span>${isAll ? 'All sessions' : 'Session report'}</span></div>
   <div class="theme" role="group" aria-label="Theme">
     <button type="button" data-theme-pick="light" aria-pressed="false">Light</button>
     <button type="button" data-theme-pick="dark" aria-pressed="false">Dark</button>
   </div>
 </header>
 <main>
-<h1>${esc(facts.repo ? facts.repo.replace(/^https?:\/\/(www\.)?github\.com\//, '') : 'Boomi Companion session')}</h1>
+<h1>${esc(facts.repo ? facts.repo.replace(/^https?:\/\/(www\.)?github\.com\//, '') : isAll ? 'Boomi Companion sessions' : 'Boomi Companion session')}</h1>
 <p class="meta">${meta.map(esc).join(' · ')}</p>
 <section class="tiles" aria-label="At a glance">${tiles}</section>
+${account}
 <section id="attention" class="card"><h2>Needs attention</h2>${attentionList}</section>
 ${charts.length > 0 ? `<section id="charts" aria-label="Charts"><div class="charts">${charts.join('\n')}</div></section>` : ''}
-${componentRows.length === 0 ? '<section id="components" class="card"><h2>Components</h2><p class="muted">None this session.</p></section>' : table('components', 'Components', ['Component', 'Type', 'Where it stands', 'Tokens', 'Cost'], componentRows)}
+${isAll ? table('sessions', 'Sessions', ['Session', 'Started', 'Last step', 'Steps', 'Failed or blocked', 'Components', 'Cost'], sessionRows) : ''}
+${componentRows.length === 0 ? `<section id="components" class="card"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Type', 'Folder', 'Component ID', 'Version', 'Changed in Boomi', 'Where it stands', 'Tokens', 'Cost'], componentRows, 'wide')}
+${table('releases', 'Deployments and tests', ['When', 'Step', 'ID in Boomi', 'Status', ...(isAll ? ['Session'] : [])], releaseRows)}
 ${table('connectors', 'Custom connectors', ['Connector', 'Group', 'Where it stands', 'Tokens', 'Cost'], connectorRows)}
 ${table('agents', 'Agentstudio agents', ['Agent', 'Where it stands', 'Tokens', 'Cost'], agentRows)}
 ${quarantine.length === 0 ? '' : `<section id="quarantine" class="card"><h2>Data Hub quarantine</h2><ul class="plain">${quarantine.map(q => `<li>${status(q.level, q.text)}</li>`).join('')}</ul></section>`}
@@ -370,7 +530,7 @@ ${
 }
 </section>
 </main>
-<footer>A snapshot of a Boomi Companion session, made by boomi-dashboard${facts.version ? ` ${esc(facts.version)}` : ''} on ${esc(new Date(now).toISOString().replace('T', ' ').slice(0, 16))} UTC, styled to Boomi's Exosphere design system. Nothing in it is live, and it holds no credentials.</footer>
+<footer>A snapshot of ${isAll ? `every Boomi Companion session the dashboard kept in ${esc(facts.folder ?? 'this folder')}` : 'a Boomi Companion session'}${facts.sessionId ? ` (Claude Code session ${esc(facts.sessionId)})` : ''}, made by boomi-dashboard${facts.version ? ` ${esc(facts.version)}` : ''} on ${esc(new Date(now).toISOString().replace('T', ' ').slice(0, 16))} UTC, styled to Boomi's Exosphere design system. Nothing in it is live, and it holds no credentials.</footer>
 <div class="tooltip" role="tooltip" hidden></div>
 <script>${SCRIPT}</script>
 </body>
@@ -435,7 +595,9 @@ svg .hit:hover .target,svg .hit:focus-visible .target{fill:var(--exo-color-font)
 .legend{display:flex;flex-wrap:wrap;gap:.25rem 1rem;list-style:none;padding:0;margin:0 0 .5rem;font-size:.813rem}
 .legend li{display:flex;align-items:center;gap:.3rem}.legend .swatch{width:.75rem;height:.75rem;border-radius:2px;display:inline-block}.legend .icon{font-weight:700}
 details.data{margin-top:.5rem;font-size:.813rem;overflow-x:auto}details.data summary{cursor:pointer;color:var(--exo-color-font-link);font-weight:600}
-.scroll{overflow-x:auto}.scroll table{min-width:560px}thead th{white-space:nowrap}
+.scroll{overflow-x:auto;position:relative}.card{position:relative}.scroll table{min-width:560px}.scroll table.wide{min-width:1040px}thead th{white-space:nowrap}
+td.id code{overflow-wrap:anywhere}td .sub,th .sub{font-weight:400;font-size:.813rem;color:var(--exo-color-font-secondary)}
+a{color:var(--exo-color-font-link)}dl.facts{margin:0}
 table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:.5rem .75rem;border-bottom:1px solid var(--exo-color-border-secondary);vertical-align:top}
 thead th{background:var(--exo-color-background-secondary)}tbody th{font-weight:600}td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -477,7 +639,8 @@ const SCRIPT = `
   var saved=null;try{saved=localStorage.getItem('bc-report-theme')}catch(e){}
   pick(saved||(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'));
   document.querySelectorAll('[data-theme-pick]').forEach(function(b){b.addEventListener('click',function(){pick(b.getAttribute('data-theme-pick'))})});
-  document.querySelectorAll('time[datetime]').forEach(function(t){var d=new Date(t.getAttribute('datetime'));if(!isNaN(d))t.textContent=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})});
+  var days=document.body.hasAttribute('data-days');
+  document.querySelectorAll('time[datetime]').forEach(function(t){var d=new Date(t.getAttribute('datetime'));if(!isNaN(d))t.textContent=days?d.toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})});
   document.querySelectorAll('table.sortable').forEach(function(table){
     table.querySelectorAll('thead button').forEach(function(btn){btn.addEventListener('click',function(){
       var col=+btn.getAttribute('data-col'),dir=btn.getAttribute('data-dir')==='asc'?'desc':'asc';

@@ -142,6 +142,24 @@ const joinPath = (dir: string, path: string): string => {
 }
 
 /**
+ * The words with each `$NAME` or `${NAME}` a variable set earlier in the same
+ * command stands for: `D=active-development/processes && bash x.sh "$D/X.xml"`
+ * names `active-development/processes/X.xml`. A variable the command doesn't
+ * set (a loop's, the environment's) stays as it is.
+ */
+const expandVariables = (tokens: readonly string[]): string[] => {
+  const vars = new Map<string, string>()
+  const expand = (word: string) => word.replace(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g, (whole, braced, bare) => vars.get(braced ?? bare) ?? whole)
+  return tokens.map((token, i) => {
+    const word = expand(token)
+    const set = word.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s)
+    // An assignment that starts a command, or follows export, sets the variable.
+    if (set && (isRun(tokens, i) || tokens[i - 1] === 'export')) vars.set(set[1]!, set[2]!)
+    return word
+  })
+}
+
+/**
  * The Companion scripts a shell command runs, with what each names. Help and
  * connection checks touch nothing, so they're left out, as is a script only
  * read or searched. A file named after a `cd` is taken from that folder, and
@@ -149,7 +167,7 @@ const joinPath = (dir: string, path: string): string => {
  */
 export const scriptRuns = (command: string): ScriptRun[] => {
   const runs: ScriptRun[] = []
-  const tokens = words(command)
+  const tokens = expandVariables(words(command))
   let dir = ''
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!
@@ -324,7 +342,9 @@ export const parseResults = (output: string): Result[] => {
   }
   const push = (result: Result) => {
     settleSubmitted()
-    results.push(result)
+    // The same line twice (an output echoed by tee, or printed by a wrapper too) is one result.
+    const isEcho = results.some(r => r.kind === result.kind && r.detail === result.detail && r.executionId === result.executionId && r.name === result.name)
+    if (!isEcho) results.push(result)
     pending = undefined
   }
   for (const raw of output.split(/\r?\n/)) {
@@ -427,6 +447,15 @@ export const assignResults = (
   }
   return { first, extras }
 }
+
+/**
+ * A run with no result of its own in a command that ran several scripts: it
+ * failed if the command did, else it isn't known how it went.
+ */
+export const unclaimedReading = (isError: boolean): Reading =>
+  isError
+    ? { outcome: 'failed', detail: 'ERROR: the command failed before this script printed a result' }
+    : { outcome: 'ok', detail: 'no result of its own in the output (it ran in a command with other scripts)' }
 
 /** The ID, name and type on a component XML's root element. */
 export const componentOf = (xml: string): { componentId?: string; name?: string; type?: string } => {
@@ -652,6 +681,8 @@ export const components = (activity: readonly Activity[]): ComponentRow[] => {
     if (row.componentId) byId.set(row.componentId, row)
     if (a.file) byFile.set(a.file, row)
   }
+  // Only a process can be test-run: a tested component whose XML wasn't read is one.
+  for (const row of rows.values()) if (!row.type && row.tested) row.type = 'process'
   return [...rows.values()].sort((a, b) => b.lastAt - a.lastAt)
 }
 
@@ -1142,13 +1173,20 @@ export const spends = (activity: readonly Activity[]): Map<number, Spend> => {
   let tokens = 0
   let usd: number | undefined
   let wasRestored: boolean | undefined
+  let session: string | undefined
   for (const a of activity) {
-    // Steps from an earlier session counted from that session's ledger: start over after them.
-    if (wasRestored !== undefined && Boolean(a.isRestored) !== wasRestored) {
+    // Each session counts from its own ledger: start over where the session changes,
+    // or where the running cost goes down (a session from before steps named theirs).
+    const isNewSession =
+      (wasRestored !== undefined && Boolean(a.isRestored) !== wasRestored) ||
+      (a.session !== undefined && session !== undefined && a.session !== session) ||
+      (a.usdAt !== undefined && usd !== undefined && a.usdAt < usd)
+    if (isNewSession) {
       tokens = 0
       usd = undefined
     }
     wasRestored = Boolean(a.isRestored)
+    session = a.session ?? session
     const spend: Spend = {}
     if (a.tokensAt !== undefined) {
       spend.tokens = Math.max(0, a.tokensAt - tokens)

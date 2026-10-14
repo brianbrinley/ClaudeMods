@@ -462,7 +462,7 @@ test("after a restart, this folder's steps from the last 24h come back; older on
   expect((await pane.find({ type: 'Button', key: 'earlier' }))?.props.label).toBe('Show 2 earlier')
   await pane.press({ key: 'earlier' })
   const after = await $.command.run(dashboard('text'))
-  expect(after.text).toContain('Old: ✓ saved')
+  expect(after.text).toContain('Old (process): ✓ saved')
   expect(after.text).toContain('3 steps from earlier sessions in this folder)')
   expect(after.text).toContain('✓ Nothing needs attention.')
   expect((await $.command.run(dashboard('earlier'))).text).toContain('No older steps')
@@ -1876,4 +1876,105 @@ test("when Claude Code's plugin list can't be read, every section shows as befor
   expect(await pane.find({ text: /COMPONENTS THIS SESSION/ })).toBeDefined()
   const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
   expect(await band.find({ text: /Companion here/ })).toBeUndefined()
+})
+
+test('a new version is toasted once, then the pane mentions it quietly until a newer one comes', async ($, on) => {
+  const toasts = world(on, { '.claude-plugin/plugin.json': '{ "name": "boomi-dashboard", "version": "0.21.0" }' })
+  const store: Record<string, unknown> = {}
+  on('store.get', async (_$, e) => ({ value: store[e.key] }))
+  on('store.set', async (_$, e) => {
+    store[e.key] = JSON.parse(JSON.stringify(e.value))
+    return { value: undefined }
+  })
+  startable(on)
+  let check = UPGRADE_CHECK
+  let checks = 0
+  on('process.run', async (_$, e) => {
+    if (!String(e.argv[1] ?? '').endsWith('/scripts/upgrade.sh')) return { deny: 'not the upgrade script' }
+    checks++
+    return { value: { exitCode: 0, stdout: check, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  const announced = () => toasts.filter(t => /is available/.test(t))
+
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.advance(20_000)
+  expect(announced()).toEqual(['bc-dashboard 0.23.0 is available (you have 0.21.0): run /bc-dashboard upgrade'])
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: '↑ bc-dashboard 0.23.0 is available: /bc-dashboard upgrade' })).toBeDefined()
+  await pane.unmount()
+
+  // A day later (the last check moved back a day), the same version: checked again, not toasted again, still in the footer.
+  store.upgradeCheckedAt = NOW - 25 * 3_600_000
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  const footer = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await footer.find({ text: /0\.23\.0 is available/ })).toBeDefined()
+  await footer.unmount()
+  await clock.advance(20_000)
+  expect(checks).toBe(2)
+  expect(announced()).toHaveLength(1)
+
+  // Another day, a newer release: that one is news.
+  check = UPGRADE_CHECK.replace('LATEST: 0.23.0', 'LATEST: 0.24.0')
+  store.upgradeCheckedAt = NOW - 25 * 3_600_000
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.advance(20_000)
+  expect(announced()).toHaveLength(2)
+  expect(announced()[1]).toContain('0.24.0 is available')
+})
+
+test('/bc-dashboard report html asks which steps to cover, adds Boomi\'s view of the account and components, and opens the page', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  mock.env(on, CREDENTIALS)
+  const asked: Question[] = []
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    const q = e.questions[0] as unknown as Question
+    asked.push(q)
+    return { result: { questions: [q], answers: { [q.question]: 'All sessions in this folder' } } as never }
+  })
+  const urls: string[] = []
+  on('http.fetch', async (_$, e) => {
+    urls.push(e.url)
+    const text = e.url.includes('/Account/')
+      ? '{"@type":"Account","accountId":"acct-1","name":"Acme Integration"}'
+      : JSON.stringify({ result: [{ componentId: ID, name: 'Orders Sync', version: 4, type: 'process', folderName: 'Orders', modifiedBy: 'pat@example.com', modifiedDate: '2026-10-12T11:00:00Z' }] })
+    return { value: { status: 200, ok: true, headers: {}, text } }
+  })
+  const opened: string[][] = []
+  on('process.run', async (_$, e) => {
+    if (e.argv[0] === 'bash' && e.argv[3] === 'open-report') opened.push([...e.argv.slice(4)])
+    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  const written: { path: string; text: string }[] = []
+  on('fs.write', async (_$, e) => {
+    written.push({ path: e.path, text: e.text })
+    return { value: undefined }
+  })
+  // An earlier session's push, kept by the dashboard, and one of this session's.
+  const earlier = { id: 1, kind: 'push', outcome: 'ok', subject: 'Orders Sync', detail: "SUCCESS: Pushed component 'Orders Sync' — now version 3", startedAt: NOW - 3 * 3_600_000, file: FILE, componentId: ID, version: '3', session: 'earlier-session-id', usdAt: 0.5 }
+  shell(on, "SUCCESS: Deployed 'Orders Sync' (package: pkg-42)")
+  await startSession($, on, { 'activity:/work': { savedAt: NOW - 3 * 3_600_000, activity: [earlier] } })
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-deploy.sh ${FILE}` })
+
+  const said = (await $.command.run(dashboard('report html'))).text ?? ''
+  expect(asked[0]?.question).toBe('Which steps should the report cover?')
+  expect(asked[0]?.options.map(o => o.label)).toEqual(['This session', 'All sessions in this folder'])
+  expect(said).toContain('Saved the report as a web page: /work/boomi-sessions-report-')
+  expect(said).toContain('Opened it in your browser.')
+  expect(opened).toEqual([[written[0]!.path]])
+  const page = written[0]!.text
+  expect(page).toContain('<title>Companion Sessions Report</title>')
+  expect(page).toContain('<code>earlier-session-id</code>')
+  expect(page).toContain('<dt>Account</dt><dd>Acme Integration</dd>')
+  expect(page).toContain('<td>process</td><td>Orders</td>')
+  expect(page).toContain('<span class="muted">package</span> <code>pkg-42</code>')
+  // Only IDs and names reach the page, never the credentials.
+  for (const secret of Object.values(CREDENTIALS).filter(v => !v.startsWith('https') && v !== 'acct-1')) expect(page).not.toContain(secret)
+  expect(urls.some(u => u.endsWith('/acct-1/ComponentMetadata/query'))).toBe(true)
+
+  // Named on the command line, there's no question; --no-open leaves the browser alone.
+  const again = (await $.command.run(dashboard('report html session --no-open'))).text ?? ''
+  expect(asked).toHaveLength(1)
+  expect(opened).toHaveLength(1)
+  expect(again).toContain('/work/boomi-session-report-')
+  expect(written[1]!.text).not.toContain('earlier-session-id')
 })

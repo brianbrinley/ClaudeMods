@@ -63,7 +63,7 @@ The install above uses no marketplace and copies nothing. Claude Code loads the 
 
 Anything it prints is masked for tokens and keys (`glc_`, `sk-`, `eyJ`, `Bearer …`, `Basic …`), and it never reads `.env`.
 
-**Update nudge:** at the start of a session, at most once every `updateCheckHours` (24), the dashboard fetches and toasts `bc-dashboard X.Y.Z is available` when you're behind. It never installs, and says nothing when offline. Turn it off with `updateCheck` under `/config`.
+**Update nudge:** at the start of a session, at most once every `updateCheckHours` (24), the dashboard fetches its checkout to see whether you're behind. A version you haven't heard about gets one toast, `bc-dashboard X.Y.Z is available`. After that, the pane's footer says `↑ bc-dashboard X.Y.Z is available: /bc-dashboard upgrade` until you install it, and only a newer release toasts again. It never installs, and says nothing when offline. Turn it off with `updateCheck` under `/config`.
 
 By hand, the same thing is `git -C ~/ClaudeMods pull --ff-only`, then `claude plugin validate` and `claude plugin test` on the mod, then a restart.
 
@@ -275,15 +275,22 @@ Boomi Companion sessions on this machine, last 90 days:
 
 ### As a web page to share
 
-`/bc-dashboard report html` saves the same report as one file, `boomi-session-report-<time>.html`, in the workspace. Open it in any browser, or send it to someone who doesn't use Claude Code. Nothing in it is live: it's a snapshot of the session, with no credentials, and anything shaped like a token is masked.
+`/bc-dashboard report html` saves the report as one file in the workspace and opens it in your browser. Send it to anyone, including people who don't use Claude Code. Nothing in it is live: it's a snapshot with no credentials, and anything shaped like a token is masked.
+
+- **This session or all of them.** When the dashboard kept steps from earlier sessions in this folder, it asks which to cover. **This session** saves `boomi-session-report-<time>.html`. **All sessions in this folder** saves `boomi-sessions-report-<time>.html`, with a **Sessions** table giving each session's ID, when it ran, its steps, failures, components and cost. `report html session` or `report html all` skips the question.
+- **Opening it:** it uses your system's opener (`open` on macOS, `wslview` or Explorer under WSL, `xdg-open` on a Linux desktop). Where there's no browser (a container, a server), it just says where the file is. `--no-open`, or `reportOpen` set to off, saves without opening.
+- **The Boomi account:** the account's name and ID, the environment ID and the Platform API host, read from Companion's `.env`. The API token and user name never go in the page.
+- **Each component as Boomi has it now:** type, folder, component ID, current version, and who changed it last and when, read from the Platform API as the report is made. A component Boomi now knows by another name shows that name too. **Open in Boomi** goes to the component in Boomi's build page. If the API can't be reached, the report says so and shows what the session saw.
+- **Deployments and tests:** every deploy with its package ID, and every test with its execution ID and status, so you can find them in Boomi's Process Reporting and Deploy pages.
+- **Each step:** its result, component (with **Open in Boomi**), version, package, execution, file, how long it took, and whether it came from Claude's tool call or Companion's activity log. In an all-sessions report, also its session.
 
 It follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system: its Exo III color tokens, light and dark (Light and Dark buttons at the top, or your system's setting), Poppins headings and Noto Sans text, its cards, badges and alerts. Every status shows its icon and its label, never color alone.
 
-- **At a glance:** cost against your budget, tokens, components and steps, and what needs attention.
+- **At a glance:** cost against your budget, tokens (sessions, in an all-sessions report), components and steps, and what needs attention.
 - **Five charts,** each with hover details and a **Show the data** table:
   - steps over the session, stacked by outcome;
   - outcomes by product (click a product to list its steps);
-  - cost over the session;
+  - cost over the session (in a one-session report: different sessions' costs don't add up to one line);
   - spend by product;
   - the component pipeline: worked on, saved in Boomi, deployed, tested and passing.
 
@@ -307,7 +314,7 @@ With a connection it loads Exosphere's fonts from Google Fonts; offline it falls
 | `/bc-dashboard size <rows> [columns]` | | The pane's size, kept for later sessions; `size` alone goes back to the default. |
 | `/bc-dashboard seen` | | Moves watched changes out of **Needs attention**. |
 | `/bc-dashboard watch <id\|file>` / `unwatch <id>` | `watch` | Watches a component, or stops. |
-| `/bc-dashboard report [save\|html]` | `report` | The session report; `html` saves it as a web page to share. |
+| `/bc-dashboard report [save\|html [session\|all] [--no-open]]` | `report` | The session report; `html` saves it as a web page to share and opens it, for this session or all of this folder's. |
 | `/bc-dashboard history` | `history` | Past Companion sessions and their cost. |
 | `/bc-dashboard resume [n]` | | Copies the command that reopens a past session in a new terminal; without a number, asks which. |
 | `/bc-dashboard review [n]` | | What drove a past session's cost, and what to change next time; without a number, asks which of the costliest. |
@@ -343,6 +350,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `companionMonthlyUsd` | `0` | A monthly amount for Companion sessions, in US dollars; `0` turns it off. |
 | `updateCheck` | `true` | At the start of a session, say when a newer dashboard is on GitHub (never installs). |
 | `updateCheckHours` | `24` | Hours between update checks; `0` turns them off. |
+| `reportOpen` | `true` | Open `/bc-dashboard report html`'s page in your browser once it's saved. |
 | `suggestions` | `true` | Suggest the next step after a turn. |
 | `historyDays` | `90` | How far back **Past Companion sessions** reads. |
 

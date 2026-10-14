@@ -77,6 +77,7 @@ import {
   choiceList,
   recapOf,
   welcomeLine,
+  unclaimedReading,
   tipsFor,
   quarantineLines,
   agents,
@@ -105,9 +106,10 @@ import {
 import type { Attention, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
-import { reportHtml } from './report-html'
+import { hasEarlierSteps, reportHtml, scoped, sessionSummaries } from './report-html'
+import type { BoomiFacts, ReportScope } from './report-html'
 import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
-import { RESTART, checkText, compareVersions, isCheckDue, parseUpgrade, planText } from './upgrade'
+import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import type { Credentials } from './platform'
@@ -142,6 +144,9 @@ const isCompanionFolder = atom({ plugin: 'boomi-dashboard', key: 'isCompanionFol
 
 /** The Boomi Companion plugins on in this session, read once at its start; null until then, or when Claude Code's list can't be read. */
 const companionPlugins = atom({ plugin: 'boomi-dashboard', key: 'companionPlugins' } as const, null as CompanionPlugin[] | null)
+
+/** A newer dashboard version on GitHub, for the pane's footer: toasted once, then mentioned quietly until installed. */
+const updateAvailable = atom({ plugin: 'boomi-dashboard', key: 'updateAvailable' } as const, null as string | null)
 
 /** What each failed execution's log says, by execution ID, once someone asks Why?. */
 const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const, {} as Record<string, DiagnosisState>)
@@ -212,6 +217,7 @@ type Settings = {
   paneColumns: number
   isCheckingUpdates: boolean
   updateCheckHours: number
+  isOpeningReport: boolean
 }
 
 const settingsFrom = (options: PluginOptions): Settings => ({
@@ -234,6 +240,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   paneColumns: Math.max(0, Math.round(Number(options.paneColumns ?? 0) || 0)),
   isCheckingUpdates: options.updateCheck !== false,
   updateCheckHours: Math.max(0, Number(options.updateCheckHours ?? 24) || 0),
+  isOpeningReport: options.reportOpen !== false,
 })
 
 const PANE = 'boomi-dashboard'
@@ -242,6 +249,8 @@ const SCRIPTS_KEY = 'scriptsDir'
 const THEME_KEY = 'theme'
 const HISTORY_KEY = 'history'
 const UPGRADE_KEY = 'upgradeCheckedAt'
+/** The newest version an update check found, and the newest already toasted (UpdateSeen). */
+const UPDATE_SEEN_KEY = 'updateSeen'
 
 /** How often the flamingo's frame moves on while Claude works. */
 const FLAMINGO_TICK_MS = 500
@@ -331,7 +340,8 @@ const usageOf = async ($: Engine): Promise<Usage> => {
 /** The session's tokens and cost right now, stamped on each step as it begins. */
 const snapshot = async ($: Engine) => {
   const usage = await usageOf($)
-  return { tokensAt: usage.tokens ?? 0, usdAt: usage.usd, model: usage.model }
+  const session = await $.session.id().catch(() => undefined)
+  return { tokensAt: usage.tokens ?? 0, usdAt: usage.usd, model: usage.model, ...(session ? { session } : {}) }
 }
 
 const refreshStatus = async ($: Engine, settings: Settings) => {
@@ -662,7 +672,9 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
       done.push({ ...a, outcome: 'blocked', detail: ran.deny.split('\n')[0]!.slice(0, 160), endedAt })
       continue
     }
-    done.push(await finish(a, first.get(a.id) ?? readOutput(a.kind, output, isError)))
+    // With several scripts in one command, another script's lines aren't this run's result.
+    const fallback = started.length > 1 ? unclaimedReading(isError) : readOutput(a.kind, output, isError)
+    done.push(await finish(a, first.get(a.id) ?? fallback))
     for (const extra of extras.get(a.id) ?? []) {
       // Another pass of the same script: its own component, not this run's file.
       added.push(await finish({ ...a, id: id++, file: undefined, componentId: undefined, subject: 'a component' }, extra))
@@ -945,12 +957,13 @@ const readActivityLog = async ($: Engine, settings: Settings) => {
     })
     logSeen = seenNow
     if (steps.length === 0) return
+    const session = await $.session.id().catch(() => undefined)
     let added: Activity[] = []
     await update($, dashboard, c => {
       // A step's logKey keeps it from being added twice, however reads overlap.
       const keys = new Set(c.activity.map(a => a.logKey))
       let id = nextId(c.activity)
-      added = steps.filter(step => !keys.has(step.logKey)).map(step => ({ ...step, id: id++ }))
+      added = steps.filter(step => !keys.has(step.logKey)).map(step => ({ ...step, id: id++, ...(session && !step.isRestored ? { session } : {}) }))
       return { ...c, activity: [...c.activity, ...added].sort((a, b) => a.startedAt - b.startedAt).slice(-150) }
     })
     for (const a of added) if (!a.isRestored) announce($, settings, a)
@@ -1379,28 +1392,104 @@ const ownVersion = async ($: Engine): Promise<string | undefined> => {
  * open in a browser or send to someone: Valence Day and Night, sortable
  * tables, a filterable list of steps and the spend charted.
  */
-const reportHtmlCommand = async ($: Engine, settings: Settings): Promise<string> => {
+const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly string[]): Promise<string> => {
   const now = await $.clock.now()
   const footer = await footerOf($)
+  const current = await read($, dashboard)
+  // This session, or every session this folder kept: asked when there's a choice to make.
+  let scope: ReportScope = words.includes('all') ? 'all' : 'session'
+  if (!words.includes('all') && !words.includes('session') && hasEarlierSteps(current)) {
+    const options = ['This session', 'All sessions in this folder']
+    const answer = await $.ui
+      .ask('Which steps should the report cover?', { header: 'Report', options })
+      .catch(() => undefined)
+    if (answer === undefined) return 'No report made. Run /bc-dashboard report html session or /bc-dashboard report html all to skip the question.'
+    scope = answer === options[1] || /all/i.test(answer) ? 'all' : 'session'
+  }
+  const view = scoped(current, scope)
+  const usage = await withBudget($, settings)
+  const sessionId = await $.session.id().catch(() => undefined)
+  const cwd = await $.session.cwd()
   const page = reportHtml(
-    await read($, dashboard),
-    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await withBudget($, settings), version: await ownVersion($) },
+    view,
+    {
+      session: footer.session,
+      sessionId,
+      date: new Date(now).toISOString().slice(0, 10),
+      repo: footer.repo,
+      usage,
+      version: await ownVersion($),
+      scope,
+      folder: cwd.split('/').filter(Boolean).pop(),
+      boomi: await boomiFacts($, settings, view),
+      ...(scope === 'all' ? { sessions: sessionSummaries(view.activity, sessionId, usage.usd, (await read($, history)).sessions ?? []) } : {}),
+    },
     now,
     settings.windowMs,
   )
   const stamp = new Date(now).toISOString().slice(0, 16).replace(/[-:T]/g, '')
-  const path = `${await $.session.cwd()}/boomi-session-report-${stamp}.html`
+  const path = `${cwd}/boomi-${scope === 'all' ? 'sessions' : 'session'}-report-${stamp}.html`
   await $.fs.write(path, page)
+  const opened = settings.isOpeningReport && !words.includes('--no-open') ? await openInBrowser($, path) : false
   return [
     `Saved the report as a web page: ${path}`,
-    'Open it in a browser (it works offline; with a connection it also loads the Valence fonts). It is one file with nothing live in it and no credentials, so you can send it as it is.',
-    'In it: Day and Night colors, sortable tables (click a column), the steps filtered by product or by what failed, a search, and the spend charted.',
+    opened
+      ? 'Opened it in your browser. It is one file with nothing live in it and no credentials, so you can send it as it is.'
+      : 'Open it in a browser (it works offline; with a connection it also loads the fonts). It is one file with nothing live in it and no credentials, so you can send it as it is.',
+    `In it: ${scope === 'all' ? 'every session this folder kept, each with its steps and cost; ' : ''}the Boomi account, each component's ID, type, folder and version in Boomi with a link to open it, every deploy's package and test's execution ID, sortable tables, the steps filtered by product or by what failed, and the charts.`,
   ].join('\n')
 }
 
-/** /bc-dashboard report [save|html]: the report as text; save also writes it as Markdown, html as a web page. */
+/**
+ * The Boomi account and the report's components as Boomi has them now, read
+ * with Companion's credentials: never the token or the user name, only IDs,
+ * names, types, folders and versions. What can't be read is said, not guessed.
+ */
+const boomiFacts = async ($: Engine, settings: Settings, view: Dashboard): Promise<BoomiFacts> => {
+  const loaded = await loadCredentials($, settings).catch(() => 'unavailable')
+  if (typeof loaded === 'string') return { components: {}, note: `Boomi's own details aren't included: ${loaded}` }
+  const facts: BoomiFacts = { accountId: loaded.accountId, environmentId: loaded.environmentId, apiHost: loaded.apiUrl.replace(/^https?:\/\//, ''), components: {} }
+  const client = platformClient((url, init) => $.http.fetch(url, init), loaded)
+  const ids = components(view.activity).flatMap(row => (row.componentId ? [row.componentId] : []))
+  const [name, found] = await Promise.all([
+    client.accountName().catch(() => undefined),
+    client.componentDetails(ids).catch((error: unknown) => {
+      facts.note = `Boomi's current details for the components couldn't be read: ${messageOf(error)}`
+      return []
+    }),
+  ])
+  if (name) facts.accountName = name
+  for (const d of found) facts.components[d.componentId] = d
+  return facts
+}
+
+/**
+ * Opens a file in the person's browser with the system's own opener: open on
+ * macOS, wslview or Explorer under WSL, start on Windows, xdg-open where
+ * there's a desktop. False where there's none (a container, a server).
+ */
+const openInBrowser = async ($: Engine, path: string): Promise<boolean> => {
+  const ran = await $.process.run(['bash', '-c', OPEN_SCRIPT, 'open-report', path], { timeoutMs: 15_000 }).catch(() => undefined)
+  return ran?.exitCode === 0
+}
+
+const OPEN_SCRIPT = [
+  'case "$(uname -s)" in',
+  '  Darwin) exec open "$1" ;;',
+  '  MINGW*|MSYS*|CYGWIN*) exec cmd //c start "" "$1" ;;',
+  'esac',
+  'if grep -qi microsoft /proc/version 2>/dev/null; then',
+  '  if command -v wslview >/dev/null 2>&1; then exec wslview "$1"; fi',
+  '  if command -v explorer.exe >/dev/null 2>&1; then explorer.exe "$(wslpath -w "$1")"; exit 0; fi',
+  'fi',
+  'if command -v xdg-open >/dev/null 2>&1 && { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; }; then exec xdg-open "$1"; fi',
+  'exit 3',
+].join('\n')
+
+/** /bc-dashboard report [save|html [session|all] [--no-open]]: the report as text; save also writes it as Markdown, html as a web page. */
 const reportCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
-  if (target === 'html') return reportHtmlCommand($, settings)
+  const words = target.split(/\s+/).filter(Boolean)
+  if (words[0] === 'html') return reportHtmlCommand($, settings, words.slice(1))
   const text = await reportNow($, settings)
   if (target !== 'save') return text
   const stamp = new Date(await $.clock.now()).toISOString().slice(0, 16).replace(/[-:T]/g, '')
@@ -1647,9 +1736,17 @@ const nudgeUpgrade = async ($: Engine, settings: Settings) => {
   const check = await runUpgrade($, ['check'], 60_000).catch(() => undefined)
   if (!check || check.error || !check.latest || !check.installed) return
   await $.store.set(UPGRADE_KEY, now).catch(() => undefined)
-  if (compareVersions(check.latest, check.installed) > 0) {
-    $.ui.toast(`bc-dashboard ${check.latest} is available (you have ${check.installed}): run /bc-dashboard upgrade`)
-  }
+  const notice = updateNotice(asUpdateSeen(await $.store.get(UPDATE_SEEN_KEY).catch(() => undefined)), check.installed, check.latest)
+  await $.store.set(UPDATE_SEEN_KEY, notice.seen ?? null).catch(() => undefined)
+  await update($, updateAvailable, () => notice.seen?.latest ?? null)
+  if (notice.isToasting) $.ui.toast(`bc-dashboard ${check.latest} is available (you have ${check.installed}): run /bc-dashboard upgrade`)
+}
+
+/** At the start, the newer version an earlier check found, for the footer, without fetching again. */
+const restoreUpdate = async ($: Engine) => {
+  const seen = asUpdateSeen(await $.store.get(UPDATE_SEEN_KEY).catch(() => undefined))
+  const pending = pendingUpdate(seen, await ownVersion($))
+  await update($, updateAvailable, () => pending ?? null)
 }
 
 // --- Drawing -------------------------------------------------------------------
@@ -1732,7 +1829,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save|html] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | upgrade [--check] [--yes] [--rollback]',
+      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | resume [n] | review [n] | report [save|html [session|all] [--no-open]] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | upgrade [--check] [--yes] [--rollback]',
     })
     await $.tool.register({
       name: 'summary',
@@ -1812,6 +1909,7 @@ export const register: Register = (on, options) => {
     await readActivityLog($, settings)
     $.clock.every(LOG_CHECK_MS, () => readActivityLog($, settings))
     // Whether a newer dashboard is on GitHub, at most once a day; it never installs.
+    if (settings.isCheckingUpdates) await restoreUpdate($).catch(() => undefined)
     $.clock.after(15_000, () => nudgeUpgrade($, settings).catch(() => undefined))
     // A monthly Companion amount counts earlier sessions' costs: read them once, soon after the start.
     if (settings.companionMonthlyUsd > 0) {
@@ -2008,6 +2106,7 @@ export const register: Register = (on, options) => {
     const agentRows = agents(current.activity)
     const connectorRows = connectors(current.activity)
     const plugins = await read($, companionPlugins)
+    const newer = await read($, updateAvailable)
     const stepsLimit = await read($, stepsShown)
     const steps = current.activity.filter(a => !a.recipe).reverse()
     const feed = steps.slice(0, stepsLimit)
@@ -2372,7 +2471,12 @@ export const register: Register = (on, options) => {
         {current.watched.length > 0 && current.platform.phase !== 'ok' && current.platform.checkedAt !== undefined && line('warning', current.platform.message)}
         {current.watched.map(w => line(watchedLevel(w), watchedText(w)))}
 
-        <Box marginTop={1}>
+        {newer && (
+          <Box marginTop={1}>
+            {t(`↑ bc-dashboard ${newer} is available: /bc-dashboard upgrade`, { color: p.muted })}
+          </Box>
+        )}
+        <Box marginTop={newer ? 0 : 1}>
           <Text color={p.muted} backgroundColor={p.bg} dimColor>
             {`session ${footer.session}`}
             {footer.repo ? ' · ' : ''}
