@@ -2495,7 +2495,7 @@ const promptWorld = async (
   return { asked, closed, filled, sent, store, typed }
 }
 
-test('suggest: a vague Boomi prompt goes through as typed, and /bc-dashboard prompt shows its tips and the upgrade', async ($, on) => {
+test('suggest: a vague Boomi prompt goes through as typed, and /bc-dashboard prompt shows its tips and the upgrade', { options: { promptCheck: 'suggest' } }, async ($, on) => {
   const { asked, sent, typed } = await promptWorld($, on)
   await typed(VAGUE)
   expect(sent).toEqual([VAGUE])
@@ -2607,7 +2607,7 @@ test('/bc-dashboard prompt use fills the prompt box; prompt upgrade has the mode
 const PROMPT_TAB = { component: 'Pane', requestId: 'boomi-dashboard-prompt', props: {} as RenderPropsOf['Pane'] } as const
 const tabOpens = () => opens.filter(o => o.id === 'boomi-dashboard-prompt').map(o => o.title)
 
-test('auto: a prompt with tips opens the Prompt tab; it shows the tips, its buttons, and the prompt beside the upgrade', async ($, on) => {
+test('auto: a prompt with tips opens the Prompt tab; it shows the tips, its buttons, and the prompt beside the upgrade', { options: { promptCheck: 'suggest' } }, async ($, on) => {
   const { closed, filled, typed } = await promptWorld($, on)
   await typed(VAGUE)
   expect(tabOpens()).toEqual(['Boomi Dashboard Prompt tips · 4'])
@@ -2639,7 +2639,7 @@ test('a prompt with nothing to add closes the Prompt tab', async ($, on) => {
   expect(closed).toEqual(['boomi-dashboard', 'boomi-dashboard-prompt'])
 })
 
-test('manual: the Prompt tab opens only when asked, from /bc-dashboard prompt or the pane’s button', { options: { promptView: 'manual' } }, async ($, on) => {
+test('manual: the Prompt tab opens only when asked, from /bc-dashboard prompt or the pane’s button', { options: { promptView: 'manual', promptCheck: 'suggest' } }, async ($, on) => {
   const { typed } = await promptWorld($, on)
   await typed(VAGUE)
   expect(tabOpens()).toEqual([])
@@ -2730,7 +2730,7 @@ test('confirm: a held prompt can go back to the prompt box, or be discarded; the
   expect(sent).toEqual([VAGUE])
 })
 
-test('suggest: the banner nudges with the suggestion, Use it fills the prompt box, and ✕ puts the nudge away', async ($, on) => {
+test('suggest: the banner nudges with the suggestion, Use it fills the prompt box, and ✕ puts the nudge away', { options: { promptCheck: 'suggest' } }, async ($, on) => {
   const { filled, typed } = await promptWorld($, on)
   await typed(VAGUE)
   const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...BAND_TARGET })
@@ -2745,7 +2745,7 @@ test('suggest: the banner nudges with the suggestion, Use it fills the prompt bo
   expect(await band.find({ text: /suggests a clearer prompt/ })).toBeUndefined()
 })
 
-test('the Prompt tab takes the dashboard pane’s place, and leaving it brings the dashboard back', async ($, on) => {
+test('the Prompt tab takes the dashboard pane’s place, and leaving it brings the dashboard back', { options: { promptCheck: 'suggest' } }, async ($, on) => {
   const { closed, typed } = await promptWorld($, on)
   await $.command.run(dashboard(''))
   await typed(VAGUE)
@@ -2777,4 +2777,25 @@ test('Regenerate reads the folder’s components and the person’s note, and ev
   await tab.press({ key: 'prompt-try-back' })
   expect(await tab.find({ text: /try 2 of 3/ })).toBeDefined()
   expect(await tab.find({ text: /Try 1: build the QTC process\./ })).toBeDefined()
+})
+
+test('by default a flagged prompt is held: confirm is the default', async ($, on) => {
+  const { sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
+  expect(await typed(VAGUE)).toEqual({ drop: "Held by the Boomi Dashboard: Claude hasn't seen it yet. Send it, or the upgrade, from Boomi Dashboard Prompt tips." })
+  expect(sent).toEqual([])
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('Prompt tips (promptCheck: confirm)')
+})
+
+test('a note longer than the field is drawn whole under it, and each try shows the note it followed', { options: { promptCheck: 'suggest' } }, async ($, on) => {
+  on('model.complete', async () => ({
+    value: { isAnswered: true, text: 'Build the Salesforce to NetSuite orders sync.', usage: { input_tokens: 100, output_tokens: 30, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
+  }) as never)
+  const { typed } = await promptWorld($, on)
+  await typed('build a process that syncs orders')
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  const note = 'lets use salesforce as the source and netsuite as the target, on a schedule every hour, with JSON'
+  await tab.input({ key: 'prompt-note', text: note, kind: 'change' })
+  expect(await tab.find({ text: new RegExp(`^${note}$`) })).toBeDefined()
+  await tab.input({ key: 'prompt-note', text: note })
+  expect(await tab.find({ text: new RegExp(`This try's note: ${note}`) })).toBeDefined()
 })

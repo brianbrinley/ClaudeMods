@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.43.0",
+  "version": "0.44.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -164,13 +164,13 @@
     "promptCheck": {
       "type": "string",
       "title": "Prompt tips",
-      "description": "Check each Boomi prompt you type for what it leaves out (which component, environment, test data, error) and suggest an upgraded one: suggest shows tips and sends the prompt, confirm asks first, off never checks. A prompt with a password or token in it always asks, unless this is off",
+      "description": "Check each Boomi prompt you type for what it leaves out (which component, environment, test data, error) and suggest an upgraded one: confirm (default) holds a flagged prompt until you send it or the upgrade, suggest shows tips and sends the prompt, off never checks. A prompt with a password or token in it always asks, unless this is off",
       "options": [
         "off",
         "suggest",
         "confirm"
       ],
-      "default": "suggest"
+      "default": "confirm"
     },
     "promptView": {
       "type": "string",

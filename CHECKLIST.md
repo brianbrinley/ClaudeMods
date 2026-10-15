@@ -298,4 +298,6 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** each time, the Prompt tab is the one you see, and **Dismiss** and **◀ Dashboard** bring the dashboard back. **Fail:** the tab opens behind the dashboard, or the dashboard doesn't come back.
 - [ ] **O17. Regenerate reads the folder and follows a note.** In a folder with a Salesforce connection component, type `build a process from salesforce to netsuite with generic connections`, press **Upgrade with a model**, then type `split it into steps` in the note and press Enter.
   **Pass:** the first rewrite says it read this folder's components and names the existing connection; the second follows the note and differs from the first; **◀** shows the earlier tries. No name or ID appears that isn't in the folder or the session. **Fail:** a made-up name, the note ignored, or a try lost.
+- [ ] **O18. Confirm by default, and a long note.** *(0.44.0)* With `promptCheck` never set (or reset with `/bc-dashboard config promptCheck confirm`), type `build a process that syncs orders`; then in the Prompt tab type a note longer than the field.
+  **Pass:** Claude doesn't start, and the tab says `⏸ Held`. The whole note shows, wrapped, under the field; after Enter, the try says `This try's note:` with all of it. **Fail:** Claude starts on its own, or the note is cut off.
 

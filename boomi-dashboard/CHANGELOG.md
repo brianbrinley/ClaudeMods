@@ -2,6 +2,11 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.44.0
+
+- **Confirm is now the default for prompt tips.** A Boomi prompt that leaves something out is held, and Claude doesn't see it until you choose **Send the upgrade**, **Send as typed**, **Edit in the prompt box** or **Discard** in the Prompt tab or the banner. This changes what happens if you never set `promptCheck`: run `/bc-dashboard config promptCheck suggest` to let prompts through with tips, as before.
+- **A long note for the rewrite shows in full.** The note field shows one line, so a longer note was cut off with `…`. It's now drawn whole, wrapped, under the field, and each try says the note it followed. The label lost its doubled colon.
+
 ## 0.43.0
 
 - **Confirm holds the prompt.** With `promptCheck` at `confirm`, a flagged prompt is held: Claude doesn't see it until you choose **Send the upgrade**, **Send as typed**, **Edit in the prompt box** or **Discard**, in the Prompt tab or the banner. The status line says `⏸ prompt held`. A sent prompt is never checked again. Where the tab can't show, the question asks as before.

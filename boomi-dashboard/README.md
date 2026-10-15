@@ -309,7 +309,7 @@ The upgrade adds only what the session knows, as sentences. What it doesn't know
 **The Prompt tab.** **See it**, or a prompt with tips, opens **Boomi Dashboard Prompt tips** in the dashboard pane's place. Claude Code can't bring a tab to the front, so the dashboard pane steps aside and comes back with **◀ Dashboard**, **Dismiss**, or a prompt with nothing to add. The tab shows the tips, your prompt beside the upgrade (one above the other in a narrow pane), then the buttons right under them:
 
 - **Use the upgrade** puts it in the prompt box. **Copy** copies it. **Dismiss** closes the tab.
-- **Upgrade with a model**, then **Regenerate**, has `promptModel` rewrite it. Type a note under them (`shorter`, `ask for a listener`, `split into steps`) and press Enter to regenerate following it. Every try is kept: **◀** and **▶** step through them.
+- **Upgrade with a model**, then **Regenerate**, has `promptModel` rewrite it. Type a note under them (`shorter`, `ask for a listener`, `split into steps`) and press Enter to regenerate following it; a note longer than the field shows in full under it. Every try is kept: **◀** and **▶** step through them, each with the note it followed.
 
 **What a rewrite reads,** besides your masked prompt and the session's facts:
 - **This folder's components** whose names share words with the prompt (up to 8, from the component XML under `componentsDir`), so "the Salesforce connection" can name the one you have. It uses a name only where the prompt clearly means it.
@@ -327,8 +327,8 @@ The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Promp
 
 | `promptCheck` | A prompt with tips |
 |---|---|
-| `suggest` (default) | Goes to Claude as typed; the tips show afterwards. |
-| `confirm` | **Holds it:** Claude doesn't see it yet. The Prompt tab and the banner say `⏸ Held`, with **Send the upgrade**, **Send as typed**, **Edit in the prompt box** and **Discard**; the status line says `⏸ prompt held`. A new prompt takes the place of a held one. Where the tab can't show (the web, a narrow window), a question asks instead, and closing it sends the prompt as typed. |
+| `confirm` (default) | **Holds it:** Claude doesn't see it yet. The Prompt tab and the banner say `⏸ Held`, with **Send the upgrade**, **Send as typed**, **Edit in the prompt box** and **Discard**; the status line says `⏸ prompt held`. A new prompt takes the place of a held one. Where the tab can't show (the web, a narrow window), a question asks instead, and closing it sends the prompt as typed. |
+| `suggest` | Goes to Claude as typed; the tips show afterwards, with the nudge above the prompt box. |
 | `off` | Nothing is checked. |
 
 **A secret always asks, even in `suggest`,** because once it's sent it stays in the transcript: **Send it with the secret masked**, **Edit it first** or **Send it as typed**. Closing the question sends it masked.
@@ -481,7 +481,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `reportStyle` | `exosphere` | How the HTML report looks: `exosphere` (Boomi's design system) or `expressive` (Valence, Miami Deco). `--style` picks one for a single report. |
 | `suggestions` | `true` | Suggest the next step after a turn. |
 | `historyDays` | `90` | How far back **Past Companion sessions** reads. |
-| `promptCheck` | `suggest` | [Prompt tips](#prompt-tips): `suggest` shows tips and sends the prompt; `confirm` asks first; `off` never checks. A secret in a prompt asks unless this is `off`. |
+| `promptCheck` | `confirm` | [Prompt tips](#prompt-tips): `confirm` holds a flagged prompt until you send it or the upgrade; `suggest` shows tips and sends the prompt; `off` never checks. A secret in a prompt asks unless this is `off`. |
 | `promptView` | `auto` | When the [Prompt tab](#prompt-tips) opens: `auto` when a prompt gets tips, `manual` only when you ask, `off` never. |
 | `promptModel` | `haiku` | The model `/bc-dashboard prompt upgrade` asks, only when you run it. |
 | `promptSkip` | (none) | Prompt checks to leave out, separated by commas. |
