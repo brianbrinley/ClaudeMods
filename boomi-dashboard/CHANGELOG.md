@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.45.1
+
+- **A note for the rewrite shows once.** The field wraps a long note itself now that its label has a line of its own, so the copy drawn under it (added in 0.44.0, when the field cut long notes off) showed the note twice. The copy is gone; each try still says the note it followed.
+
 ## 0.45.0
 
 - **The Prompt tab fits the pane.** A long prompt or upgrade pushed the buttons off the bottom. The cards now take only the rows the pane has, ending with `▼ 14 more lines` and **Show all**, so the buttons stay in view. **Show all** draws them whole and says `▼ Shown in full: scroll with ↓ or the wheel`, with **Jump to the buttons** and **Fit to the pane**.

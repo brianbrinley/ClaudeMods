@@ -310,7 +310,7 @@ The upgrade adds only what the session knows, as sentences. What it doesn't know
 
 - **Use the upgrade** puts it in the prompt box. **Copy** copies it. **Dismiss** closes the tab.
 - A long prompt or upgrade is fitted to the pane so the buttons stay in view: `▼ 14 more lines` and **Show all**, then **Jump to the buttons** and **Fit to the pane**.
-- **Upgrade with a model**, then **Regenerate**, has `promptModel` rewrite it. Type a note under them (`shorter`, `ask for a listener`, `split into steps`) and press Enter to regenerate following it; a note longer than the field shows in full under it. Every try is kept: **◀** and **▶** step through them, each with the note it followed.
+- **Upgrade with a model**, then **Regenerate**, has `promptModel` rewrite it. Type a note under them (`shorter`, `ask for a listener`, `split into steps`) and press Enter to regenerate following it; a long note wraps in the field. Every try is kept: **◀** and **▶** step through them, each with the note it followed.
 
 **What a rewrite reads,** besides your masked prompt and the session's facts:
 - **This folder's components** whose names share words with the prompt (up to 8, from the component XML under `componentsDir`), so "the Salesforce connection" can name the one you have. It uses a name only where the prompt clearly means it.
