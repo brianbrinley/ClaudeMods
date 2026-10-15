@@ -16,7 +16,13 @@ export type UsageWindow = {
   sessions?: number
 }
 
-export type UsageBreakdown = { day?: UsageWindow; week?: UsageWindow; isSubscription: boolean }
+export type UsageBreakdown = {
+  day?: UsageWindow
+  week?: UsageWindow
+  isSubscription: boolean
+  /** The windows are there but nothing in them was understood: Claude Code probably reworded its output. */
+  isUnreadable?: true
+}
 
 /** `name 20%, other 6%` as pairs; an item that isn't one is skipped. */
 const percents = (list: string): { name: string; percent: number }[] =>
@@ -58,10 +64,14 @@ export const parseUsage = (stdout: string): UsageBreakdown | undefined => {
   const day = find('24h')
   const week = find('7d')
   if (!day && !week) return undefined
+  const dayOf = day ? windowOf(day) : undefined
+  const weekOf = week ? windowOf(week) : undefined
+  const isUnderstood = [dayOf, weekOf].some(w => w && (w.plugins.length > 0 || w.habits.length > 0 || w.requests !== undefined))
   return {
     isSubscription: /using your subscription/i.test(text),
-    ...(day ? { day: windowOf(day) } : {}),
-    ...(week ? { week: windowOf(week) } : {}),
+    ...(dayOf ? { day: dayOf } : {}),
+    ...(weekOf ? { week: weekOf } : {}),
+    ...(isUnderstood ? {} : { isUnreadable: true as const }),
   }
 }
 
@@ -71,11 +81,26 @@ export const topHabit = (b: UsageBreakdown | null | undefined): string | undefin
   return top ? `${top.percent}% of your usage ${top.text}` : undefined
 }
 
-/** Companion's share in a line: "Companion: 20% of your usage today · 18% this week". Undefined without either. */
+/**
+ * Companion's share in a line: "≥20% of your usage today · ≥18% this week". Undefined without either.
+ * Claude Code lists only its top plugins, so a share is a lower bound.
+ */
 export const companionUseLine = (b: UsageBreakdown | null | undefined): string | undefined => {
   const parts = [
-    b?.day?.companion !== undefined ? `${Math.round(b.day.companion)}% of your usage today` : '',
-    b?.week?.companion !== undefined ? `${Math.round(b.week.companion)}% this week` : '',
+    b?.day?.companion !== undefined ? `≥${Math.round(b.day.companion)}% of your usage today` : '',
+    b?.week?.companion !== undefined ? `≥${Math.round(b.week.companion)}% this week` : '',
   ].filter(Boolean)
   return parts.length > 0 ? parts.join(' · ') : undefined
 }
+
+/**
+ * The headless run that prints the breakdown. `--safe-mode` leaves out the
+ * person's hooks, plugins and MCP servers (this one included), which a
+ * `/usage` run doesn't need: the same text in about half the time, with no
+ * SessionStart hook run every quarter of an hour. Without it, for a Claude
+ * Code that doesn't know the flag.
+ */
+export const usageArgv = (isSafe: boolean): string[] => ['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence', ...(isSafe ? ['--safe-mode'] : [])]
+
+/** Whether a reading from `checkedAt` is still good at `now`: another session on this machine may have taken it. */
+export const isFresh = (checkedAt: number | undefined, now: number, ms: number): boolean => checkedAt !== undefined && now >= checkedAt && now - checkedAt < ms

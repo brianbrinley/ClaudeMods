@@ -36,7 +36,7 @@ test('the /usage breakdown: Companion’s share is the bc-* plugins added up, pe
   })
   expect(b.week?.companion).toBe(21)
   expect(b.week?.requests).toBe(1150)
-  expect(companionUseLine(b)).toBe('20% of your usage today · 21% this week')
+  expect(companionUseLine(b)).toBe('≥20% of your usage today · ≥21% this week')
   expect(topHabit(b)).toBe('44% of your usage was at >150k context')
   // The plain text reads the same as the JSON.
   expect(parseUsage(RESULT)?.week?.companion).toBe(21)
@@ -62,4 +62,18 @@ test('your Claude budget: in dollars from a spend limit, said plainly when the l
     { label: 'Companion', level: 'healthy', percent: 0, detail: "20% of your usage today (Claude Code's estimate, this machine)", isUnmeasured: true },
   ])
   expect(budgetLines({}, SETTINGS)).toEqual([])
+})
+
+test('reworded output: windows with nothing understood say so, instead of showing nothing', () => {
+  const reworded = JSON.stringify({ result: 'You are currently using your subscription\n\nLast 24h\n  most went to bc-integration (20 percent)\n\nLast 7d\n  mostly long contexts' })
+  const b = parseUsage(reworded)!
+  expect(b.isUnreadable).toBe(true)
+  expect(companionUseLine(b)).toBeUndefined()
+  expect(parseUsage(OUTPUT)!.isUnreadable).toBeUndefined()
+  const lines = budgetLines({ isUsageUnreadable: true } as never, SETTINGS)
+  expect(lines.some(l => /couldn't read Claude Code's \/usage/.test(l.detail))).toBe(true)
+})
+
+test('a share is a lower bound: Claude Code lists only its top plugins', () => {
+  expect(companionUseLine(parseUsage(OUTPUT))).toContain('≥')
 })
