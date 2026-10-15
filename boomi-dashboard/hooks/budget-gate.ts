@@ -21,12 +21,12 @@ const CHANGING: { script: RegExp; when?: RegExp; what: string }[] = [
 
 /**
  * The other plugins' steps that change nothing in Boomi, though the dashboard
- * shows them: checks and scaffolding on this machine, downloads, a pull into
- * a working file, and a cancel (which stops a run, so a spent budget never
- * holds it back). Read from the plugins' own scripts (bc-connectordev 0.0.50,
- * bc-marketplace 0.2.10, bc-datahub 0.2.12, bc-bdi 0.2.5).
+ * shows them: checks and scaffolding on this machine, downloads and a pull
+ * into a working file. Read from the plugins' own scripts (bc-connectordev
+ * 0.0.50, bc-marketplace 0.2.10, bc-datahub 0.2.12, bc-bdi 0.2.5). Keyed by
+ * the script, or the script and its verb.
  */
-const NOT_A_CHANGE = new Set([
+export const LOCAL_ONLY: ReadonlySet<string> = new Set([
   'connectordev-descriptor-lint',
   'connectordev-doctor',
   'connectordev-init',
@@ -34,8 +34,10 @@ const NOT_A_CHANGE = new Set([
   'boomi-marketplace-supporting-materials',
   'datahub-model pull',
   'datahub-source pull',
-  'bdi-flow cancel',
 ])
+
+/** What the gate lets through: the local steps, and a cancel, which stops a run, so a spent budget never holds it back. */
+const NOT_A_CHANGE = new Set([...LOCAL_ONLY, 'bdi-flow cancel'])
 
 const KIND_WORDS: Record<string, string> = {
   create: 'create a component in Boomi',

@@ -259,7 +259,7 @@ Numbers go in without quotes. The period is `"day"`, `"week"` or `"month"`. Leav
 **What you see:**
 - A refused change shows as `⚠ Blocked by budget` in Claude's latest steps and under **Needs attention**, naming the budget and how far over it is.
 - The status line and the banner say `⛔ budget reached, Companion changes paused`, and one toast says so when it starts.
-- Every override you grant in `confirm` mode is recorded as a step and listed under **Budget overrides** in `/bc-dashboard report` and the HTML report, as an audit trail.
+- Every override you grant in `confirm` mode is recorded as a step and listed under **Budget overrides** in `/bc-dashboard report` and the HTML report, and shown on the change it let through under **Platform changes**, as an audit trail.
 
 **What Claude is told:** with your next prompt after enforcement starts (and again when it changes), Claude gets a short note that the budget is spent and changes are paused, so it plans without them. This costs about 80 tokens each time. A refused call tells Claude which budget is spent and by how much, to stop and report to you, and not to work around the block (no curl to the API, no running the script another way).
 
@@ -305,7 +305,7 @@ Boomi Companion sessions on this machine, last 90 days:
 
 ## Session report
 
-`/bc-dashboard report` prints the session as Markdown for a pull request, ticket or hand-off: components, deployments and tests, what needs attention, runs and spend. `report save` also writes it to `boomi-session-report-<date>.md`. Claude can ask for it with the `report` tool.
+`/bc-dashboard report` prints the session as Markdown for a pull request, ticket or hand-off: components, deployments and tests, what needs attention, the platform changes, runs and spend. `report save` also writes it to `boomi-session-report-<date>.md`. Claude can ask for it with the `report` tool.
 
 ### As a web page to share
 
@@ -333,6 +333,10 @@ It follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system: its 
 - **Save as CSV** downloads it as a file.
 
 Each row has the component's name, type, folder, ID and version in Boomi; its last deploy (how it went, when, and the package ID); its last test (how it went, when, and the execution ID); its cost; and its link in Boomi. In Claude Code, `/bc-dashboard components` copies the same table, `components csv` copies it as CSV, and `components save` also writes a `.csv` file into the workspace. A name that a spreadsheet would read as a formula is pasted as text.
+
+**Platform changes** lists every change the session made in Boomi, oldest first, as an audit trail for a change ticket. That covers creates, saves, deploys, undeploys, tests, folders made and web service calls, and the other plugins' changes. Edits, pulls, reads and local checks are left out. Each row has when the change ran, what it did, how it went, the ID it left (version, package, execution or run) and, when a budget override let it through, which one: allowed once or for the session, with the budget that was spent. A change the budget gate refused shows as `⚠ blocked by budget, not run`. The same buttons copy or save it, as `boomi-changes-<date>.csv`, and the Markdown report has it as a table.
+
+Branches, extensions and Event Streams setup aren't in it: a step doesn't record whether they read or changed something. They're still in the steps.
 
 **To print it or keep it as a PDF,** press **Print or save as PDF** at the top of the page, or use your browser's Print, and pick **Save as PDF** to keep a copy. The printout:
 - is always in the light theme, whatever the screen shows;

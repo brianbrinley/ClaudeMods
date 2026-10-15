@@ -1819,6 +1819,8 @@ export type ReportFacts = {
   date: string
   repo?: string
   usage: Usage
+  /** The Platform changes section's lines (changes.ts), placed after the budget overrides. */
+  changes?: readonly string[]
 }
 
 const cell = (text: string) => text.replace(/\|/g, '\\|')
@@ -1910,6 +1912,7 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
     lines.push('', '## Budget overrides', '', 'Companion changes allowed past a spent budget, as the user chose:', '')
     for (const a of overrides) lines.push(`- ${new Date(a.startedAt).toISOString().slice(0, 16).replace('T', ' ')} UTC: ${a.detail}`)
   }
+  if (facts.changes && facts.changes.length > 0) lines.push('', ...facts.changes)
 
   lines.push('', '## Spend', '')
   if (u.usd !== undefined) lines.push(`- Cost: ${formatCost(u.usd)}`)
