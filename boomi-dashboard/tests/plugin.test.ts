@@ -24,7 +24,8 @@ let clock: MockClock
 /** What the surface does with a pane, and the session's id and origin remote. */
 type WorldOptions = {
   isPlaced?: boolean
-  sessionId?: string
+  /** The session's ID, or a function for one that changes (a /clear). */
+  sessionId?: string | (() => string)
   remote?: string | null
   /** The seat's usage limits, read each time the session's usage is. */
   limits?: () => { kind: string; percentUsed: number; resetsAt?: string }[]
@@ -52,7 +53,7 @@ const world = (on: On, files: Record<string, string> = {}, options: WorldOptions
     return { value: options.isPlaced ? { isPlaced: true as const } : { isPlaced: false as const, reason: 'no pane in tests' } }
   })
   on('session.cwd', async () => ({ value: '/work' }))
-  on('session.id', async () => ({ value: options.sessionId ?? '3adaec6a-0227-5e7b-a04b-eeeba5da8710' }))
+  on('session.id', async () => ({ value: (typeof options.sessionId === 'function' ? options.sessionId() : options.sessionId) ?? '3adaec6a-0227-5e7b-a04b-eeeba5da8710' }))
   on('session.repo', async () => ({
     value: options.remote === null ? null : { root: '/work', remote: options.remote ?? 'git@github.com:brianbrinley/ClaudeMods.git', internal: false, name: null },
   }))
@@ -2437,8 +2438,14 @@ const VAGUE = 'deploy it and test it, still failing'
  * `answer` picks in the question dialog (undefined dismisses it); records the
  * questions, what went into the prompt box and what reached the model.
  */
-const promptWorld = async ($: Engine, on: On, answer: (q: Question) => string | undefined = () => undefined, files: Record<string, string> = { 'active-development': '' }) => {
-  world(on, { [FILE]: ORDERS, '.env': `BOOMI_ENVIRONMENT_ID=${ENV_ID}\nBOOMI_API_TOKEN=secret-token-value\n`, ...files })
+const promptWorld = async (
+  $: Engine,
+  on: On,
+  answer: (q: Question) => string | undefined = () => undefined,
+  files: Record<string, string> = { 'active-development': '' },
+  options: WorldOptions = {},
+) => {
+  world(on, { [FILE]: ORDERS, '.env': `BOOMI_ENVIRONMENT_ID=${ENV_ID}\nBOOMI_API_TOKEN=secret-token-value\n`, ...files }, options)
   scriptedShell(on, { [PUSH]: "SUCCESS: Pushed component 'Orders Sync' — now version 4", [TEST_RUN]: 'Execution completed: status=ERROR, executionId=execution-aaaa1111' })
   const asked: string[] = []
   on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
@@ -2466,13 +2473,14 @@ const promptWorld = async ($: Engine, on: On, answer: (q: Question) => string | 
     closed.push(String(e.id))
     return { value: undefined } as never
   })
-  await startSession($, on)
+  const store: Record<string, unknown> = {}
+  await startSession($, on, store)
   await $.tool.call({ tool: 'Bash', command: PUSH })
   await $.tool.call({ tool: 'Bash', command: TEST_RUN })
   // The steps refresh the status line and save in the background: let them finish before the test does.
   await $.command.run(dashboard('text'))
   const typed = (text: string, extra: Record<string, unknown> = {}) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' }, ...extra } as never)
-  return { asked, closed, filled, sent, typed }
+  return { asked, closed, filled, sent, store, typed }
 }
 
 test('suggest: a vague Boomi prompt goes through as typed, and /bc-dashboard prompt shows its tips and the upgrade', async ($, on) => {
@@ -2590,9 +2598,9 @@ const tabOpens = () => opens.filter(o => o.id === 'boomi-dashboard-prompt').map(
 test('auto: a prompt with tips opens the Prompt tab; it shows the tips, its buttons, and the prompt beside the upgrade', async ($, on) => {
   const { closed, filled, typed } = await promptWorld($, on)
   await typed(VAGUE)
-  expect(tabOpens()).toEqual(['Prompt · 4 tips'])
+  expect(tabOpens()).toEqual(['Boomi Dashboard Prompt tips · 4'])
   const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
-  expect(await tab.find({ text: /PROMPT TIPS/ })).toBeDefined()
+  expect(await tab.find({ text: /BOOMI DASHBOARD PROMPT TIPS/ })).toBeDefined()
   expect(await tab.find({ text: /"it": the process Orders Sync, the last one this session\?/ })).toBeDefined()
   expect(await tab.find({ text: /YOUR PROMPT/ })).toBeDefined()
   expect(await tab.find({ text: /By "it" I mean the process Orders Sync/ })).toBeDefined()
@@ -2624,9 +2632,9 @@ test('manual: the Prompt tab opens only when asked, from /bc-dashboard prompt or
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
   expect(await pane.find({ text: /4 prompt tips for your last prompt/ })).toBeDefined()
   await pane.press({ key: 'prompt-open' })
-  expect(tabOpens()).toEqual(['Prompt · 4 tips'])
+  expect(tabOpens()).toEqual(['Boomi Dashboard Prompt tips · 4'])
   expect((await $.command.run(dashboard('prompt'))).text).toContain('Prompt tips (promptCheck: suggest)')
-  expect(tabOpens()).toEqual(['Prompt · 4 tips', 'Prompt · 4 tips'])
+  expect(tabOpens()).toEqual(['Boomi Dashboard Prompt tips · 4', 'Boomi Dashboard Prompt tips · 4'])
 })
 
 test('off: the Prompt tab never opens, and the pane offers none', { options: { promptView: 'off' } }, async ($, on) => {
@@ -2649,4 +2657,24 @@ test('the Prompt tab’s Upgrade with a model rewrites the upgrade in place', as
   expect(await tab.find({ text: /Rewritten by haiku \(130 tokens\)\./ })).toBeDefined()
   expect(await tab.find({ text: /UPGRADED BY HAIKU/ })).toBeDefined()
   expect(await tab.find({ text: /Deploy Orders Sync to \[environment\], then test it with \[test data\]\./ })).toBeDefined()
+})
+
+// --- After /clear ---
+
+test('after /clear the dashboard sets the new session up again: it sees the folder anew, checks prompts, and keeps what was saved', async ($, on) => {
+  let id = 'session-before-clear'
+  const { sent, store, typed } = await promptWorld($, on, () => undefined, {}, { sessionId: () => id })
+  const saved = () => ((Object.entries(store).find(([k]) => k.startsWith('activity:'))?.[1] ?? {}) as { activity?: unknown[] }).activity ?? []
+  expect(saved()).toHaveLength(2)
+  // The session started outside a Companion folder; its steps since make it one, which only a new setup looks at.
+  await typed('deploy it')
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('No Boomi prompt checked yet')
+  // /clear: the process goes on under a new ID, with no session.start. The dashboard sets the new session up.
+  id = 'session-after-clear'
+  await typed(VAGUE)
+  expect(sent).toEqual(['deploy it', VAGUE])
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('"it": the process Orders Sync, the last one this session?')
+  await $.tool.call({ tool: 'Bash', command: PUSH })
+  await $.command.run(dashboard('text'))
+  expect(saved().length).toBeGreaterThanOrEqual(3)
 })

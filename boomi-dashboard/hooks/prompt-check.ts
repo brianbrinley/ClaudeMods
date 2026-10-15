@@ -119,11 +119,11 @@ export const checkPrompt = (text: string, facts: PromptFacts, skip: ReadonlySet<
   if (TEST.test(text) && !TEST_DATA.test(text)) add('test', 'warning', 'test: say what to test with, and what a pass looks like')
   if (BUILD.test(text)) {
     const missing = [
-      ENDPOINTS.test(text) ? '' : 'source and target',
+      ENDPOINTS.test(text) ? '' : 'the source and target',
       TRIGGER.test(text) ? '' : 'what starts it',
-      FORMAT.test(text) ? '' : 'data format',
+      FORMAT.test(text) ? '' : 'the data format',
     ].filter(Boolean)
-    if (missing.length > 0) add('build', 'warning', `new process: no ${listed(missing)}`)
+    if (missing.length > 0) add('build', 'warning', `new process: doesn't say ${listed(missing)}`)
   }
   if (MAP.test(text) && !MAP_DETAIL.test(text)) add('map', 'warning', 'map: name the source and target profiles or fields')
   const steps = STEPS.filter(s => s.test(text)).length

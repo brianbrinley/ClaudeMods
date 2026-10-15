@@ -531,6 +531,8 @@ const activityKey = async ($: Engine) => `activity:${await $.session.cwd()}`
  */
 const saveActivity = async ($: Engine, settings: Settings) => {
   try {
+    // After a /clear, the folder's saved steps come back first, so this save doesn't write over them.
+    await ensureSession($, settings)
     const current = await read($, dashboard)
     // Older steps not shown are kept too: the window is what shows, not what's saved.
     const shown = current.activity.filter(a => a.outcome !== 'running')
@@ -1960,8 +1962,8 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   return undefined
 }
 
-/** The Prompt tab's title, in its tab: "Prompt · 3 tips". */
-const promptTitle = (count: number) => `Prompt · ${count} tip${count === 1 ? '' : 's'}`
+/** The Prompt tab's title, in its tab: "Boomi Dashboard Prompt tips · 3". */
+const promptTitle = (count: number) => `Boomi Dashboard Prompt tips · ${count}`
 
 /** Opens (or retitles) the Prompt tab; whether a surface draws it. */
 const openPromptTab = async ($: Engine, count: number) =>
@@ -2484,6 +2486,71 @@ const decoRule = (width: number): string => {
   return `${'═'.repeat(side)}◇◆◇${'═'.repeat(Math.max(2, width - 3 - side))}`
 }
 
+/**
+ * The session's values the dashboard sets up from the store and the folder:
+ * the folder's earlier steps, past sessions, the watch list, and whether this
+ * is a Companion folder. Run at the session's start, and again when the
+ * session ID changes without one (a /clear goes on under a new ID and fires
+ * no session.start), so nothing saved is written over and the checks see the
+ * folder.
+ */
+/** The session the dashboard last set up: a /clear changes the ID. */
+let setUpFor: string | undefined
+
+const setUpSession = async ($: Engine, settings: Settings) => {
+  setUpFor = await $.session.id().catch(() => undefined)
+  // The watch list outlives the session; restore it the first time.
+  // A theme or size kept in the store (by 0.33.0 and earlier, or where /config refused it) moves to /config once it will take it.
+  const saved = await $.store.get(THEME_KEY)
+  if (isTheme(saved)) {
+    if (await saveSetting($, settings, 'paneTheme', saved)) await $.store.delete(THEME_KEY).catch(() => undefined)
+    else await update($, pickedTheme, () => saved)
+  }
+  const size = (await $.store.get(SIZE_KEY)) as { rows?: number; columns?: number } | undefined
+  if (size && typeof size.rows === 'number') {
+    if ((await saveSetting($, settings, 'paneRows', size.rows)) && (await saveSetting($, settings, 'paneColumns', size.columns ?? 0))) await $.store.delete(SIZE_KEY).catch(() => undefined)
+    else await update($, paneSize, () => ({ rows: size.rows!, columns: size.columns ?? 0 }))
+  }
+
+  await restoreActivity($, settings)
+
+  const scanned = (await $.store.get(HISTORY_KEY)) as { sessions?: PastSession[]; scannedAt?: number; scanned?: number } | undefined
+  if (Array.isArray(scanned?.sessions)) {
+    await update($, history, (): HistoryState => ({ phase: 'ready', sessions: scanned.sessions, scannedAt: scanned.scannedAt, scanned: scanned.scanned }))
+  }
+
+  const ids = await $.store.get(WATCH_KEY)
+  if (Array.isArray(ids)) {
+    await update($, dashboard, c =>
+      c.watched.length > 0 ? c : { ...c, watched: ids.map(id => ({ componentId: String(id) })) },
+    )
+  }
+
+  // The banner greets only where Companion works: its components folder, its log, or an earlier session here.
+  const cwd = await $.session.cwd()
+  const exists = (path: string) => $.fs.exists(path.startsWith('/') ? path : `${cwd}/${path}`).catch(() => false)
+  const isCompanion =
+    (await read($, recap)) !== null ||
+    (await read($, dashboard)).activity.length > 0 ||
+    (await exists(settings.componentsDir)) ||
+    (await exists(ACTIVITY_LOG))
+  await update($, isCompanionFolder, () => isCompanion)
+}
+
+/**
+ * Sets the session up again after a /clear: once per new session ID, before
+ * anything reads or saves its steps. Only once a session was set up, as
+ * session.start always does first.
+ */
+const ensureSession = async ($: Engine, settings: Settings) => {
+  if (setUpFor === undefined) return
+  const id = await $.session.id().catch(() => undefined)
+  if (id === undefined || id === setUpFor) return
+  setUpFor = id
+  await setUpSession($, settings)
+  void notePlugins($)
+}
+
 export const register: Register = (on, options) => {
   const settings = settingsFrom(options)
 
@@ -2520,32 +2587,7 @@ export const register: Register = (on, options) => {
       },
     })
 
-    // The watch list outlives the session; restore it the first time.
-    // A theme or size kept in the store (by 0.33.0 and earlier, or where /config refused it) moves to /config once it will take it.
-    const saved = await $.store.get(THEME_KEY)
-    if (isTheme(saved)) {
-      if (await saveSetting($, settings, 'paneTheme', saved)) await $.store.delete(THEME_KEY).catch(() => undefined)
-      else await update($, pickedTheme, () => saved)
-    }
-    const size = (await $.store.get(SIZE_KEY)) as { rows?: number; columns?: number } | undefined
-    if (size && typeof size.rows === 'number') {
-      if ((await saveSetting($, settings, 'paneRows', size.rows)) && (await saveSetting($, settings, 'paneColumns', size.columns ?? 0))) await $.store.delete(SIZE_KEY).catch(() => undefined)
-      else await update($, paneSize, () => ({ rows: size.rows!, columns: size.columns ?? 0 }))
-    }
-
-    await restoreActivity($, settings)
-
-    const scanned = (await $.store.get(HISTORY_KEY)) as { sessions?: PastSession[]; scannedAt?: number; scanned?: number } | undefined
-    if (Array.isArray(scanned?.sessions)) {
-      await update($, history, (): HistoryState => ({ phase: 'ready', sessions: scanned.sessions, scannedAt: scanned.scannedAt, scanned: scanned.scanned }))
-    }
-
-    const ids = await $.store.get(WATCH_KEY)
-    if (Array.isArray(ids)) {
-      await update($, dashboard, c =>
-        c.watched.length > 0 ? c : { ...c, watched: ids.map(id => ({ componentId: String(id) })) },
-      )
-    }
+    await setUpSession($, settings)
 
     $.clock.every(5_000, () => refreshStatus($, settings))
     // The flamingo's scene: what it does next is checked every half second.
@@ -2561,15 +2603,6 @@ export const register: Register = (on, options) => {
       $.clock.every(settings.pollSeconds * 1000, () => poll($, settings))
     }
 
-    // The banner greets only where Companion works: its components folder, its log, or an earlier session here.
-    const cwd = await $.session.cwd()
-    const exists = (path: string) => $.fs.exists(path.startsWith('/') ? path : `${cwd}/${path}`).catch(() => false)
-    const isCompanion =
-      (await read($, recap)) !== null ||
-      (await read($, dashboard)).activity.length > 0 ||
-      (await exists(settings.componentsDir)) ||
-      (await exists(ACTIVITY_LOG))
-    await update($, isCompanionFolder, () => isCompanion)
     // A new session's banner turns through the last session's recap and the tips until Companion does something.
     $.clock.every(TIP_MS, async () => {
       if (!(await read($, dashboard)).activity.some(a => !a.isRestored)) await update($, tip, n => n + 1)
@@ -2597,6 +2630,7 @@ export const register: Register = (on, options) => {
   // Companion's scripts: note each run as it starts, then read how it went.
   // The dashboard only watches: its own trouble never stops the command.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    await ensureSession($, settings).catch(() => undefined)
     const command = String(e.command ?? '')
     // A spent budget, with budgetEnforce confirm or block, stops Companion changes before they run.
     const gate = await budgetGate($, settings, command).catch(() => undefined)
@@ -2636,11 +2670,15 @@ export const register: Register = (on, options) => {
     return ran
   })
 
-  on('command.run', { command: 'bc-dashboard' }, async ($, e) => ({ text: await runCommand($, settings, e.args) }))
+  on('command.run', { command: 'bc-dashboard' }, async ($, e) => {
+    await ensureSession($, settings).catch(() => undefined)
+    return { text: await runCommand($, settings, e.args) }
+  })
 
   // A spent budget that pauses Companion changes: Claude hears it with the person's prompt, once and on a change.
   // A Boomi prompt is checked first: tips in suggest mode, a question in confirm mode or when it holds a secret.
   on('prompt.submit', async ($, e, next) => {
+    await ensureSession($, settings).catch(() => undefined)
     const checked = await checkSubmitted($, settings, e).catch(() => undefined)
     if (checked?.drop !== undefined) return { drop: checked.drop }
     const note = await enforcementContext($, settings).catch(() => undefined)
@@ -2812,7 +2850,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" backgroundColor={p.bg} paddingX={1} minHeight={e.viewport?.rows} width="100%">
         <Box justifyContent="space-between" backgroundColor={p.band ?? p.bg} paddingX={1}>
-          {t('◆ PROMPT TIPS ◆', { color: p.bandText, bold: true, bg: p.band })}
+          {t('◆ BOOMI DASHBOARD PROMPT TIPS ◆', { color: p.bandText, bold: true, bg: p.band })}
           {t(`promptCheck: ${settings.promptCheck}`, { color: p.bandText, bg: p.band })}
         </Box>
         <Text color={p.rule} backgroundColor={p.bg} wrap="truncate-end">

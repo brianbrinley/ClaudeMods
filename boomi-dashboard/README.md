@@ -303,7 +303,7 @@ The upgrade adds only what the session knows. Anything it doesn't know is left a
 
 **What you see:** the status line says `◐ 4 prompt tips: /bc-dashboard prompt` until your next prompt, and `/bc-dashboard prompt` shows the tips and the upgrade, on the web too.
 
-**The Prompt tab.** A prompt with tips opens a second pane, so Claude Code's tab row shows **Prompt · 4 tips** beside the dashboard, like a browser's tabs; click it, or press ctrl+x tab, to switch. It shows the buttons first, then the tips, then your prompt and the upgrade side by side (one above the other in a narrow pane):
+**The Prompt tab.** A prompt with tips opens a second pane, so Claude Code's tab row shows **Boomi Dashboard Prompt tips · 4** beside the dashboard, like a browser's tabs; click it, or press ctrl+x tab, to switch. It shows the buttons first, then the tips, then your prompt and the upgrade side by side (one above the other in a narrow pane):
 
 - **Use the upgrade** puts it in the prompt box.
 - **Upgrade with a model** has `promptModel` rewrite it there.
