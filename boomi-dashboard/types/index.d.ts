@@ -193,7 +193,7 @@ export type Dashboard = {
 }
 
 /** A prompt check: what a Companion prompt can leave out (see hooks/prompt-check.ts). */
-export type PromptCheckCode = 'subject' | 'environment' | 'test' | 'production' | 'steps' | 'error' | 'build' | 'map' | 'secret'
+export type PromptCheckCode = 'subject' | 'environment' | 'test' | 'production' | 'steps' | 'error' | 'build' | 'map' | 'secret' | 'aim'
 
 /** One thing a prompt leaves out, as a line: `deploy: no environment named; the session points at …`. */
 export type PromptTip = { code: PromptCheckCode; level: 'warning' | 'serious'; text: string }
@@ -303,6 +303,6 @@ export type RuntimeSeen = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { budgetAllowed: boolean; budgetPaused: string; enforceNoted: string; dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; paneSize: { rows: number; columns: number } | null; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; companionPlugins: CompanionPlugin[] | null; updateAvailable: string | null; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; reviewing: string | null; historyShown: number; stepsShown: number; promptTips: PromptTips | null; promptCounts: PromptCounts; promptBusy: boolean; promptNote: string; promptHeld: string | null; promptNudgeHidden: number; promptNoteDraft: string; promptExpanded: boolean }
+    'boomi-dashboard': { budgetAllowed: boolean; budgetPaused: string; enforceNoted: string; dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; paneSize: { rows: number; columns: number } | null; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; companionPlugins: CompanionPlugin[] | null; updateAvailable: string | null; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; reviewing: string | null; historyShown: number; stepsShown: number; promptTips: PromptTips | null; promptCounts: PromptCounts; promptBusy: boolean; promptNote: string; promptHeld: string | null; promptNudgeHidden: number; promptNoteDraft: string; promptExpanded: boolean; isPastCollapsed: boolean }
   }
 }

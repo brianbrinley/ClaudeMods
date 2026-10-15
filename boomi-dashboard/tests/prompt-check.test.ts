@@ -166,3 +166,10 @@ test('wrapLines breaks at spaces, cuts a word longer than a line, and keeps blan
   expect(wrapLines('abcdefghijkl', 8)).toEqual(['abcdefgh', 'ijkl'])
   expect(wrapLines('a\n\nb', 20)).toEqual(['a', '', 'b'])
 })
+
+test('a look around with nothing named to find gets a nudge; one that names what to find gets none', () => {
+  expect(checkPrompt('use boomi companion to check out my account.', NONE).map(t => t.code)).toEqual(['aim'])
+  expect(checkPrompt('explore the environment', NONE).map(t => t.code)).toEqual(['aim'])
+  expect(checkPrompt('check out the failed executions in my account', NONE)).toEqual([])
+  expect(checkPrompt('look at the deployed processes in my account', NONE)).toEqual([])
+})

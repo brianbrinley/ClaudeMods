@@ -282,6 +282,7 @@ The dashboard checks each prompt you type in a Companion folder for what Boomi w
 | `build` | A new process with no source and target, trigger or data format | What's missing |
 | `map` | A map with no profiles or fields | What to add |
 | `steps` | Three or more big steps at once (build, deploy, test, fix) | To stop between them |
+| `aim` | A look around the account with nothing named to find ("check out my account") | What to ask for. It only nudges: `confirm` doesn't hold a prompt for it alone |
 | `secret` | A password, token, API key, auth header or private key | That it will be masked (⚠) |
 
 For example, `deploy it and test it, still failing` after a failed test of Orders Sync gets:
@@ -362,6 +363,8 @@ With `BOOMI_COMPANION_LOG_ACTIVITY=1` in its `.env`, Companion's scripts append 
 - `activityLog` under `/config` turns it off.
 
 ## Past Companion sessions
+
+In the pane the section starts folded to its totals and a count, so this session keeps the room: **▸ Show** lists the sessions, **▾ Hide** folds them again, and the choice is kept for later sessions.
 
 **Scan** in the pane, `/bc-dashboard history`, or the `history` tool lists the sessions on this machine from the last `historyDays` days that ran a Companion script. Each one says when it started and how long it ran, what it cost, what it was about (its title if you named it with `/rename`, else your first request), and what it did:
 

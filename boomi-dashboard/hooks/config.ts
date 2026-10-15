@@ -58,7 +58,7 @@ export const GROUPS: readonly Group[] = [
       { key: 'promptCheck', label: 'Prompt tips', about: 'Check each Boomi prompt for what it leaves out and suggest an upgrade. Confirm holds a flagged prompt until you send it or the upgrade; suggest shows tips and sends it. A password or token in a prompt always asks unless this is off.', kind: 'choice', options: ['off', 'suggest', 'confirm'], default: 'confirm' },
       { key: 'promptView', label: 'Prompt tab', about: 'Auto opens the Prompt tab beside the pane when a prompt gets tips; manual only from /bc-dashboard prompt or the pane’s Prompt tab button; off never.', kind: 'choice', options: ['auto', 'manual', 'off'], default: 'auto' },
       { key: 'promptModel', label: 'Prompt rewrite model', about: 'The model /bc-dashboard prompt upgrade asks, only when you run it.', kind: 'text', default: 'haiku' },
-      { key: 'promptSkip', label: 'Prompt checks to skip', about: 'Checks to leave out, separated by commas: subject, environment, test, production, steps, error, build, map, secret.', kind: 'text', default: '' },
+      { key: 'promptSkip', label: 'Prompt checks to skip', about: 'Checks to leave out, separated by commas: subject, environment, test, production, steps, error, build, map, secret, aim.', kind: 'text', default: '' },
       { key: 'flamingo', label: 'Flamingo', about: 'The 8-bit flamingo in the pane, standing while Claude is idle and walking while it works.', kind: 'boolean', default: true, isNextSession: true },
     ],
   },

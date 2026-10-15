@@ -2,6 +2,12 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.46.0
+
+- **A nudge for a look around.** A prompt like "use boomi companion to check out my account" names nothing to find, so Claude guesses what to list. It now gets a tip, "look-around: say what you want to find out (deployed processes, failed runs, a folder's components, runtimes)", and the upgrade a **What to find out** line. It only nudges: reading changes nothing in Boomi, so `confirm` doesn't hold a prompt for this tip alone. `promptSkip aim` turns it off.
+- **Fewer false tips.** "Check out the failed executions" no longer reads as a request to fix something, and "the deployed processes" no longer as a deploy with no environment: the fix tip needs a fix word or something still failing, and the deploy tip needs deploying as the thing to do.
+- **Past Companion sessions fold up.** The section starts folded to its totals and a count, to leave the pane's room to this session. **▸ Show** lists the sessions with **Review** and **Copy**, **▾ Hide** folds them again, and the choice is kept for later sessions.
+
 ## 0.45.1
 
 - **A note for the rewrite shows once.** The field wraps a long note itself now that its label has a line of its own, so the copy drawn under it (added in 0.44.0, when the field cut long notes off) showed the note twice. The copy is gone; each try still says the note it followed.

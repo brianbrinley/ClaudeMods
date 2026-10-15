@@ -798,6 +798,8 @@ test('the pane lists past sessions a page at a time: More adds a page, Fewer goe
   on('process.run', async () => ({ value: { exitCode: 0, stdout: JSON.stringify({ version: 1, scanned: 12, sessions }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   await $.command.run(dashboard('history'))
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  // Past sessions start folded to their totals: unfold them.
+  await pane.press({ key: 'history-toggle' })
   expect(await pane.find({ text: /Showing 5 of 12/ })).toBeDefined()
   expect(await pane.find({ text: /"Request number 0"/ })).toBeDefined()
   expect(await pane.find({ text: /"Request number 7"/ })).toBeUndefined()
@@ -1066,6 +1068,8 @@ test('Copy on a past session puts the command that reopens it on the clipboard',
   const copies = pastWorld(on, TWO_SCANNED)
   await $.command.run(dashboard('history'))
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  // Past sessions start folded to their totals: unfold them.
+  await pane.press({ key: 'history-toggle' })
   await pane.press({ key: 'history-copy-1' })
   expect(copies).toEqual(["cd '/Users/me/pat'\\''s sync' && claude --resume bbbbbbbb-2222"])
   expect(await pane.find({ text: /Copied\. Paste it into a new terminal/ })).toBeDefined()
@@ -1075,6 +1079,8 @@ test('where the clipboard can\'t take it, Copy shows the command to type instead
   pastWorld(on, SCANNED, false)
   await $.command.run(dashboard('history'))
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  // Past sessions start folded to their totals: unfold them.
+  await pane.press({ key: 'history-toggle' })
   await pane.press({ key: 'history-copy-0' })
   expect(await pane.find({ text: /Run this in a new terminal: cd \/Users\/me\/orders && claude --resume aaaaaaaa-1111/ })).toBeDefined()
 })
@@ -1403,6 +1409,8 @@ test('Review on a past session shows what drove its cost, and Ask Claude to revi
   })
   await $.command.run(dashboard('history'))
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  // Past sessions start folded to their totals: unfold them.
+  await pane.press({ key: 'history-toggle' })
   expect((await pane.find({ type: 'Button', key: 'history-review-1' }))?.props.label).toBe('Review')
   await pane.press({ key: 'history-review-1' })
   expect(await pane.find({ text: /Opus 5\.5 did 100% of the work/ })).toBeDefined()
@@ -2821,4 +2829,43 @@ test('a long upgrade is fitted to the pane: the buttons stay in view, Show all d
   expect(await tab.press({ key: 'prompt-jump' })).toBeDefined()
   await tab.press({ key: 'prompt-collapse' })
   expect(await tab.find({ text: /▼ \d+ more lines/ })).toBeDefined()
+})
+
+// --- 0.46.0: folding past sessions, and the look-around nudge ---
+
+test('Past Companion sessions start folded to their totals; Show and Hide toggle them, and the choice is kept', async ($, on) => {
+  world(on)
+  const store: Record<string, unknown> = {}
+  const sessions = Array.from({ length: 3 }, (_, i) => ({
+    id: `s${i}`,
+    project: '/Users/me/ws',
+    startedAt: `2026-10-1${i}T09:00:00Z`,
+    costUsd: 1 + i,
+    firstPrompt: `Request number ${i}`,
+    models: {},
+    commands: [`bash scripts/boomi-component-push.sh ${FILE}`],
+  }))
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: JSON.stringify({ version: 1, scanned: 3, sessions }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await startSession($, on, store)
+  await $.command.run(dashboard('history'))
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /3 sessions listed: Show lists them/ })).toBeDefined()
+  expect(await pane.find({ text: /"Request number 0"/ })).toBeUndefined()
+  expect((await pane.find({ type: 'Button', key: 'history-toggle' }))?.props.label).toBe('▸ Show')
+  await pane.press({ key: 'history-toggle' })
+  expect(await pane.find({ text: /"Request number 0"/ })).toBeDefined()
+  expect((await pane.find({ type: 'Button', key: 'history-toggle' }))?.props.label).toBe('▾ Hide')
+  expect(store.pastCollapsed).toBe(false)
+  await pane.press({ key: 'history-toggle' })
+  expect(await pane.find({ text: /"Request number 0"/ })).toBeUndefined()
+  expect(store.pastCollapsed).toBe(true)
+})
+
+test('a look around the account gets a nudge, and confirm lets it through: reading changes nothing', async ($, on) => {
+  const { sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
+  await typed('use boomi companion to check out my account.')
+  expect(sent).toEqual(['use boomi companion to check out my account.'])
+  const text = (await $.command.run(dashboard('prompt'))).text ?? ''
+  expect(text).toContain("◐ look-around: say what you want to find out (deployed processes, failed runs, a folder's components, runtimes)")
+  expect(text).toContain('- What to find out: [deployed processes and where')
 })

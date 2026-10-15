@@ -127,7 +127,7 @@ import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import { contextLines, folderComponentOf, relevantComponents, relevantSections, sectionsOf } from './retrieve'
 import type { FolderComponent, Section } from './retrieve'
-import { NO_COUNTS, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
+import { NO_COUNTS, NUDGE_ONLY, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import type { Credentials } from './platform'
 
@@ -244,6 +244,17 @@ const promptHeld = atom({ plugin: 'boomi-dashboard', key: 'promptHeld' } as cons
 
 /** The note for the next rewrite as it's typed: how many rows its field takes, for fitting the tab to the pane. */
 const promptNoteDraft = atom({ plugin: 'boomi-dashboard', key: 'promptNoteDraft' } as const, '')
+
+/** Past Companion sessions folded to their totals, to leave the pane's room to this session; kept across sessions. */
+const isPastCollapsed = atom({ plugin: 'boomi-dashboard', key: 'isPastCollapsed' } as const, true)
+const PAST_COLLAPSED_KEY = 'pastCollapsed'
+
+/** Folds or unfolds Past Companion sessions, and keeps the choice for later sessions. */
+const togglePast = async ($: Engine) => {
+  const next = !(await read($, isPastCollapsed))
+  await update($, isPastCollapsed, () => next)
+  await $.store.set(PAST_COLLAPSED_KEY, next).catch(() => undefined)
+}
 
 /** True once the person pressed Show all: the Prompt tab's cards draw whole and the pane scrolls. */
 const promptExpanded = atom({ plugin: 'boomi-dashboard', key: 'promptExpanded' } as const, false)
@@ -1980,6 +1991,8 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
     return { text: maskPrompt(typed) }
   }
   if (settings.promptCheck !== 'confirm') return undefined
+  // A look around changes nothing in Boomi: its tip nudges, and holds nothing on its own.
+  if (tips.every(t => NUDGE_ONLY.has(t.code))) return undefined
   // Confirm holds the prompt in the Prompt tab, where the person sends it, the upgrade, or neither. Claude doesn't see it until then.
   if (settings.promptView !== 'off' && (await showPromptTab($, tips.length))) {
     await update($, promptHeld, () => typed)
@@ -2667,6 +2680,9 @@ const setUpSession = async ($: Engine, settings: Settings) => {
     await update($, history, (): HistoryState => ({ phase: 'ready', sessions: scanned.sessions, scannedAt: scanned.scannedAt, scanned: scanned.scanned }))
   }
 
+  const folded = await $.store.get(PAST_COLLAPSED_KEY).catch(() => undefined)
+  if (typeof folded === 'boolean') await update($, isPastCollapsed, () => folded)
+
   const ids = await $.store.get(WATCH_KEY)
   if (Array.isArray(ids)) {
     await update($, dashboard, c =>
@@ -3171,6 +3187,7 @@ export const register: Register = (on, options) => {
     const themeNow = await themeOf($, settings)
     const guards = await guardLines($)
     const past = await read($, history)
+    const pastHidden = await read($, isPastCollapsed)
     const shown = await read($, historyShown)
     const copiedNow = await read($, copied)
     const reviewingNow = await read($, reviewing)
@@ -3481,12 +3498,15 @@ export const register: Register = (on, options) => {
             {t('PAST COMPANION SESSIONS', { color: p.heading, bold: true })}
             {past.scannedAt !== undefined && t(`  scanned ${ago(past.scannedAt, now)}`, { color: p.muted })}
           </Box>
-          {past.phase !== 'loading' && (
-            <Button key="history-scan" label={past.phase === 'idle' ? 'Scan' : 'Rescan'} onPress={() => void scanHistory($, settings)} />
-          )}
+          <Box columnGap={1}>
+            <Button key="history-toggle" label={pastHidden ? '▸ Show' : '▾ Hide'} onPress={() => togglePast($)} />
+            {past.phase !== 'loading' && (
+              <Button key="history-scan" label={past.phase === 'idle' ? 'Scan' : 'Rescan'} onPress={() => void scanHistory($, settings)} />
+            )}
+          </Box>
         </Box>
-        {past.phase === 'idle' && note(`What earlier Companion sessions on this machine cost, from Claude Code's transcripts. Scan reads the last ${settings.historyDays} days.`)}
-        {past.sessions && past.sessions.length > 0 && note('Review shows what made a session cost what it did. Copy puts the command that reopens it on the clipboard, for a new terminal.')}
+        {!pastHidden && past.phase === 'idle' && note(`What earlier Companion sessions on this machine cost, from Claude Code's transcripts. Scan reads the last ${settings.historyDays} days.`)}
+        {!pastHidden && past.sessions && past.sessions.length > 0 && note('Review shows what made a session cost what it did. Copy puts the command that reopens it on the clipboard, for a new terminal.')}
         {past.phase === 'loading' && note('Reading the transcripts…')}
         {past.phase === 'error' && line('warning', past.error ?? 'The transcript scan failed.')}
         {past.sessions && past.sessions.length === 0 && note(`No Companion sessions in the last ${settings.historyDays} days.`)}
@@ -3498,7 +3518,8 @@ export const register: Register = (on, options) => {
           return (
             <Box flexDirection="column">
               {t(`${total('This week', week)}   ${total('30 days', month)}`, { color: p.accent, bold: true })}
-              {past.sessions.slice(0, shown).map((s, i) => {
+              {pastHidden && t(`  ${past.sessions.length} session${past.sessions.length === 1 ? '' : 's'} listed: Show lists them, with Review and Copy`, { color: p.muted })}
+              {!pastHidden && past.sessions.slice(0, shown).map((s, i) => {
                 const { head, detail } = pastParts(s, { currentId: sessionId, withProject: projectsDiffer(past.sessions!) })
                 const isThis = s.id === sessionId
                 return (
@@ -3549,7 +3570,7 @@ export const register: Register = (on, options) => {
                   </Box>
                 )
               })}
-              {past.sessions.length > PAST_PAGE && (
+              {!pastHidden && past.sessions.length > PAST_PAGE && (
                 <Box>
                   {t(`  Showing ${Math.min(shown, past.sessions.length)} of ${past.sessions.length}  `, { color: p.muted })}
                   {shown < past.sessions.length && (
