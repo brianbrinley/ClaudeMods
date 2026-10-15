@@ -242,7 +242,7 @@ const promptNote = atom({ plugin: 'boomi-dashboard', key: 'promptNote' } as cons
  */
 const promptHeld = atom({ plugin: 'boomi-dashboard', key: 'promptHeld' } as const, null as string | null)
 
-/** The note for the next rewrite as it's typed, drawn whole under the field, which shows one line. */
+/** The note for the next rewrite as it's typed: how many rows its field takes, for fitting the tab to the pane. */
 const promptNoteDraft = atom({ plugin: 'boomi-dashboard', key: 'promptNoteDraft' } as const, '')
 
 /** True once the person pressed Show all: the Prompt tab's cards draw whole and the pane scrolls. */
@@ -3039,7 +3039,8 @@ export const register: Register = (on, options) => {
     const room = e.props.scroll?.bodyRows || e.viewport?.rows || 40
     const cardColumns = Math.max(12, (isWide ? Math.floor(width / 2) - 1 : width) - 4)
     const tipRows = (tips?.tips ?? []).reduce((n, tip) => n + wrapLines(`  ${tip.text}`, width).length, 0)
-    const noteRows = draft.length > width - 12 ? wrapLines(draft, width).length : 0
+    // The note's field wraps as it's typed, beside its Regenerate hint.
+    const noteRows = Math.max(1, wrapLines(draft, width - 14).length) - 1
     const fixedRows = 3 + wrapLines(intro, width).length + 2 + tipRows + 4 + 1 + (said ? wrapLines(said, width).length : 0) + 2 + 2 + noteRows + 1 + (tries[shown]?.note ? 1 : 0)
     const textRows = Math.max(4, room - fixedRows - 1)
     // Side by side the cards share the rows; one above the other, your prompt takes up to a third.
@@ -3157,8 +3158,7 @@ export const register: Register = (on, options) => {
                 void rewriteFromTab($, settings, value)
               }}
             />
-            {/* The field shows one line: a longer note is drawn whole, wrapped, under it. */}
-            {draft.length > width - 12 ? t(draft) : undefined}
+
             {t(`This session: ${countsLine(counts)}`, { color: p.muted })}
           </Box>
         )}

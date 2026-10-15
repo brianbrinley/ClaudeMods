@@ -2786,7 +2786,7 @@ test('by default a flagged prompt is held: confirm is the default', async ($, on
   expect((await $.command.run(dashboard('prompt'))).text).toContain('Prompt tips (promptCheck: confirm)')
 })
 
-test('a note longer than the field is drawn whole under it, and each try shows the note it followed', { options: { promptCheck: 'suggest' } }, async ($, on) => {
+test('a long note is drawn once, in its field, and each try shows the note it followed', { options: { promptCheck: 'suggest' } }, async ($, on) => {
   on('model.complete', async () => ({
     value: { isAnswered: true, text: 'Build the Salesforce to NetSuite orders sync.', usage: { input_tokens: 100, output_tokens: 30, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
   }) as never)
@@ -2795,7 +2795,8 @@ test('a note longer than the field is drawn whole under it, and each try shows t
   const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
   const note = 'lets use salesforce as the source and netsuite as the target, on a schedule every hour, with JSON'
   await tab.input({ key: 'prompt-note', text: note, kind: 'change' })
-  expect(await tab.find({ text: new RegExp(`^${note}$`) })).toBeDefined()
+  // The field wraps the note itself: no second copy of it is drawn.
+  expect(await tab.findAll({ text: new RegExp(note) })).toHaveLength(0)
   await tab.input({ key: 'prompt-note', text: note })
   expect(await tab.find({ text: new RegExp(`This try's note: ${note}`) })).toBeDefined()
 })
