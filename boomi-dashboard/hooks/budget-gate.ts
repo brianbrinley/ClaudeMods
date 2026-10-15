@@ -8,16 +8,24 @@ import type { BudgetLine } from './activity'
 /** What a spent budget does: warn only (as before), ask before each change, or refuse them. */
 export type Enforce = 'warn' | 'confirm' | 'block'
 
-/** bc-integration scripts outside the dashboard's own kinds that change something, and when. */
-const CHANGING: { script: RegExp; when?: RegExp; what: string }[] = [
-  { script: /boomi-folder-create\.sh/, what: 'create a folder in Boomi' },
-  { script: /boomi-branch\.sh/, when: /boomi-branch\.sh['"]?\s+(create|delete)\b/, what: 'create or delete a branch' },
-  { script: /boomi-extensions\.sh/, when: /boomi-extensions\.sh['"]?\s+set\b/, what: "set the environment's extensions" },
-  { script: /boomi-wss-test\.sh/, what: 'call a deployed web service (it runs the process)' },
-  { script: /event-streams-setup\.sh/, when: /event-streams-setup\.sh['"]?\s+create[-\w]*/, what: 'create an Event Streams topic, subscription or token' },
-  { script: /event-streams-setup\.sh/, when: /event-streams-setup\.sh['"]?\s+provision-connection\b/, what: 'create an Event Streams connection component' },
-  { script: /event-streams-setup\.sh/, when: /event-streams-setup\.sh['"]?\s+rest-produce\b/, what: 'send a message to an Event Streams topic' },
+/**
+ * bc-integration scripts outside the dashboard's own kinds that change
+ * something, and with which subcommand when it matters. Keyed by the script's
+ * name as a step has it (without `boomi-` and `.sh`).
+ */
+const CHANGING: { script: string; verbs?: RegExp; what: string }[] = [
+  { script: 'folder-create', what: 'create a folder in Boomi' },
+  { script: 'branch', verbs: /^(create|delete)$/, what: 'create or delete a branch' },
+  { script: 'extensions', verbs: /^set$/, what: "set the environment's extensions" },
+  { script: 'wss-test', what: 'call a deployed web service (it runs the process)' },
+  { script: 'event-streams-setup', verbs: /^create[-\w]*$/, what: 'create an Event Streams topic, subscription or token' },
+  { script: 'event-streams-setup', verbs: /^provision-connection$/, what: 'create an Event Streams connection component' },
+  { script: 'event-streams-setup', verbs: /^rest-produce$/, what: 'send a message to an Event Streams topic' },
 ]
+
+/** What one of bc-integration's other scripts changes with this subcommand, in words; undefined when it only reads. */
+export const integrationChange = (script: string | undefined, verb: string | undefined): string | undefined =>
+  CHANGING.find(c => c.script === script && (!c.verbs || c.verbs.test(verb ?? '')))?.what
 
 /**
  * The other plugins' steps that change nothing in Boomi, though the dashboard
@@ -62,8 +70,8 @@ export const companionChanges = (command: string): string[] => {
     else if (run.kind === 'other' && run.product && (NOT_A_CHANGE.has(run.script ?? '') || NOT_A_CHANGE.has(`${run.script} ${run.verb}`))) continue
     else if (run.kind === 'other' && run.product) out.push(`${run.product} ${run.verb ?? 'change'}${run.target ? ` (${run.target})` : ''}`)
     else if (run.kind === 'other' && run.script) {
-      const changing = CHANGING.find(c => (c.script.test(`boomi-${run.script}.sh`) || c.script.test(`${run.script}.sh`)) && (!c.when || c.when.test(command)))
-      if (changing) out.push(changing.what)
+      const changing = integrationChange(run.script, run.verb)
+      if (changing) out.push(changing)
     }
   }
   return out

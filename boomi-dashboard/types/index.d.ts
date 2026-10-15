@@ -35,7 +35,7 @@ export type Activity = {
   type?: string
   /** For `other`: the script's name without `boomi-` and `.sh`. */
   script?: string
-  /** Another Companion plugin's step: its product, and the script's subcommand (`deploy`, `run`, ...). */
+  /** Another Companion plugin's step: its product, and the script's subcommand (`deploy`, `run`, ...). One of bc-integration's other scripts has its subcommand too (`branch create`, `extensions set`). */
   product?: Product
   verb?: string
   /** A component a Marketplace recipe installed: the recipe's name. Its install is the step; this is the component. */

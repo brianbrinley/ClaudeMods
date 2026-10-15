@@ -4,7 +4,7 @@
 
 ## 0.40.0
 
-- **Platform changes in the report.** `/bc-dashboard report` and `report html` have a **Platform changes** section: every change the session made in Boomi, oldest first. That covers creates, saves, deploys, undeploys, tests, folders made and web service calls, and the other plugins' changes (Data Hub, BDI, Agentstudio, connectors, Marketplace installs). Each shows when it ran, what it did, how it went (with its icon and label) and the ID it left: the version, package, execution or run. A change the budget gate refused shows as blocked and not run.
+- **Platform changes in the report.** `/bc-dashboard report` and `report html` have a **Platform changes** section: every change the session made in Boomi, oldest first. That covers creates, saves, deploys, undeploys and tests; folders, branches and extensions created, deleted or set; Event Streams setup; web service calls; and the other plugins' changes (Data Hub, BDI, Agentstudio, connectors, Marketplace installs). Steps now keep the subcommand of bc-integration's branch, extensions and Event Streams scripts, so a `branch create` is listed and a `branch list` isn't. Each shows when it ran, what it did, how it went (with its icon and label) and the ID it left: the version, package, execution or run. A change the budget gate refused shows as blocked and not run.
 - **Overrides on the change they let through.** A change allowed past a spent budget says so in its row: allowed once, or allowed for the session, and which budget was spent. **Budget overrides** still lists each choice.
 - **Copy or save the changes.** The HTML report has **Copy for a spreadsheet**, **Copy as CSV** and **Save as CSV** above the changes, as it has for Components. The file is `boomi-changes-<date>.csv`.
 

@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Activity, Dashboard } from '../types'
 import { changeLines, changeTable, isPlatformChange, overridesFor, resultOf } from '../hooks/changes'
 import { reportHtml } from '../hooks/report-html'
-import { report } from '../hooks/activity'
+import { report, scriptRuns } from '../hooks/activity'
 
 const NOW = Date.parse('2026-10-14T12:00:00Z')
 const MIN = 60_000
@@ -88,4 +88,21 @@ test('the Markdown report places Platform changes after the budget overrides', (
   expect(text.indexOf('## Budget overrides')).toBeGreaterThan(-1)
   expect(text.indexOf('## Platform changes')).toBeGreaterThan(text.indexOf('## Budget overrides'))
   expect(text.indexOf('## Spend')).toBeGreaterThan(text.indexOf('## Platform changes'))
+})
+
+test("bc-integration's branch, extensions and Event Streams steps count when their subcommand changes something", () => {
+  const S = '.claude/skills/boomi-integration/scripts'
+  expect(scriptRuns(`bash ${S}/boomi-branch.sh create --name dev`)[0]?.verb).toBe('create')
+  expect(scriptRuns(`bash ${S}/boomi-extensions.sh --json set --file ext.json`)[0]?.verb).toBe('set')
+  const other = (script: string, verb?: string) => step(40, { kind: 'other', script, subject: script, ...(verb ? { verb } : {}) })
+  expect(isPlatformChange(other('branch', 'create'))).toBe(true)
+  expect(isPlatformChange(other('branch', 'delete'))).toBe(true)
+  expect(isPlatformChange(other('branch', 'list'))).toBe(false)
+  expect(isPlatformChange(other('extensions', 'set'))).toBe(true)
+  expect(isPlatformChange(other('extensions', 'get'))).toBe(false)
+  expect(isPlatformChange(other('event-streams-setup', 'create-topic'))).toBe(true)
+  expect(isPlatformChange(other('event-streams-setup', 'rest-produce'))).toBe(true)
+  expect(isPlatformChange(other('event-streams-setup', 'list-topics'))).toBe(false)
+  // A step kept from before 0.40.0 has no subcommand, so it isn't taken for a change.
+  expect(isPlatformChange(other('branch'))).toBe(false)
 })

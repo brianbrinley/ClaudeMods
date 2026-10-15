@@ -204,6 +204,9 @@ export const scriptRuns = (command: string): ScriptRun[] => {
     const run: ScriptRun = { kind: found.kind }
     if (token.includes('/')) run.scriptsDir = joinPath(dir, token).replace(/\/[^/]+$/, '')
     if (found.script) run.script = found.script
+    // One of bc-integration's other scripts: its subcommand (`branch create`, `extensions set`), which says whether it changes anything.
+    const verb = found.kind === 'other' ? args.find(arg => !arg.startsWith('-')) : undefined
+    if (verb && /^[a-z][a-z-]*$/.test(verb)) run.verb = verb
     if (found.kind === 'test') run.args = args
     for (let j = 0; j < args.length; j++) {
       const arg = args[j]!

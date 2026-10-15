@@ -5,18 +5,16 @@
 
 import type { Activity } from '../types'
 import { STATUS, describe, levelOf } from './activity'
-import { LOCAL_ONLY } from './budget-gate'
+import { LOCAL_ONLY, integrationChange } from './budget-gate'
 import { PRODUCT_NAMES } from './products'
 import { mask } from './upgrade'
 import type { Table } from './export'
 
-/** bc-integration's other scripts that change something whatever their arguments. The ones that also read (branch, extensions, Event Streams) aren't told apart in a step, so they stay in Steps only. */
-const CHANGING_SCRIPTS = new Set(['folder-create', 'wss-test'])
-
 /**
  * Whether a step changed something in Boomi, or tried to: a create, save,
  * deploy, undeploy or test, another plugin's step that isn't local, or one of
- * bc-integration's changing scripts. Edits and pulls are local; an override is
+ * bc-integration's other scripts run with a subcommand that changes something
+ * (a folder, a branch, extensions, Event Streams). Edits and pulls are local; an override is
  * the person's choice, not a change; a recipe's component is part of its
  * install.
  */
@@ -25,7 +23,7 @@ export const isPlatformChange = (a: Activity): boolean => {
   if (a.kind === 'create' || a.kind === 'push' || a.kind === 'deploy' || a.kind === 'undeploy' || a.kind === 'test') return true
   if (a.kind !== 'other') return false
   if (a.product) return !LOCAL_ONLY.has(a.script ?? '') && !LOCAL_ONLY.has(`${a.script} ${a.verb}`)
-  return CHANGING_SCRIPTS.has(a.script ?? '')
+  return integrationChange(a.script, a.verb) !== undefined
 }
 
 /** An override in words: "allowed once, with the session budget ($5.20 of $5.00, 104%) spent". */

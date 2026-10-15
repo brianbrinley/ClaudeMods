@@ -610,7 +610,9 @@ const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun
     const args = run.kind === 'test' && run.args ? { args: run.args } : {}
     const product = run.product
       ? { product: run.product, verb: run.verb ?? '', ...(run.ref ? { ref: run.ref } : {}), ...(run.project ? { project: run.project } : {}), ...(run.group ? { group: run.group } : {}), ...(run.version ? { version: run.version } : {}) }
-      : {}
+      : run.verb
+        ? { verb: run.verb }
+        : {}
     started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found, ...args, ...product })
   }
   if (!current.activity.some(a => a.kind !== 'other' || a.product)) void openPane($, settings)
