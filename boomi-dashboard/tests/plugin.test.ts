@@ -2457,13 +2457,22 @@ const promptWorld = async ($: Engine, on: On, answer: (q: Question) => string | 
     sent.push(e.text)
     return { text: e.text }
   })
+  // The panes the plugin opened and hasn't closed, as the engine lists them.
+  const closed: string[] = []
+  on('ui.panes', async () => ({
+    value: [...new Set(opens.map(o => String(o.id)))].filter(id => !closed.includes(id)).map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: false })),
+  }) as never)
+  on('ui.close', async (_$, e) => {
+    closed.push(String(e.id))
+    return { value: undefined } as never
+  })
   await startSession($, on)
   await $.tool.call({ tool: 'Bash', command: PUSH })
   await $.tool.call({ tool: 'Bash', command: TEST_RUN })
   // The steps refresh the status line and save in the background: let them finish before the test does.
   await $.command.run(dashboard('text'))
   const typed = (text: string, extra: Record<string, unknown> = {}) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' }, ...extra } as never)
-  return { asked, filled, sent, typed }
+  return { asked, closed, filled, sent, typed }
 }
 
 test('suggest: a vague Boomi prompt goes through as typed, and /bc-dashboard prompt shows its tips and the upgrade', async ($, on) => {
@@ -2571,4 +2580,73 @@ test('/bc-dashboard prompt use fills the prompt box; prompt upgrade has the mode
   expect(asks[0]!.prompt).not.toContain('secret-token-value')
   isAnswered = false
   expect((await $.command.run(dashboard('prompt upgrade'))).text).toBe("haiku couldn't rewrite it (api-error). Your prompt is safe, and the upgrade from the checks is still there: /bc-dashboard prompt use.")
+})
+
+// --- The Prompt tab ---
+
+const PROMPT_TAB = { component: 'Pane', requestId: 'boomi-dashboard-prompt', props: {} as RenderPropsOf['Pane'] } as const
+const tabOpens = () => opens.filter(o => o.id === 'boomi-dashboard-prompt').map(o => o.title)
+
+test('auto: a prompt with tips opens the Prompt tab; it shows the tips, its buttons, and the prompt beside the upgrade', async ($, on) => {
+  const { closed, filled, typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  expect(tabOpens()).toEqual(['Prompt · 4 tips'])
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  expect(await tab.find({ text: /PROMPT TIPS/ })).toBeDefined()
+  expect(await tab.find({ text: /"it": the process Orders Sync, the last one this session\?/ })).toBeDefined()
+  expect(await tab.find({ text: /YOUR PROMPT/ })).toBeDefined()
+  expect(await tab.find({ text: /By "it" I mean the process Orders Sync/ })).toBeDefined()
+  await tab.press({ key: 'prompt-use' })
+  expect(filled[0]).toContain('By "it" I mean the process Orders Sync')
+  expect(await tab.find({ text: /In the prompt box: fill in any \[placeholder\], then press Enter\./ })).toBeDefined()
+  await tab.press({ key: 'prompt-dismiss' })
+  expect(closed).toEqual(['boomi-dashboard-prompt'])
+  await tab.unmount()
+  // Wide, the two cards sit side by side; narrow, one above the other. Both draw.
+  for (const columns of [40, 140]) {
+    const sized = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB, viewport: { columns, rows: 40 } } as never)
+    expect(await sized.find({ text: /UPGRADED/ })).toBeDefined()
+    await sized.unmount()
+  }
+})
+
+test('a prompt with nothing to add closes the Prompt tab', async ($, on) => {
+  const { closed, typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  await typed('Deploy Orders Sync to dev')
+  expect(closed).toEqual(['boomi-dashboard-prompt'])
+})
+
+test('manual: the Prompt tab opens only when asked, from /bc-dashboard prompt or the pane’s button', { options: { promptView: 'manual' } }, async ($, on) => {
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  expect(tabOpens()).toEqual([])
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /4 prompt tips for your last prompt/ })).toBeDefined()
+  await pane.press({ key: 'prompt-open' })
+  expect(tabOpens()).toEqual(['Prompt · 4 tips'])
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('Prompt tips (promptCheck: suggest)')
+  expect(tabOpens()).toEqual(['Prompt · 4 tips', 'Prompt · 4 tips'])
+})
+
+test('off: the Prompt tab never opens, and the pane offers none', { options: { promptView: 'off' } }, async ($, on) => {
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  await $.command.run(dashboard('prompt'))
+  expect(tabOpens()).toEqual([])
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /prompt tips for your last prompt/ })).toBeUndefined()
+})
+
+test('the Prompt tab’s Upgrade with a model rewrites the upgrade in place', async ($, on) => {
+  on('model.complete', async () => ({
+    value: { isAnswered: true, text: 'Deploy Orders Sync to [environment], then test it with [test data].', usage: { input_tokens: 100, output_tokens: 30, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
+  }) as never)
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  await tab.press({ key: 'prompt-rewrite' })
+  expect(await tab.find({ text: /Rewritten by haiku \(130 tokens\)\./ })).toBeDefined()
+  expect(await tab.find({ text: /UPGRADED BY HAIKU/ })).toBeDefined()
+  expect(await tab.find({ text: /Deploy Orders Sync to \[environment\], then test it with \[test data\]\./ })).toBeDefined()
 })

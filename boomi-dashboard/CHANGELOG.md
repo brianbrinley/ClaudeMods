@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.42.0
+
+- **The Prompt tab.** A prompt with tips opens a second pane beside the dashboard, so Claude Code's tab row shows **Prompt · 3 tips** next to it, like a browser's tabs. The tab has **Use the upgrade**, **Upgrade with a model**, **Copy** and **Dismiss** at the top, the tips under them, and your prompt beside the upgrade. It closes when your next prompt has nothing to add, and the dashboard pane's **Prompt tab** button brings it back. `promptView` is `auto` (default), `manual` (only when you ask) or `off`. See [Prompt tips](README.md#prompt-tips).
+
 ## 0.41.0
 
 - **Prompt tips.** Each prompt you type in a Companion folder is checked for what Boomi work needs and it leaves out: which component "it" is, the environment for a deploy, the error for a fix, test data, a new process's source, trigger and format, a map's profiles, production named, or several big steps at once. Each tip names the session's likely answer, such as the component you worked on last or the last failed test's execution ID, and an upgraded prompt fills those in, leaving a `[placeholder]` for anything it doesn't know. The checks make no model call. See [Prompt tips](README.md#prompt-tips).
