@@ -212,6 +212,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** one row per component, with every column in its own cell: name, type, folder, component ID, version, deploy, package ID, test, execution ID, cost and link. The note beside the buttons says what was copied, the CSV opens with its characters intact, and the command's paste matches. **Fail:** everything in one column, IDs cut or reformatted (for example as numbers), or nothing copied.
 - [x] **K19. The theme button.** *(Passed: Claude Code 2.1.299, macOS, 0.39.2.)* *(0.39.1)* In the report, press the round moon button at the top right, then reload the page.
   **Pass:** the page turns dark, the button shows a sun, and the page stays dark after the reload. Pressing the sun turns it light again. A screen reader announces "Switch to the dark theme" (or light). **Fail:** no change, the wrong icon, or the choice is lost on reload.
+- [ ] **K20. Platform changes.** *(0.40.0)* In a session with `budgetEnforce` set to `confirm` and a spent budget, ask Claude to save and deploy a process and pick **Allow this one**, then ask for another deploy and pick **Stop**. Run `/bc-dashboard report`, then `/bc-dashboard report html session`, and press **Save as CSV** above **Platform changes**.
+  **Pass:** both reports list the save and the deploys, oldest first, with no edits or reads. The allowed deploy says `allowed once, with … spent`, and the stopped one shows `⚠ blocked by budget, not run`. Each result has its icon and label. The CSV `boomi-changes-<date>.csv` opens with one row per change, IDs intact. **Fail:** a change missing, a read or edit listed, the override on the wrong row, or the buttons copying the components instead.
 
 ## L. Installed Companion plugins
 
