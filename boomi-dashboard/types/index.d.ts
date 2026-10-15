@@ -192,6 +192,31 @@ export type Dashboard = {
   quarantine?: Record<string, QuarantineSeen>
 }
 
+/** A prompt check: what a Companion prompt can leave out (see hooks/prompt-check.ts). */
+export type PromptCheckCode = 'subject' | 'environment' | 'test' | 'production' | 'steps' | 'error' | 'build' | 'map' | 'secret'
+
+/** One thing a prompt leaves out, as a line: `deploy: no environment named; the session points at …`. */
+export type PromptTip = { code: PromptCheckCode; level: 'warning' | 'serious'; text: string }
+
+/** The latest checked prompt that had tips: the prompt masked, its tips and the upgrade. Never the prompt as typed. */
+export type PromptTips = {
+  at: number
+  masked: string
+  tips: PromptTip[]
+  upgrade: string
+  /** Set once a model rewrote the upgrade (/bc-dashboard prompt upgrade): which model, and the tokens it took. */
+  rewrittenBy?: string
+  tokens?: number
+}
+
+/** How many prompts were checked and had tips this session, and how many tips the next prompt followed, per check. */
+export type PromptCounts = {
+  checked: number
+  tipped: number
+  followed: number
+  byCode: Partial<Record<PromptCheckCode, { seen: number; followed: number }>>
+}
+
 /** One universe's Data Hub quarantine, as the dashboard last saw it. */
 export type QuarantineSeen = { count: number; causes: string; reason?: string; checkedAt: number; seen?: number }
 
@@ -272,6 +297,6 @@ export type RuntimeSeen = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { budgetAllowed: boolean; budgetPaused: string; enforceNoted: string; dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; paneSize: { rows: number; columns: number } | null; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; companionPlugins: CompanionPlugin[] | null; updateAvailable: string | null; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; reviewing: string | null; historyShown: number; stepsShown: number }
+    'boomi-dashboard': { budgetAllowed: boolean; budgetPaused: string; enforceNoted: string; dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; paneSize: { rows: number; columns: number } | null; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; companionPlugins: CompanionPlugin[] | null; updateAvailable: string | null; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; reviewing: string | null; historyShown: number; stepsShown: number; promptTips: PromptTips | null; promptCounts: PromptCounts }
   }
 }

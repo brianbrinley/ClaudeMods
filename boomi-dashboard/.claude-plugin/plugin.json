@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.40.0",
+  "version": "0.41.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -160,6 +160,29 @@
       "title": "Open the HTML report",
       "description": "Open /bc-dashboard report html's page in your browser once it's saved (open on macOS, wslview or Explorer under WSL, xdg-open on a Linux desktop). Where there's no browser to open, it only says where the file is",
       "default": true
+    },
+    "promptCheck": {
+      "type": "string",
+      "title": "Prompt tips",
+      "description": "Check each Boomi prompt you type for what it leaves out (which component, environment, test data, error) and suggest an upgraded one: suggest shows tips and sends the prompt, confirm asks first, off never checks. A prompt with a password or token in it always asks, unless this is off",
+      "options": [
+        "off",
+        "suggest",
+        "confirm"
+      ],
+      "default": "suggest"
+    },
+    "promptModel": {
+      "type": "string",
+      "title": "Prompt rewrite model",
+      "description": "The model /bc-dashboard prompt upgrade asks to rewrite a prompt, only when you run it: an alias such as haiku, or a full model ID",
+      "default": "haiku"
+    },
+    "promptSkip": {
+      "type": "string",
+      "title": "Prompt checks to skip",
+      "description": "Checks to leave out, separated by commas: subject, environment, test, production, steps, error, build, map, secret",
+      "default": ""
     }
   }
 }

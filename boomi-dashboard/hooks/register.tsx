@@ -8,9 +8,9 @@
 // follows $ only within it; parsing and wording are in ./activity.
 
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, PluginOptions, Register } from 'claude-code'
+import type { EngineInterface, PluginOptions, PromptSubmitInput, Register } from 'claude-code'
 
-import type { Activity, CompanionPlugin, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
+import type { Activity, CompanionPlugin, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, PromptCounts, PromptTips, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -125,6 +125,8 @@ import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from '.
 import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
+import { NO_COUNTS, REWRITE_SYSTEM, checkPrompt, countsAfter, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
+import type { PromptFacts } from './prompt-check'
 import type { Credentials } from './platform'
 
 type Engine = EngineInterface
@@ -219,6 +221,12 @@ const historyShown = atom({ plugin: 'boomi-dashboard', key: 'historyShown' } as 
 /** The next step last suggested in the prompt box, so it isn't suggested after every turn. */
 const suggested = atom({ plugin: 'boomi-dashboard', key: 'suggested' } as const, '')
 
+/** The latest checked prompt that had tips, masked, with its upgrade; null once a prompt needs none. */
+const promptTips = atom({ plugin: 'boomi-dashboard', key: 'promptTips' } as const, null as PromptTips | null)
+
+/** How many prompts were checked, had tips, and followed the tips before them, this session. */
+const promptCounts = atom({ plugin: 'boomi-dashboard', key: 'promptCounts' } as const, NO_COUNTS as PromptCounts)
+
 type Settings = {
   envFile: string
   componentsDir: string
@@ -243,6 +251,9 @@ type Settings = {
   budgetEnforce: Enforce
   budgetGrace: number
   reportStyle: ReportStyle
+  promptCheck: 'off' | 'suggest' | 'confirm'
+  promptModel: string
+  promptSkip: ReadonlySet<string>
   /** The options these settings came from, for a change to one of them. */
   options: Readonly<Record<string, unknown>>
 }
@@ -271,6 +282,9 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   budgetEnforce: options.budgetEnforce === 'confirm' || options.budgetEnforce === 'block' ? options.budgetEnforce : 'warn',
   budgetGrace: Math.min(100, Math.max(0, Number(options.budgetGrace ?? 0) || 0)),
   reportStyle: options.reportStyle === 'expressive' ? 'expressive' : 'exosphere',
+  promptCheck: options.promptCheck === 'off' || options.promptCheck === 'confirm' ? options.promptCheck : 'suggest',
+  promptModel: String(options.promptModel || 'haiku').trim() || 'haiku',
+  promptSkip: new Set(String(options.promptSkip ?? '').split(/[\s,]+/).filter(Boolean)),
   options: { ...options },
 })
 
@@ -401,7 +415,9 @@ const refreshStatus = async ($: Engine, settings: Settings) => {
   const read0 = { ...(await usageOf($)), budgetUsd: settings.budgetUsd }
   const usage: Usage = { ...read0, companion: await companionBudget($, settings, read0) }
   usage.isPaused = await notePause($, settings, usage)
-  $.ui.status(statusLine(await read($, dashboard), now, settings.windowMs, usage, (await read($, recap)) ?? undefined))
+  const line = statusLine(await read($, dashboard), now, settings.windowMs, usage, (await read($, recap)) ?? undefined)
+  const tips = settings.promptCheck === 'off' ? undefined : statusPart(await read($, promptTips))
+  $.ui.status(tips ? `${line} · ${tips}` : line)
   await warnBudget($, settings, usage.usd)
   await warnLimits($, settings, usage)
   await trackShare($, settings, usage)
@@ -1491,7 +1507,7 @@ const reportNow = async ($: Engine, settings: Settings) => {
   const state = await read($, dashboard)
   return report(
     state,
-    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await withBudget($, settings), changes: changeLines(state.activity) },
+    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await withBudget($, settings), changes: changeLines(state.activity), promptLines: reportLines(await read($, promptCounts)) },
     now,
     settings.windowMs,
   )
@@ -1742,6 +1758,7 @@ const USAGE = [
   '/bc-dashboard history         past Companion sessions on this machine and what each cost',
   '/bc-dashboard resume [n]      copy the command that reopens a past session in a new terminal',
   '/bc-dashboard review [n]      what made a past session cost what it did, and what to change next time',
+  '/bc-dashboard prompt [use|upgrade] your last Boomi prompt\'s tips and an upgraded prompt; use puts it in the prompt box, upgrade has a model rewrite it',
   '/bc-dashboard seen            mark watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
@@ -1837,11 +1854,135 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
     case 'config':
     case 'settings':
       return configCommand($, settings, target)
+    case 'prompt':
+      return promptCommand($, settings, target)
     case 'banner':
       await update($, isBandHidden, () => false)
       return 'The dashboard banner is back above the prompt.'
     default:
       return USAGE
+  }
+}
+
+// --- Prompt tips ---------------------------------------------------------------------
+
+const SEND_MASKED = 'Send it with the secret masked'
+const SEND_AS_TYPED = 'Send it as typed'
+const USE_UPGRADE = 'Use the upgrade'
+const EDIT_FIRST = 'Edit it first'
+
+/** Typed by the person: the prompt box, Remote Control, an SDK host, or a plugin sending the person's own words. */
+const isTyped = (origin: PromptSubmitInput['origin']) =>
+  origin.kind === 'composer' || origin.kind === 'bridge' || origin.kind === 'sdk' || (origin.kind === 'plugin' && (origin as { asUser?: boolean }).asUser === true)
+
+/** The environment Companion points at: the session's own variable, else its .env. Only that key is read. */
+const environmentOf = async ($: Engine, settings: Settings): Promise<string | undefined> => {
+  const fromEnv = await $.env.get('BOOMI_ENVIRONMENT_ID').catch(() => undefined)
+  if (fromEnv) return fromEnv
+  const path = await envPath($, settings)
+  if (!(await $.fs.exists(path).catch(() => false))) return undefined
+  return parseEnv(String(await $.fs.read(path).catch(() => ''))).BOOMI_ENVIRONMENT_ID || undefined
+}
+
+/** What the session knows that a prompt might lean on: the last component, the environment, the last failure. */
+const promptFacts = async ($: Engine, settings: Settings): Promise<PromptFacts> => {
+  const current = await read($, dashboard)
+  const recent = current.activity.filter(a => !a.isEarlier)
+  const rows = components(recent).sort((a, b) => b.lastAt - a.lastAt)
+  const last = rows[0]
+  const failed = [...recent].reverse().find(a => a.outcome === 'failed' && !(current.closedSteps ?? []).includes(a.id))
+  return {
+    component: last ? { name: last.name, type: last.type, id: last.componentId } : undefined,
+    names: rows.map(r => r.name),
+    environmentId: current.platform.environmentId ?? (await environmentOf($, settings)),
+    failed: failed ? { name: failed.kind === 'test' ? `the test of ${failed.subject}` : describe(failed), executionId: failed.executionId, detail: failed.detail } : undefined,
+  }
+}
+
+/** Puts text in the prompt box; false where no box could take it, so nothing typed is ever dropped. */
+const refill = async ($: Engine, text: string) => (await $.prompt.fill({ text, mode: 'replace' }).catch(() => undefined))?.isFilled === true
+
+/**
+ * Checks a prompt the person typed in a Companion folder. Undefined lets it
+ * through as typed; `text` sends another text (the `>` taken off, or the
+ * secret masked); `drop` holds it, its text already back in the prompt box.
+ */
+const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInput): Promise<{ text?: string; drop?: string } | undefined> => {
+  if (settings.promptCheck === 'off' || e.command || e.isMeta || e.turnId || !isTyped(e.origin)) return undefined
+  const typed = e.text
+  if (!(await read($, isCompanionFolder)) && !((await read($, companionPlugins))?.length)) return undefined
+  if (/^\s*>/.test(typed)) return { text: typed.replace(/^\s*>\s?/, '') }
+  const hasSecret = findSecrets(typed).length > 0
+  if (!hasSecret && !isCheckable(typed)) return undefined
+  const facts = await promptFacts($, settings)
+  const tips = checkPrompt(typed, facts, settings.promptSkip)
+  const before = await read($, promptTips)
+  await update($, promptCounts, c => countsAfter(c, before?.tips, tips))
+  const upgrade = tips.length > 0 ? upgradePrompt(typed, facts, tips) : ''
+  const at = await $.clock.now()
+  await update($, promptTips, (): PromptTips | null => (tips.length > 0 ? { at, masked: maskPrompt(typed).trim().slice(0, 4000), tips, upgrade } : null))
+  await refreshStatus($, settings).catch(() => undefined)
+  if (tips.length === 0) return undefined
+
+  // A secret asks in any mode: once sent, it's in the transcript. No answer sends it masked.
+  if (hasSecret) {
+    const kinds = findSecrets(typed).join(' and ')
+    const answer = await $.ui
+      .ask(`Your prompt has ${kinds} in it. Once it's sent, it stays in the transcript. Send it with the secret masked?`, { header: 'Secret', options: [SEND_MASKED, EDIT_FIRST, SEND_AS_TYPED] })
+      .catch(() => undefined)
+    if (answer === SEND_AS_TYPED) return undefined
+    if (answer === EDIT_FIRST && (await refill($, typed))) return { drop: 'Held by the dashboard: your prompt is back in the prompt box to edit.' }
+    return { text: maskPrompt(typed) }
+  }
+  if (settings.promptCheck !== 'confirm') return undefined
+  const said = tips.map(t => t.text).join('; ')
+  const answer = await $.ui
+    .ask(`This prompt leaves out: ${said}. Send it as typed?`, { header: 'Prompt', options: [SEND_AS_TYPED, USE_UPGRADE, EDIT_FIRST] })
+    .catch(() => undefined)
+  if (answer === USE_UPGRADE && (await refill($, upgrade))) return { drop: 'Held by the dashboard: the upgraded prompt is in the prompt box. Fill in any [placeholder], then press Enter.' }
+  if (answer === EDIT_FIRST && (await refill($, typed))) return { drop: 'Held by the dashboard: your prompt is back in the prompt box to edit.' }
+  return undefined
+}
+
+/** A model's rewrite of the last prompt's upgrade, on demand: it reads the masked prompt and the session's facts only. */
+const rewritePrompt = async ($: Engine, settings: Settings): Promise<string> => {
+  const tips = await read($, promptTips)
+  if (!tips) return 'Nothing to upgrade yet: no Boomi prompt this session has had tips.'
+  const facts = await promptFacts($, settings)
+  const reply = await $.model.complete({
+    model: settings.promptModel,
+    system: REWRITE_SYSTEM,
+    prompt: rewriteRequest(tips.masked, facts, tips.tips, tips.upgrade),
+    maxTokens: 800,
+    effort: 'low',
+  })
+  if (!reply.isAnswered) {
+    return `${settings.promptModel} couldn't rewrite it (${reply.reason}). Your prompt is safe, and the upgrade from the checks is still there: /bc-dashboard prompt use.`
+  }
+  const text = rewriteFrom(reply.text)
+  if (!text) return `${settings.promptModel} gave back nothing. The upgrade from the checks is still there: /bc-dashboard prompt use.`
+  const tokens = reply.usage.input_tokens + reply.usage.output_tokens
+  await update($, promptTips, t => (t ? { ...t, upgrade: text, rewrittenBy: settings.promptModel, tokens } : t))
+  const where = (await refill($, text)) ? " It's in the prompt box: fill in any [placeholder], then press Enter." : ''
+  return `Rewritten by ${settings.promptModel} (${tokens} tokens).${where}\n\n${text}`
+}
+
+/** /bc-dashboard prompt: the last prompt's tips; `use` puts the upgrade in the prompt box; `upgrade` has a model rewrite it. */
+const promptCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const verb = target.trim().split(/\s+/)[0] ?? ''
+  try {
+    if (!verb) return tipsText(await read($, promptTips), await read($, promptCounts), settings.promptCheck)
+    if (verb === 'use') {
+      const tips = await read($, promptTips)
+      if (!tips) return 'No upgraded prompt yet: no Boomi prompt this session has had tips.'
+      return (await refill($, tips.upgrade))
+        ? 'The upgraded prompt is in the prompt box: fill in any [placeholder], then press Enter.'
+        : `The prompt box couldn't take it here. The upgraded prompt:\n\n${tips.upgrade}`
+    }
+    if (verb === 'upgrade') return await rewritePrompt($, settings)
+    return 'Usage: /bc-dashboard prompt shows your last Boomi prompt\'s tips; prompt use puts the upgrade in the prompt box; prompt upgrade has a model rewrite it.'
+  } catch (error) {
+    return `The dashboard couldn't do that: ${messageOf(error)}. Your prompt is safe.`
   }
 }
 
@@ -2302,7 +2443,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | components [csv] [save] | resume [n] | review [n] | report [save|html [session|all] [--no-open] [--style exosphere|expressive]] | close <n|all> | reopen | watch <id|file> | unwatch <id> | seen | banner | theme [day|night|terminal] | config [budget|pane|data|list|<setting> <value>] | upgrade [--check] [--yes] [--rollback]',
+      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | components [csv] [save] | resume [n] | review [n] | report [save|html [session|all] [--no-open] [--style exosphere|expressive]] | close <n|all> | reopen | watch <id|file> | unwatch <id> | prompt [use|upgrade] | seen | banner | theme [day|night|terminal] | config [budget|pane|data|list|<setting> <value>] | upgrade [--check] [--yes] [--rollback]',
     })
     await $.tool.register({
       name: 'summary',
@@ -2449,9 +2590,13 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'bc-dashboard' }, async ($, e) => ({ text: await runCommand($, settings, e.args) }))
 
   // A spent budget that pauses Companion changes: Claude hears it with the person's prompt, once and on a change.
+  // A Boomi prompt is checked first: tips in suggest mode, a question in confirm mode or when it holds a secret.
   on('prompt.submit', async ($, e, next) => {
+    const checked = await checkSubmitted($, settings, e).catch(() => undefined)
+    if (checked?.drop !== undefined) return { drop: checked.drop }
     const note = await enforcementContext($, settings).catch(() => undefined)
-    return next(note ? { ...e, context: [...(e.context ?? []), note] } : e)
+    const typed = checked?.text === undefined ? e : { ...e, text: checked.text }
+    return next(note ? { ...typed, context: [...(e.context ?? []), note] } : typed)
   })
 
   on('tool.call', { tool: 'mcp__boomi-dashboard__summary' }, async $ => ({

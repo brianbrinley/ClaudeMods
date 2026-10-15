@@ -259,3 +259,25 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** the subagent's deploy is refused the same way. **Fail:** it runs.
 - [ ] **N8. Cancelling isn't held back.** *(0.39.2)* *(Not tested yet: needs bc-bdi and a BDI account.)* With `block` on and a BDI flow running, ask Claude to cancel the run.
   **Pass:** the cancel goes through. **Fail:** it's refused as a budget block.
+
+## O. Prompt tips
+
+*boomi-dashboard 0.41.0. Use a Companion workspace where Claude has saved a process and a test of it has failed, so there's a last component and a last failure.*
+
+- [ ] **O1. A vague prompt goes through, with tips.** Type `deploy it and test it, still failing`.
+  **Pass:** Claude starts on it straight away. The status line shows `◐ 4 prompt tips: /bc-dashboard prompt` beside the dashboard's own entry. `/bc-dashboard prompt` names the process, the environment and the failed test's execution ID, and the upgrade has them filled in. **Fail:** the prompt is held or changed, the status line shows no tips, or a tip names the wrong component.
+- [ ] **O2. A clear prompt gets none.** Type `Deploy <the process's name> to <your test environment> and test it with <a sample file>`.
+  **Pass:** no tips; `/bc-dashboard prompt` says your last Boomi prompt had nothing to add. **Fail:** any tip.
+- [ ] **O3. Left alone.** Type `yes`, a prompt starting with `>`, a prompt while Claude is working, and `/bc-dashboard text`.
+  **Pass:** none gets a tip or a question, and the `>` prompt reaches Claude without the `>`. **Fail:** any of them is checked, or the `>` is left on.
+- [ ] **O4. A secret asks, in suggest mode too.** Type `connect with password=example123` (a made-up value, never a real one).
+  **Pass:** a question offers **Send it with the secret masked**, **Edit it first** and **Send it as typed**. Masked, Claude's copy reads `password=****`. **Edit it first** puts the prompt back in the prompt box, whole, and nothing is sent. **Fail:** no question, the value reaches Claude after choosing masked, or the prompt is lost.
+- [ ] **O5. Confirm mode.** Set `promptCheck` to `confirm` (`/bc-dashboard config promptCheck confirm`) and repeat O1, picking **Use the upgrade**.
+  **Pass:** the question lists the tips; the prompt isn't sent; the upgrade is in the prompt box to edit and send. **Fail:** it's sent anyway, or the box is empty.
+- [ ] **O6. The model rewrite.** Run `/bc-dashboard prompt upgrade`.
+  **Pass:** within a few seconds it shows a rewrite with the model and its tokens, and the rewrite is in the prompt box; nothing in it is a name or ID the session didn't have. **Fail:** an error other than the model being unavailable, a made-up name or ID, or the box is empty.
+- [ ] **O7. On the web.** In Claude Code on the web, repeat O1 and O4.
+  **Pass:** `/bc-dashboard prompt` shows the tips, and the secret question appears. **Fail:** either is missing, or the prompt is held with no way to send it.
+- [ ] **O8. With the budget note.** With `budgetEnforce` at `block` and a spent budget, type a vague prompt.
+  **Pass:** Claude still hears the budget is spent, and the tips still show. **Fail:** either is missing.
+

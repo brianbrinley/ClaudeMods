@@ -2424,3 +2424,151 @@ test("Claude hears of a spent budget with the person's prompt, once, and again w
   expect(contexts[1] ?? []).toEqual([])
   expect((await $.command.run(dashboard('text'))).text).toBeDefined()
 })
+
+// --- Prompt tips ---
+
+const PUSH = `bash scripts/boomi-component-push.sh ${FILE}`
+const TEST_RUN = `bash scripts/boomi-test-execute.sh --process-id ${ID}`
+const ENV_ID = '9f8e7d6c-1111-2222-3333-444455556666'
+const VAGUE = 'deploy it and test it, still failing'
+
+/**
+ * A Companion folder where Claude saved Orders Sync and its test failed.
+ * `answer` picks in the question dialog (undefined dismisses it); records the
+ * questions, what went into the prompt box and what reached the model.
+ */
+const promptWorld = async ($: Engine, on: On, answer: (q: Question) => string | undefined = () => undefined, files: Record<string, string> = { 'active-development': '' }) => {
+  world(on, { [FILE]: ORDERS, '.env': `BOOMI_ENVIRONMENT_ID=${ENV_ID}\nBOOMI_API_TOKEN=secret-token-value\n`, ...files })
+  scriptedShell(on, { [PUSH]: "SUCCESS: Pushed component 'Orders Sync' — now version 4", [TEST_RUN]: 'Execution completed: status=ERROR, executionId=execution-aaaa1111' })
+  const asked: string[] = []
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    const q = e.questions[0] as unknown as Question
+    asked.push(q.question)
+    const picked = answer(q)
+    return picked === undefined ? { deny: 'dismissed' } : { result: { questions: [q], answers: { [q.question]: picked } } as never }
+  })
+  const filled: string[] = []
+  on('prompt.fill', async (_$, e) => {
+    filled.push(e.text)
+    return { isFilled: true }
+  })
+  const sent: string[] = []
+  on('prompt.submit', async (_$, e) => {
+    sent.push(e.text)
+    return { text: e.text }
+  })
+  await startSession($, on)
+  await $.tool.call({ tool: 'Bash', command: PUSH })
+  await $.tool.call({ tool: 'Bash', command: TEST_RUN })
+  // The steps refresh the status line and save in the background: let them finish before the test does.
+  await $.command.run(dashboard('text'))
+  const typed = (text: string, extra: Record<string, unknown> = {}) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' }, ...extra } as never)
+  return { asked, filled, sent, typed }
+}
+
+test('suggest: a vague Boomi prompt goes through as typed, and /bc-dashboard prompt shows its tips and the upgrade', async ($, on) => {
+  const { asked, sent, typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  expect(sent).toEqual([VAGUE])
+  expect(asked).toEqual([])
+  const text = (await $.command.run(dashboard('prompt'))).text ?? ''
+  expect(text).toContain('Prompt tips (promptCheck: suggest)')
+  expect(text).toContain('◐ "it": the process Orders Sync, the last one this session?')
+  expect(text).toContain('◐ deploy: no environment named; the session points at 9f8e7d6c…')
+  expect(text).toContain('◐ fix: no error given; the last failure was the test of Orders Sync (execution-aaaa1111)')
+  expect(text).toContain(`By "it" I mean the process Orders Sync (${ID}). Deploy to environment ${ENV_ID}.`)
+  expect(text).toContain('This session: 1 prompt checked · 1 with tips · 0 tips followed')
+  expect(text).not.toContain('secret-token-value')
+  // The next prompt says what was missing: those tips count as followed, and the report says so.
+  await typed('Deploy Orders Sync to dev, then test it with tests/orders.json')
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('Your last Boomi prompt had nothing to add.')
+  expect((await $.command.run(dashboard('report'))).text).toContain('## Prompt tips\n\n- 2 prompts checked · 1 with tips · 4 tips followed')
+})
+
+test('short replies, prompts typed mid-turn, other sessions’ messages and “>” go straight through', async ($, on) => {
+  const { asked, sent, typed } = await promptWorld($, on)
+  await typed('yes')
+  await typed('deploy it', { turnId: 't1' })
+  await typed('deploy it', { origin: { kind: 'peer' } })
+  await typed('> deploy it')
+  expect(sent).toEqual(['yes', 'deploy it', 'deploy it', 'deploy it'])
+  expect(asked).toEqual([])
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('No Boomi prompt checked yet this session.')
+})
+
+test('outside a Companion folder, prompts are not checked', async ($, on) => {
+  const { sent, typed } = await promptWorld($, on, () => undefined, {})
+  await typed(VAGUE)
+  await typed('> a quoted line')
+  expect(sent).toEqual([VAGUE, '> a quoted line'])
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('No Boomi prompt checked yet')
+})
+
+test('a secret in a prompt asks even in suggest mode; no answer sends it masked', async ($, on) => {
+  let pick: string | undefined = 'Send it with the secret masked'
+  const { asked, sent, typed } = await promptWorld($, on, () => pick)
+  await typed('connect Orders Sync with password=hunter22')
+  expect(asked[0]).toBe("Your prompt has a password or token in it. Once it's sent, it stays in the transcript. Send it with the secret masked?")
+  pick = undefined
+  await typed('and the token: abcd1234efgh')
+  pick = 'Send it as typed'
+  await typed('use password=hunter22 after all')
+  expect(sent).toEqual(['connect Orders Sync with password=****', 'and the token: ****', 'use password=hunter22 after all'])
+})
+
+test('a secret: Edit it first holds the prompt and puts it back in the prompt box', async ($, on) => {
+  const { filled, sent, typed } = await promptWorld($, on, () => 'Edit it first')
+  const result = await typed('connect with password=hunter22')
+  expect(result).toEqual({ drop: 'Held by the dashboard: your prompt is back in the prompt box to edit.' })
+  expect(filled).toEqual(['connect with password=hunter22'])
+  expect(sent).toEqual([])
+})
+
+test('confirm: a flagged prompt asks first; Use the upgrade holds it and puts the upgrade in the prompt box', { options: { promptCheck: 'confirm' } }, async ($, on) => {
+  const { asked, filled, sent, typed } = await promptWorld($, on, () => 'Use the upgrade')
+  const result = await typed(VAGUE)
+  expect(asked[0]).toContain('This prompt leaves out: "it": the process Orders Sync, the last one this session?; deploy: no environment named')
+  expect(result).toEqual({ drop: 'Held by the dashboard: the upgraded prompt is in the prompt box. Fill in any [placeholder], then press Enter.' })
+  expect(filled[0]).toContain('By "it" I mean the process Orders Sync')
+  expect(sent).toEqual([])
+  // A prompt that says it all asks nothing.
+  await typed('Deploy Orders Sync to dev')
+  expect(asked).toHaveLength(1)
+  expect(sent).toEqual(['Deploy Orders Sync to dev'])
+})
+
+test('off: nothing is checked, asked or changed', { options: { promptCheck: 'off' } }, async ($, on) => {
+  const { asked, sent, typed } = await promptWorld($, on, () => 'Send it with the secret masked')
+  await typed(VAGUE)
+  await typed('> password=hunter22')
+  expect(sent).toEqual([VAGUE, '> password=hunter22'])
+  expect(asked).toEqual([])
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('Prompts are not checked.')
+})
+
+test('/bc-dashboard prompt use fills the prompt box; prompt upgrade has the model rewrite the masked prompt', async ($, on) => {
+  const asks: { model: string; prompt: string }[] = []
+  let isAnswered = true
+  const usage = (input: number, output: number) => ({ input_tokens: input, output_tokens: output, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 })
+  on('model.complete', async (_$, e) => {
+    asks.push({ model: e.model, prompt: String(e.prompt) })
+    return {
+      value: isAnswered
+        ? { isAnswered: true, text: 'Deploy Orders Sync to [environment], then test it with [test data].', usage: usage(100, 30) }
+        : { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) },
+    } as never
+  })
+  const { filled, typed } = await promptWorld($, on)
+  expect((await $.command.run(dashboard('prompt use'))).text).toBe('No upgraded prompt yet: no Boomi prompt this session has had tips.')
+  await typed(VAGUE)
+  expect((await $.command.run(dashboard('prompt use'))).text).toBe('The upgraded prompt is in the prompt box: fill in any [placeholder], then press Enter.')
+  expect(filled[0]).toContain('Deploy to environment')
+  const rewritten = (await $.command.run(dashboard('prompt upgrade'))).text ?? ''
+  expect(rewritten).toContain('Rewritten by haiku (130 tokens).')
+  expect(filled[1]).toBe('Deploy Orders Sync to [environment], then test it with [test data].')
+  expect(asks[0]!.model).toBe('haiku')
+  expect(asks[0]!.prompt).toContain(`<prompt>\n${VAGUE}\n</prompt>`)
+  expect(asks[0]!.prompt).not.toContain('secret-token-value')
+  isAnswered = false
+  expect((await $.command.run(dashboard('prompt upgrade'))).text).toBe("haiku couldn't rewrite it (api-error). Your prompt is safe, and the upgrade from the checks is still there: /bc-dashboard prompt use.")
+})
