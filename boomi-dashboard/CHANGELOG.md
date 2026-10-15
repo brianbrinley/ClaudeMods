@@ -2,6 +2,11 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.47.0
+
+- **Companion's share of all your usage.** Every 15 minutes the dashboard runs `claude -p "/usage" --output-format json --no-session-persistence` (no model call, no session kept) and reads Claude Code's own breakdown. BUDGET then shows `Companion: 20% of your usage today · 18% this week` (the `bc-*` plugins added up) and the habit behind most of the week's usage, such as `44% of your usage was at >150k context`. It's Claude Code's estimate from this machine's sessions. Off a subscription there's no breakdown and nothing shows; `usageBreakdown` turns it off. It's information only: the `companionShare` budget still measures a share of your weekly limit.
+- **Your assigned Claude budget.** A new setting, `seatBudgetUsd`, takes the budget your admin gave you. With a spend limit Claude Code reports, BUDGET shows it in dollars (`Claude budget: $84 of $200`), warns at 80% and counts for `budgetEnforce`; without one, it says this login doesn't report how much is used. The usage credits the interactive `/usage` shows aren't available to mods, so this is the way to see dollars.
+
 ## 0.46.0
 
 - **A nudge for a look around.** A prompt like "use boomi companion to check out my account" names nothing to find, so Claude guesses what to list. It now gets a tip, "look-around: say what you want to find out (deployed processes, failed runs, a folder's components, runtimes)", and the upgrade a **What to find out** line. It only nudges: reading changes nothing in Boomi, so `confirm` doesn't hold a prompt for this tip alone. `promptSkip aim` turns it off.

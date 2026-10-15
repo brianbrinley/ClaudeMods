@@ -192,6 +192,13 @@ export type Dashboard = {
   quarantine?: Record<string, QuarantineSeen>
 }
 
+/** Claude Code's /usage breakdown as the dashboard last read it (hooks/usage-breakdown.ts's UsageBreakdown). */
+export type UsageBreakdownSeen = {
+  isSubscription: boolean
+  day?: { companion?: number; plugins: { name: string; percent: number }[]; habits: { percent: number; text: string }[]; requests?: number; sessions?: number }
+  week?: { companion?: number; plugins: { name: string; percent: number }[]; habits: { percent: number; text: string }[]; requests?: number; sessions?: number }
+}
+
 /** A prompt check: what a Companion prompt can leave out (see hooks/prompt-check.ts). */
 export type PromptCheckCode = 'subject' | 'environment' | 'test' | 'production' | 'steps' | 'error' | 'build' | 'map' | 'secret' | 'aim'
 
@@ -303,6 +310,6 @@ export type RuntimeSeen = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { budgetAllowed: boolean; budgetPaused: string; enforceNoted: string; dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; paneSize: { rows: number; columns: number } | null; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; companionPlugins: CompanionPlugin[] | null; updateAvailable: string | null; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; reviewing: string | null; historyShown: number; stepsShown: number; promptTips: PromptTips | null; promptCounts: PromptCounts; promptBusy: boolean; promptNote: string; promptHeld: string | null; promptNudgeHidden: number; promptNoteDraft: string; promptExpanded: boolean; isPastCollapsed: boolean }
+    'boomi-dashboard': { budgetAllowed: boolean; budgetPaused: string; enforceNoted: string; dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; paneSize: { rows: number; columns: number } | null; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; companionPlugins: CompanionPlugin[] | null; updateAvailable: string | null; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; reviewing: string | null; historyShown: number; stepsShown: number; promptTips: PromptTips | null; promptCounts: PromptCounts; promptBusy: boolean; promptNote: string; promptHeld: string | null; promptNudgeHidden: number; promptNoteDraft: string; promptExpanded: boolean; isPastCollapsed: boolean; usageBreakdown: { breakdown: UsageBreakdownSeen; checkedAt: number } | null }
   }
 }

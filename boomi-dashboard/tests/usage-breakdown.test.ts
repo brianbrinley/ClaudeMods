@@ -1,0 +1,65 @@
+import { expect, test } from 'claude-code/testing'
+import { budgetLines } from '../hooks/activity'
+import { companionUseLine, parseUsage, topHabit } from '../hooks/usage-breakdown'
+
+// The shape of `claude -p "/usage" --output-format json` on a subscription, as of Claude Code 2.1.300, with made-up figures.
+const RESULT = [
+  'You are currently using your subscription to power your Claude Code usage',
+  '',
+  "What's contributing to your limits usage?",
+  'Approximate, based on local sessions on this machine — does not include other devices or claude.ai. Behaviors are independent characteristics, not a breakdown.',
+  '',
+  'Last 24h · 140 requests · 11 sessions',
+  '  50% of your usage went to always-on context over 40k tokens',
+  '  33% of your usage was at >150k context',
+  '  Top skills: /docx 22%, /bc-integration:boomi-integration 20%, /superpowers:brainstorming 2%',
+  '  Top plugins: bc-integration 20%, app-connections 6%, superpowers 2%',
+  '',
+  'Last 7d · 1,150 requests · 60 sessions',
+  '  44% of your usage was at >150k context',
+  '  10% of your usage came from subagent-heavy sessions',
+  '  Top plugins: bc-integration 18%, bc-datahub 3%, app-connections 1%',
+].join('\n')
+const OUTPUT = JSON.stringify({ type: 'result', subtype: 'success', local_command: 'usage', total_cost_usd: 0, result: RESULT })
+
+const SETTINGS = { budgetUsd: 0, companionShare: 0, companionSharePeriod: 'week' as const, companionMonthlyUsd: 0 }
+
+test('the /usage breakdown: Companion’s share is the bc-* plugins added up, per window, with the habits that drove the usage', () => {
+  const b = parseUsage(OUTPUT)!
+  expect(b.isSubscription).toBe(true)
+  expect(b.day).toEqual({
+    companion: 20,
+    plugins: [{ name: 'bc-integration', percent: 20 }, { name: 'app-connections', percent: 6 }, { name: 'superpowers', percent: 2 }],
+    habits: [{ percent: 50, text: 'went to always-on context over 40k tokens' }, { percent: 33, text: 'was at >150k context' }],
+    requests: 140,
+    sessions: 11,
+  })
+  expect(b.week?.companion).toBe(21)
+  expect(b.week?.requests).toBe(1150)
+  expect(companionUseLine(b)).toBe('20% of your usage today · 21% this week')
+  expect(topHabit(b)).toBe('44% of your usage was at >150k context')
+  // The plain text reads the same as the JSON.
+  expect(parseUsage(RESULT)?.week?.companion).toBe(21)
+})
+
+test('off a subscription, or with no plugin lines, there is nothing to show rather than a guess', () => {
+  expect(parseUsage(JSON.stringify({ result: 'Total cost:            $0.0000\nUsage:                 0 input, 0 output' }))).toBeUndefined()
+  expect(parseUsage('not json at all')).toBeUndefined()
+  const noPlugins = parseUsage('Last 24h · 3 requests · 1 sessions\n  Top skills: /docx 100%')!
+  expect(noPlugins.day?.companion).toBeUndefined()
+  expect(companionUseLine(noPlugins)).toBeUndefined()
+  expect(companionUseLine(null)).toBeUndefined()
+})
+
+test('your Claude budget: in dollars from a spend limit, said plainly when the login reports none; Companion’s share beside it', () => {
+  const spend = budgetLines({ limits: [{ kind: 'spend_limit', percentUsed: 42 }] }, { ...SETTINGS, seatBudgetUsd: 200 })
+  expect(spend).toEqual([{ label: 'Claude budget', level: 'healthy', percent: 42, detail: '$84 of $200' }])
+  expect(budgetLines({ limits: [{ kind: 'spend_limit', percentUsed: 85 }] }, { ...SETTINGS, seatBudgetUsd: 200 })[0]!.level).toBe('warning')
+  expect(budgetLines({}, { ...SETTINGS, seatBudgetUsd: 200 })).toEqual([
+    { label: 'Claude budget', level: 'healthy', percent: 0, detail: "$200 set; this login doesn't report how much of it is used", isUnmeasured: true },
+  ])
+  expect(budgetLines({ companionUse: '20% of your usage today' }, SETTINGS)).toEqual([
+    { label: 'Companion', level: 'healthy', percent: 0, detail: "20% of your usage today (Claude Code's estimate, this machine)", isUnmeasured: true },
+  ])
+  expect(budgetLines({}, SETTINGS)).toEqual([])
+})
