@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.46.0",
+  "version": "0.47.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -103,6 +103,18 @@
       "title": "Companion's monthly amount (USD)",
       "description": "A monthly amount for Boomi Companion sessions, counted as Claude Code's own cost figures (on a seat, what the same use would cost on the API); warns at 80% and when it's reached; 0 turns it off",
       "default": 0
+    },
+    "seatBudgetUsd": {
+      "type": "number",
+      "title": "Your Claude budget (USD)",
+      "description": "The Claude budget your admin assigned you, in US dollars. With a spend limit Claude Code reports, the BUDGET gauge shows it in dollars; 0 leaves it out",
+      "default": 0
+    },
+    "usageBreakdown": {
+      "type": "boolean",
+      "title": "Read Claude Code's usage breakdown",
+      "description": "Every 15 minutes, run claude -p \"/usage\" (no model call, no session kept) to show Companion's share of all your usage, as Claude Code estimates it for this machine",
+      "default": true
     },
     "budgetEnforce": {
       "type": "string",

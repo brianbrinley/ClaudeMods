@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, PromptSubmitInput, Register } from 'claude-code'
 
-import type { Activity, CompanionPlugin, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, PromptCounts, PromptTips, PromptTry, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
+import type { Activity, CompanionPlugin, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, PromptCounts, PromptTips, PromptTry, UsageBreakdownSeen, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -127,6 +127,7 @@ import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import { contextLines, folderComponentOf, relevantComponents, relevantSections, sectionsOf } from './retrieve'
 import type { FolderComponent, Section } from './retrieve'
+import { companionUseLine, parseUsage, topHabit } from './usage-breakdown'
 import { NO_COUNTS, NUDGE_ONLY, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import type { Credentials } from './platform'
@@ -245,6 +246,35 @@ const promptHeld = atom({ plugin: 'boomi-dashboard', key: 'promptHeld' } as cons
 /** The note for the next rewrite as it's typed: how many rows its field takes, for fitting the tab to the pane. */
 const promptNoteDraft = atom({ plugin: 'boomi-dashboard', key: 'promptNoteDraft' } as const, '')
 
+/** Claude Code's own breakdown of what used the person's limits, read from `claude -p "/usage"` now and then. */
+const usageBreakdown = atom({ plugin: 'boomi-dashboard', key: 'usageBreakdown' } as const, null as { breakdown: UsageBreakdownSeen; checkedAt: number } | null)
+
+/** How often the breakdown is read again: it covers a day and a week, so a quarter of an hour is plenty. */
+const BREAKDOWN_MS = 15 * 60_000
+
+/**
+ * Reads Claude Code's /usage breakdown with a headless run of it: no model
+ * call and no session kept (`--no-session-persistence`). Nothing changes when
+ * the command fails or has no breakdown (off a subscription).
+ */
+const readBreakdown = async ($: Engine) => {
+  const cwd = await $.session.cwd()
+  const ran = await $.process.run(['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence'], { cwd, timeoutMs: 30_000 }).catch(() => undefined)
+  const breakdown = ran?.exitCode === 0 ? parseUsage(ran.stdout) : undefined
+  if (breakdown) {
+    const checkedAt = await $.clock.now()
+    await update($, usageBreakdown, () => ({ breakdown, checkedAt }))
+  }
+}
+
+/** The usage with what only the dashboard's own reads add: Companion's share of all usage, from the /usage breakdown. */
+const withUse = async ($: Engine, usage: Usage): Promise<Usage> => {
+  const breakdown = (await read($, usageBreakdown))?.breakdown
+  const use = companionUseLine(breakdown)
+  const habit = topHabit(breakdown)
+  return { ...usage, ...(use ? { companionUse: use } : {}), ...(habit ? { usageHabit: habit } : {}) }
+}
+
 /** Past Companion sessions folded to their totals, to leave the pane's room to this session; kept across sessions. */
 const isPastCollapsed = atom({ plugin: 'boomi-dashboard', key: 'isPastCollapsed' } as const, true)
 const PAST_COLLAPSED_KEY = 'pastCollapsed'
@@ -290,6 +320,8 @@ type Settings = {
   promptModel: string
   promptSkip: ReadonlySet<string>
   promptView: 'auto' | 'manual' | 'off'
+  seatBudgetUsd: number
+  isReadingBreakdown: boolean
   /** The options these settings came from, for a change to one of them. */
   options: Readonly<Record<string, unknown>>
 }
@@ -320,6 +352,8 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   reportStyle: options.reportStyle === 'expressive' ? 'expressive' : 'exosphere',
   promptCheck: options.promptCheck === 'off' || options.promptCheck === 'suggest' ? options.promptCheck : 'confirm',
   promptModel: String(options.promptModel || 'haiku').trim() || 'haiku',
+  seatBudgetUsd: Math.max(0, Number(options.seatBudgetUsd ?? 0) || 0),
+  isReadingBreakdown: options.usageBreakdown !== false,
   promptView: options.promptView === 'manual' || options.promptView === 'off' ? options.promptView : 'auto',
   promptSkip: new Set(String(options.promptSkip ?? '').split(/[\s,]+/).filter(Boolean)),
   options: { ...options },
@@ -1831,7 +1865,7 @@ const guardLines = async ($: Engine) => {
 /** The session's usage with the person's budgets, for the text and the report. */
 const withBudget = async ($: Engine, settings: Settings): Promise<Usage> => {
   const usage = { ...(await usageOf($)), budgetUsd: settings.budgetUsd }
-  return { ...usage, companion: await companionBudget($, settings, usage) }
+  return withUse($, { ...usage, companion: await companionBudget($, settings, usage) })
 }
 
 const summaryNow = async ($: Engine, settings: Settings) =>
@@ -2754,6 +2788,11 @@ export const register: Register = (on, options) => {
     await setUpSession($, settings)
 
     $.clock.every(5_000, () => refreshStatus($, settings))
+    // Claude Code's /usage breakdown: Companion's share of all usage. Only in an interactive session, so the headless run it starts never starts another.
+    if (settings.isReadingBreakdown && e.isInteractive) {
+      $.clock.after(20_000, () => readBreakdown($).catch(() => undefined))
+      $.clock.every(BREAKDOWN_MS, () => readBreakdown($).catch(() => undefined))
+    }
     // The flamingo's scene: what it does next is checked every half second.
     if (settings.hasFlamingo) {
       // It stands in one place, working or not; the pane redraws only when the scene changes.
@@ -3221,7 +3260,7 @@ export const register: Register = (on, options) => {
 
     const limitsNow = limitViews(usage.limits, now)
     const mine = await companionBudget($, settings, usage)
-    const budgets = budgetLines({ ...usage, ...(mine ? { companion: mine } : {}) }, settings)
+    const budgets = budgetLines(await withUse($, { ...usage, ...(mine ? { companion: mine } : {}) }), settings)
     const measured = budgets.find(b => !b.isUnmeasured)
     // Every Text carries the pane's colors, so it reads the same on any terminal.
     const t = (text: string, style: { color?: string; bold?: boolean; bg?: string } = {}) => (

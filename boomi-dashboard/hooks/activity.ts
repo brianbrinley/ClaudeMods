@@ -1427,6 +1427,10 @@ export type Usage = {
   companion?: { week?: BudgetView; month?: BudgetView }
   /** Set while a spent budget pauses Companion changes (budgetEnforce confirm or block). */
   isPaused?: boolean
+  /** Companion's share of all the person's usage, from Claude Code's /usage breakdown: "20% of your usage today · 18% this week". */
+  companionUse?: string
+  /** The habit that drove most of the week's usage, from the same breakdown: "44% of your usage was at >150k context". */
+  usageHabit?: string
 }
 
 /** What the status line and banner say while a spent budget pauses Companion changes. */
@@ -2643,9 +2647,22 @@ export type BudgetLine = { label: string; level: Level; percent: number; detail:
  */
 export const budgetLines = (
   usage: Usage,
-  settings: { budgetUsd: number; companionShare: number; companionSharePeriod: SharePeriod; companionMonthlyUsd: number },
+  settings: { budgetUsd: number; companionShare: number; companionSharePeriod: SharePeriod; companionMonthlyUsd: number; seatBudgetUsd?: number },
 ): BudgetLine[] => {
   const lines: BudgetLine[] = []
+  // The budget the person's admin assigned them: in dollars from the spend limit Claude Code reports, when it reports one.
+  const seat = settings.seatBudgetUsd ?? 0
+  if (seat > 0) {
+    const spend = usage.limits?.find(l => l.kind === 'spend_limit')
+    if (spend) {
+      const level: Level = spend.percentUsed >= 100 ? 'critical' : spend.percentUsed >= 80 ? 'warning' : 'healthy'
+      lines.push({ label: 'Claude budget', level, percent: spend.percentUsed, detail: `${formatCost((spend.percentUsed / 100) * seat)} of ${formatCost(seat)}` })
+    } else {
+      lines.push({ label: 'Claude budget', level: 'healthy', percent: 0, detail: `${formatCost(seat)} set; this login doesn't report how much of it is used`, isUnmeasured: true })
+    }
+  }
+  if (usage.companionUse) lines.push({ label: 'Companion', level: 'healthy', percent: 0, detail: `${usage.companionUse} (Claude Code's estimate, this machine)`, isUnmeasured: true })
+  if (usage.usageHabit) lines.push({ label: 'this week', level: 'healthy', percent: 0, detail: usage.usageHabit, isUnmeasured: true })
   const session = budgetOf(usage.usd ?? 0, settings.budgetUsd)
   if (session) lines.push({ label: 'session', level: session.level, percent: session.percent, detail: `${formatCost(usage.usd ?? 0)} of ${formatCost(settings.budgetUsd)}` })
   const month = usage.companion?.month

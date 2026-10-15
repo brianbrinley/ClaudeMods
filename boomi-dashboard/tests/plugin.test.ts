@@ -2075,14 +2075,15 @@ test('/bc-dashboard config walks the budget with figures from past sessions, and
     'Keep off',
     '30%',
     'Month',
+    'Keep off',
     'Keep warn',
     'Done',
   ])
   const answer = await $.command.run(dashboard('config'))
-  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget 1/6', 'Budget 2/6', 'Budget 3/6', 'Budget 4/6', 'Budget 5/6', 'Settings'])
+  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget 1/7', 'Budget 2/7', 'Budget 3/7', 'Budget 4/7', 'Budget 5/7', 'Budget 6/7', 'Settings'])
   expect(asked[1]!.options.map(o => o.label)).toEqual(['Keep off', '$2.50 (twice a typical session)', '$3.50 (your costliest session)', 'Back to the menu'])
   expect(asked[1]!.question).toContain('cost $1.25 typically, $3.50 at most')
-  expect(asked[6]!.question).toContain('3 changes so far, saved when you pick Done.')
+  expect(asked[7]!.question).toContain('3 changes so far, saved when you pick Done.')
   expect(sets).toEqual([
     ['boomi-dashboard.budgetUsd', 2.5],
     ['boomi-dashboard.companionShare', 30],
@@ -2098,7 +2099,7 @@ test('/bc-dashboard config skips the share period with no share, goes back to th
   const answer = await $.command.run(dashboard('config budget'))
   expect(asked[0]!.options.map(o => o.label)).toEqual(['Keep $5.00', '$2.50 (twice a typical session)', 'Off', 'Back to the menu'])
   expect(asked[1]!.question).toMatch(/^"lots" didn't work: Session budget takes a number \(0 for off\)\. Session budget:/)
-  expect(asked[2]!.header).toBe('Budget 2/6')
+  expect(asked[2]!.header).toBe('Budget 2/7')
   expect(sets).toEqual([['boomi-dashboard.budgetUsd', 7]])
   expect(answer.text).toBe('Saved to /config:\n  Session budget: $5.00 → $7.00')
 })
@@ -2868,4 +2869,22 @@ test('a look around the account gets a nudge, and confirm lets it through: readi
   const text = (await $.command.run(dashboard('prompt'))).text ?? ''
   expect(text).toContain("◐ look-around: say what you want to find out (deployed processes, failed runs, a folder's components, runtimes)")
   expect(text).toContain('- What to find out: [deployed processes and where')
+})
+
+// --- 0.47.0: Claude Code's usage breakdown ---
+
+test('the pane reads Claude Code’s /usage breakdown after the start, with no session kept, and shows Companion’s share', async ($, on) => {
+  world(on, { [FILE]: ORDERS, 'active-development': '' })
+  const runs: string[][] = []
+  const result = 'You are currently using your subscription\n\nLast 24h · 9 requests · 2 sessions\n  Top plugins: bc-integration 20%\n\nLast 7d · 90 requests · 8 sessions\n  Top plugins: bc-integration 18%'
+  on('process.run', async (_$, e) => {
+    runs.push([...e.argv])
+    const isUsage = e.argv[1] === '-p' && e.argv[2] === '/usage'
+    return { value: { exitCode: 0, stdout: isUsage ? JSON.stringify({ result }) : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await startSession($, on)
+  await clock.advance(20_000)
+  expect(runs).toContainEqual(['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence'])
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /Companion: 20% of your usage today · 18% this week \(Claude Code's estimate, this machine\)/ })).toBeDefined()
 })

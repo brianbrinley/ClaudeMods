@@ -309,3 +309,12 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **O22. Past sessions fold.** Open the dashboard pane with past sessions scanned.
   **Pass:** **Past Companion sessions** shows its totals and `N sessions listed`, with **▸ Show**. **Show** lists them; **Hide** folds them; in a new session the section stays as you left it. **Fail:** the list shows unfolded at first, a button does nothing, or the choice is forgotten.
 
+## P. Usage breakdown and your Claude budget
+
+*boomi-dashboard 0.47.0, on a Claude subscription login.*
+
+- [ ] **P1. Companion's share.** Start a session in a Companion folder and wait half a minute.
+  **Pass:** BUDGET in the pane shows `Companion: N% of your usage today · M% this week (Claude Code's estimate, this machine)` and a `this week:` habit line, and the numbers match the `Top plugins:` lines of `claude -p "/usage"` for the `bc-*` plugins. No new session appears in `/resume` for the check. **Fail:** nothing shows on a subscription, the numbers differ, or a session is left behind each time.
+- [ ] **P2. Your Claude budget.** Run `/bc-dashboard config seatBudgetUsd 200` (or your real figure).
+  **Pass:** with a spend limit reported, BUDGET says `Claude budget: $X of $200` matching its percentage; without one, `$200 set; this login doesn't report how much of it is used`. **Fail:** a dollar figure with no spend limit, or none with one.
+

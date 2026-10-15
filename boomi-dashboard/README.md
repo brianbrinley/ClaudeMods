@@ -178,6 +178,10 @@ On a Claude seat (Pro, Max, Team or Enterprise), the dashboard reads your usage 
 
 On an API key there are no limits to read, so none of this shows.
 
+**Your assigned Claude budget.** Claude Code reports how much of a spend limit is used, never its dollar amount, and the usage credits `/usage` shows aren't available to mods. If your admin gave you a figure, set `seatBudgetUsd` (or **Your Claude budget** in `/bc-dashboard config budget`): with a spend limit reported, BUDGET shows `Claude budget: $84 of $200`; without one, it says this login doesn't report how much is used.
+
+**Companion's share of all your usage.** Every 15 minutes the dashboard runs `claude -p "/usage" --output-format json --no-session-persistence`: no model call, no session kept, nothing to pay. From Claude Code's own breakdown it shows `Companion: 20% of your usage today · 18% this week` (the `bc-*` plugins added up) and the habit behind most of the week's usage, such as `44% of your usage was at >150k context`. It's Claude Code's estimate from this machine's sessions, not claude.ai or other devices. Off a subscription the command has no breakdown, and nothing shows. `usageBreakdown` turns it off.
+
 ### Your own Companion budget
 
 Two optional settings under `/config` give Companion work a budget of its own. Both warn in the status line from 80% and toast at 80% and 100%. Under the default `budgetEnforce` (`warn`) they stop nothing. With `confirm` or `block`, a spent budget really does stop Companion's changes: see [Budget enforcement](#budget-enforcement).
@@ -479,6 +483,8 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `companionShare` | `0` | Companion's share of your weekly usage limit, in percent; `0` turns it off. |
 | `companionSharePeriod` | `week` | What the share runs over: `day`, `week` or `month`. |
 | `companionMonthlyUsd` | `0` | A monthly amount for Companion sessions, in US dollars; `0` turns it off. |
+| `seatBudgetUsd` | `0` | The Claude budget your admin assigned you, in US dollars, shown against the spend limit Claude Code reports; `0` leaves it out. |
+| `usageBreakdown` | `true` | Read Claude Code's `/usage` breakdown every 15 minutes for Companion's share of all your usage. |
 | `budgetEnforce` | `warn` | What a spent budget does: `warn` only warns; `confirm` asks before each Companion change; `block` refuses them. `confirm` and `block` really stop changes. See [Budget enforcement](#budget-enforcement). |
 | `budgetGrace` | `0` | How far past a budget, in percent, before `confirm` or `block` starts. |
 | `updateCheck` | `true` | At the start of a session, say when a newer dashboard is on GitHub (never installs). |
@@ -548,7 +554,7 @@ The dashboard follows Claude's tool calls, so tracking the session costs no Plat
 | `$.session.usage` | Cost, context, session length and the seat's usage limits |
 | `$.http.fetch` | Read-only Platform API queries for watched components |
 | `$.fs` | Component XML, Companion's `.env` and its activity log |
-| `$.process.run` | **Why?**, **Run again** and the session scan |
+| `$.process.run` | **Why?**, **Run again**, the session scan, and `claude -p "/usage"` for the usage breakdown |
 | `prompt.submit` | Prompt tips, the secret question and the budget note |
 | `$.model.complete` | `/bc-dashboard prompt upgrade`, only when you run it |
 | `$.prompt.fill`, `$.prompt.suggest` | **Ask Claude to fix**, the next-step suggestion and an upgraded prompt |
