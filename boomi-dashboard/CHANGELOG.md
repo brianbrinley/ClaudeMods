@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.48.1
+
+- **The budgets in the reports and the text.** The HTML report labelled the monthly Claude budget "Companion's share (Claude budget)" and Companion's share of all usage "Companion's share (Companion)". They now read **Your Claude budget**, **Companion, all your usage** and **What drove this week**. A spent monthly Claude budget under `budgetEnforce` is named as that, not as a Companion share. `/bc-dashboard text` and the Markdown report, which showed none of these, now list the monthly Claude budget in dollars, Companion's share and the week's habit.
+
 ## 0.48.0
 
 - **Your monthly Claude budget, in dollars, automatically.** The `/usage` run now uses `--output-format stream-json --verbose`, whose `usage_report` carries the account's monthly budget and what's used, the figures the interactive `/usage` shows. BUDGET reads `Claude budget: $380 of $1100 this month`, measured, with a toast at 80% and when it's used up, and it counts for `budgetEnforce`. It's the account's figure (other devices and claude.ai included) and needs extra usage on for the account. Amounts arrive in cents and anything not in dollars, off or malformed is left out. `seatBudgetUsd` is now only for logins that report a spend limit in percent. This corrects 0.47.0, which said the credits weren't available to mods.

@@ -120,7 +120,7 @@ export const wrapperScripts = (command: string): string[] => {
 
 /** A budget as a sentence: "the session budget", "Companion's monthly amount". */
 const budgetName = (line: BudgetLine) =>
-  line.label === 'session' ? 'the session budget' : line.label === 'month' ? "Companion's monthly amount" : `Companion's share of your usage limit (${line.label.replace(/^share,? ?/, '') || 'week'})`
+  line.label === 'session' ? 'the session budget' : line.label === 'month' ? "Companion's monthly amount" : line.label === 'Claude budget' ? 'your monthly Claude budget' : `Companion's share of your usage limit (${line.label.replace(/^share,? ?/, '') || 'week'})`
 
 /** The budgets spent past the grace, fullest first. */
 export const spentBudgets = (lines: readonly BudgetLine[], gracePercent: number): BudgetLine[] =>

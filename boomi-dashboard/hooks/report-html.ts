@@ -831,7 +831,13 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
 
   // Budgets: every one the person set, as a meter; in an all-sessions report, each session against the session budget too.
   const budgetRows = (facts.budgets ?? []).map(b => {
-    const label = b.label === 'session' ? (isAll ? 'This session' : 'Session') : b.label === 'month' ? 'Companion this month' : `Companion's share (${b.label.replace(/^share,? ?/, '') || 'limit'})`
+    const label =
+      b.label === 'session' ? (isAll ? 'This session' : 'Session')
+      : b.label === 'month' ? 'Companion this month'
+      : b.label === 'Claude budget' ? 'Your Claude budget'
+      : b.label === 'Companion' ? 'Companion, all your usage'
+      : b.label === 'this week' ? 'What drove this week'
+      : `Companion's share (${b.label.replace(/^share,? ?/, '') || 'limit'})`
     if (b.isUnmeasured) return `<li class="meter meter-none"><div class="meter-head"><span>${esc(label)}</span><span class="na">not measured</span></div><div class="sub">${esc(b.detail)}</div></li>`
     const shown = Math.min(100, Math.max(0, b.percent))
     return `<li class="meter meter-${b.level}"><div class="meter-head"><span>${esc(label)}</span>${status(b.level, `${Math.round(b.percent)}%`)}</div><div class="meter-bar" role="img" aria-label="${esc(`${label}: ${Math.round(b.percent)}%, ${b.detail}`)}"><span style="width:${shown.toFixed(1)}%"></span></div><div class="sub">${esc(b.detail)}</div></li>`

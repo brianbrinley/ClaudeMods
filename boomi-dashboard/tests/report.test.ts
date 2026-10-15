@@ -388,3 +388,22 @@ test('one quiet theme button: a moon to go dark, a sun to come back, labelled fo
   expect(page).not.toContain('data-theme-pick')
   expect(page).toContain('.ex-theme-dark .theme-toggle .sun{display:block}')
 })
+
+test('the report’s budget block names the Claude budget and Companion’s share of all usage as what they are', () => {
+  const view = scoped(DASHBOARD, 'session')
+  const base = { session: 'cccccccc-3333', sessionId: 'cccccccc-3333', date: '2026-10-14', scope: 'session' as const, usage: { usd: 0.4 } }
+  const page = reportHtml(view, {
+    ...base,
+    budgets: [
+      { label: 'Claude budget', level: 'warning', percent: 82, detail: '$902 of $1100 this month' },
+      { label: 'Companion', level: 'healthy', percent: 0, detail: '≥15% of your usage today · ≥18% this week (Claude Code\'s estimate, this machine)', isUnmeasured: true },
+      { label: 'this week', level: 'healthy', percent: 0, detail: '46% of your usage was at >150k context', isUnmeasured: true },
+    ],
+  }, NOW, 24 * HOUR)
+  expect(page).toContain('<span>Your Claude budget</span>')
+  expect(page).toContain('$902 of $1100 this month')
+  expect(page).toContain('<span>Companion, all your usage</span>')
+  expect(page).toContain('<span>What drove this week</span>')
+  expect(page).not.toContain("Companion&#39;s share (Claude budget)")
+  expect(page).not.toContain("Companion&#39;s share (Companion)")
+})

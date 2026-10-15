@@ -8,6 +8,7 @@ import {
   diagnose,
   fixPrompt,
   report,
+  usageReadLines,
   guardrails,
   guardrailText,
   pastSessions,
@@ -1152,4 +1153,23 @@ test("Companion's share without a weekly limit to take it of is not measured: no
   expect(budgetLines({}, settings)).toEqual([{ label: 'share', level: 'healthy', percent: 0, detail: 'this login reports no weekly limit', isUnmeasured: true }])
   const [withLimit] = budgetLines({ limits: [{ kind: 'seven_day', percentUsed: 10 }] }, settings)
   expect(withLimit).toEqual({ label: 'share', level: 'healthy', percent: 0, detail: 'no Companion work yet' })
+})
+
+test('the text summary and the Markdown report carry the monthly Claude budget, Companion’s share and the habit', () => {
+  const usage = {
+    usd: 0.42,
+    extraUsage: { limitUsd: 1100, usedUsd: 380.04, percent: 34.5 },
+    companionUse: '≥15% of your usage today · ≥18% this week',
+    usageHabit: '46% of your usage was at >150k context',
+  }
+  const lines = usageReadLines(usage)
+  expect(lines).toEqual([
+    expect.stringContaining('Claude budget: $380 of $1100 this month (35%)'),
+    "Companion: ≥15% of your usage today · ≥18% this week (Claude Code's estimate, this machine)",
+    'This week: 46% of your usage was at >150k context',
+  ])
+  const md = report(dashboard([]), { session: 'abc', date: '2026-10-15', usage }, NOW, 24 * HOUR)
+  for (const line of lines) expect(md).toContain(`- ${line}`)
+  expect(usageReadLines({ usd: 1 })).toEqual([])
+  expect(usageReadLines({ isUsageUnreadable: true })[0]).toContain("couldn't read Claude Code's /usage")
 })

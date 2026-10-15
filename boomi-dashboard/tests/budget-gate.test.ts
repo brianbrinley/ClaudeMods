@@ -94,3 +94,8 @@ test('the note Claude gets once enforcement starts, or changes', () => {
   expect(enforcementNote([LINES[0]!], 'confirm', true)).toContain('the user allowed Companion changes for the rest of this session')
   expect(enforcementNote([], 'block', false)).toContain('no longer spent')
 })
+
+test('a spent monthly Claude budget is named as that, not as a Companion share', () => {
+  const spent = [{ label: 'Claude budget', level: 'critical', percent: 101, detail: '$1111 of $1100 this month' }] as BudgetLine[]
+  expect(spentText(spent)).toBe('your monthly Claude budget ($1111 of $1100 this month, 101%)')
+})
