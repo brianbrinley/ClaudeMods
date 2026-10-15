@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.49.1
+
+- **A Report button in the pane.** A quiet **Report ↗** button sits at the right of the footer, beside the session ID. It makes the same web page as `/bc-dashboard report html` (asking which steps to cover when earlier sessions are kept) and says where it saved it.
+
 ## 0.49.0
 
 - **When your Claude budget resets, and where the month leads.** The dashboard keeps the last dollar figure of each day with the `/usage` reading and shows, under the monthly Claude budget: `Claude pace: on pace for $811 (74%) by the reset in 15d 4h` (or, at a pace that would pass the limit, when it's used up, before the reset) and `Claude spend: $30 today · $26/day this month`. The reset is 00:00 UTC on the 1st, which Claude Code's rate-limit event and Claude Desktop confirmed for this account (Oct 31, 8:00 PM EDT). The pace is the month's average so far carried to the reset, and waits for a tenth of the month. They're readings and estimates, never a spent budget: they don't count for `budgetEnforce`. In the pane, `/bc-dashboard text`, and the Markdown and HTML reports.

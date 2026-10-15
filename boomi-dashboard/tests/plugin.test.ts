@@ -345,6 +345,21 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(link?.props).toMatchObject({ href: 'https://github.com/brianbrinley/ClaudeMods', label: 'github.com/brianbrinley/ClaudeMods' })
   })
 
+  test(`on ${surface}, a quiet Report button beside the session saves the HTML report and toasts where`, async ($, on) => {
+    const toasts = world(on, { '.claude-plugin/plugin.json': '{ "name": "boomi-dashboard", "version": "9.9.9" }' })
+    mock.store(on)
+    const written: { path: string; text: string }[] = []
+    on('fs.write', async (_$, e) => {
+      written.push({ path: e.path, text: e.text })
+      return { value: undefined }
+    })
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
+    await pane.press({ key: 'report-html' })
+    expect(written).toHaveLength(1)
+    expect(written[0]!.path).toMatch(/^\/work\/boomi-session-report-\d{12}\.html$/)
+    expect(toasts.some(t => t.includes('Saved the report as a web page'))).toBe(true)
+  })
+
   test(`on ${surface}, a Needs attention item closes with its box and comes back with Reopen`, async ($, on) => {
     world(on, { [FILE]: ORDERS })
     mock.store(on)

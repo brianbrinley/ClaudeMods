@@ -395,7 +395,7 @@ Boomi Companion sessions on this machine, last 90 days:
 
 ### As a web page to share
 
-`/bc-dashboard report html` saves the report as one file in the workspace and opens it in your browser. Send it to anyone, including people who don't use Claude Code. Nothing in it is live: it's a snapshot with no credentials, and anything shaped like a token is masked.
+`/bc-dashboard report html` saves the report as one file in the workspace and opens it in your browser. The pane's footer has a quiet **Report ↗** button, right of the session ID, that does the same. Send it to anyone, including people who don't use Claude Code. Nothing in it is live: it's a snapshot with no credentials, and anything shaped like a token is masked.
 
 - **This session or all of them.** When the dashboard kept steps from earlier sessions in this folder, it asks which to cover. **This session** saves `boomi-session-report-<time>.html`. **All sessions in this folder** saves `boomi-sessions-report-<time>.html`, with a **Sessions** table giving each session's ID, when it ran, its steps, failures, components and cost. Costs are Claude Code's own, from each session's transcript (it scans them first if the last scan is over an hour old). Where no transcript covers a step, the cost is "at least" what the session had cost by its last Companion step, and one that wasn't recorded shows as **—**, never $0. `report html session` or `report html all` skips the question.
 - **Opening it:** it uses your system's opener (`open` on macOS, `wslview` or Explorer under WSL, `xdg-open` on a Linux desktop). Where there's no browser (a container, a server), it just says where the file is. `--no-open`, or `reportOpen` set to off, saves without opening.
