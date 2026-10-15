@@ -2,6 +2,12 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.42.1
+
+- **After `/clear`, the dashboard sets the new session up.** A `/clear` goes on under a new session ID without the start the dashboard set itself up in, so the new session didn't bring back the folder's earlier steps or know it was a Companion folder. Three things went wrong: prompt tips skipped every prompt, `report html` stopped offering every session, and the first save wrote over the folder's saved steps. The dashboard now sets up again the first time it sees a new session ID, before anything is saved. Steps written over before this fix aren't recoverable; past sessions in Claude Code's transcripts still are.
+- **The Prompt tab says whose it is:** **Boomi Dashboard Prompt tips**, in its tab and its title.
+- **Clearer wording** for a new process's tip: "doesn't say the source and target, what starts it or the data format".
+
 ## 0.42.0
 
 - **The Prompt tab.** A prompt with tips opens a second pane beside the dashboard, so Claude Code's tab row shows **Prompt · 3 tips** next to it, like a browser's tabs. The tab has **Use the upgrade**, **Upgrade with a model**, **Copy** and **Dismiss** at the top, the tips under them, and your prompt beside the upgrade. It closes when your next prompt has nothing to add, and the dashboard pane's **Prompt tab** button brings it back. `promptView` is `auto` (default), `manual` (only when you ask) or `off`. See [Prompt tips](README.md#prompt-tips).

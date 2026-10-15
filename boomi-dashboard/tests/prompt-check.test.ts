@@ -42,7 +42,7 @@ test('a prompt that says it all gets no tips', () => {
 test('production wording, a new process with details missing, a map with no profiles and several big steps', () => {
   const prod = checkPrompt('run the Orders Sync process against production orders', FACTS)
   expect(prod.map(t => [t.code, t.level])).toEqual([['production', 'serious']])
-  expect(checkPrompt('build a process that syncs orders', FACTS).map(t => t.text)).toEqual(['new process: no source and target, what starts it or data format'])
+  expect(checkPrompt('build a process that syncs orders', FACTS).map(t => t.text)).toEqual(["new process: doesn't say the source and target, what starts it or the data format"])
   expect(codes('build a process from Salesforce to NetSuite every hour with JSON')).toEqual([])
   expect(codes('add a map for Orders Sync')).toEqual(['map'])
   expect(checkPrompt('create the Orders Sync map from the Order profile to the Invoice profile, deploy to dev and test with orders.json', FACTS).map(t => t.code)).toEqual(['steps'])
