@@ -16,6 +16,7 @@
 - **Pick up where you left off.** A new session opens with what the last one did and left to fix, and **Past Companion sessions** shows what earlier work cost.
 - **Every Companion plugin, not only integration.** Data Hub deploys, BDI flow runs, Agentstudio agents, custom connector releases and Marketplace recipes show up as steps too, with their failures under **Needs attention** and each product's share of the spend.
 - **Catch what happens outside the chat.** Companion's activity log adds script runs from a terminal, and watched components flag changes someone else makes in Boomi.
+- **Better prompts for Boomi work.** Each prompt you type is checked for what Boomi work needs and it leaves out (which component "it" is, the environment, test data, the error), with an upgraded prompt built from what the session already knows. It never blocks, except to ask before a password or token goes into the transcript.
 - **Hand it off.** `/bc-dashboard report` writes the session up as Markdown for a pull request, a ticket or the next person. `report html` makes it a web page with charts that you can send to anyone.
 
 ## Install
@@ -267,6 +268,62 @@ Numbers go in without quotes. The period is `"day"`, `"week"` or `"month"`. Leav
 
 **Set it up:** run `/bc-dashboard config budget` and answer the **When a budget is spent** and **Grace past a budget** questions, or set `budgetEnforce` and `budgetGrace` in `/config`.
 
+## Prompt tips
+
+The dashboard checks each prompt you type in a Companion folder for what Boomi work needs and the prompt leaves out, and suggests a better one. The checks are plain rules, with no model call, so they cost nothing.
+
+| Check | Fires on | The tip names |
+|---|---|---|
+| `subject` | "it", "this" or "the process" with no component named | The component Claude worked on last |
+| `environment` | A deploy with no environment | The environment Companion's `.env` points at |
+| `error` | "Fix it", "still failing" with no error, log or execution ID | The last failure and its execution ID |
+| `test` | A test with no test data or expected result | What to add |
+| `production` | "prod", "production", "live orders", "customer data" | That Claude should ask first (⚠) |
+| `build` | A new process with no source and target, trigger or data format | What's missing |
+| `map` | A map with no profiles or fields | What to add |
+| `steps` | Three or more big steps at once (build, deploy, test, fix) | To stop between them |
+| `secret` | A password, token, API key, auth header or private key | That it will be masked (⚠) |
+
+For example, `deploy it and test it, still failing` after a failed test of Orders Sync gets:
+
+```
+◐ "it": the process Orders Sync, the last one this session?
+◐ deploy: no environment named; the session points at 9f8e7d6c…
+◐ fix: no error given; the last failure was the test of Orders Sync (execution-aaaa1111)
+◐ test: say what to test with, and what a pass looks like
+
+Upgraded:
+  deploy it and test it, still failing. By "it" I mean the process Orders Sync (1a2b3c4d-…).
+  Deploy to environment 9f8e7d6c-…. The last failure was the test of Orders Sync
+  (execution execution-aaaa1111): …. Read its process log and tell me the cause before
+  you change anything. Test it with [test data], and a pass means [the expected result].
+```
+
+The upgrade adds only what the session knows. Anything it doesn't know is left as a `[placeholder]` for you to fill in; it never makes up a name or an ID.
+
+**What you see:** the status line says `◐ 4 prompt tips: /bc-dashboard prompt` until your next prompt, and `/bc-dashboard prompt` shows the tips and the upgrade, on the web too.
+
+- `/bc-dashboard prompt use` puts the upgrade in the prompt box.
+- `/bc-dashboard prompt upgrade` has a model (`promptModel`, `haiku` by default) rewrite it as one plain request and puts that in the prompt box. It's the only part that calls a model, only when you run it, and it says how many tokens it took.
+
+**`promptCheck`** decides what a tip does:
+
+| `promptCheck` | A prompt with tips |
+|---|---|
+| `suggest` (default) | Goes to Claude as typed; the tips show afterwards. |
+| `confirm` | Asks first: **Send it as typed**, **Use the upgrade** or **Edit it first**. The last two hold the prompt and put the text in the prompt box. Closing the question sends it as typed. |
+| `off` | Nothing is checked. |
+
+**A secret always asks, even in `suggest`,** because once it's sent it stays in the transcript: **Send it with the secret masked**, **Edit it first** or **Send it as typed**. Closing the question sends it masked.
+
+**What's left alone:** slash commands, prompts typed while Claude works, messages from other sessions and background tasks, short replies ("yes", "keep going"), prompts with no Boomi words in them, and anything outside a Companion folder. Start a prompt with `>` to send it unchecked (the `>` is taken off).
+
+**Privacy:** the prompt is masked before it's kept, kept only in this session's state, and never logged or saved across sessions. The model rewrite reads the masked prompt and the session's facts, never Companion's `.env` or its token; the dashboard reads only `BOOMI_ENVIRONMENT_ID` from it for the tips.
+
+**Counted:** `/bc-dashboard prompt` and the session report say how many prompts were checked and had tips, how many tips your next prompt followed, and which tip came up most.
+
+**Skip a check:** list it in `promptSkip`, such as `promptSkip test,steps`.
+
 ## Watched components
 
 `/bc-dashboard watch <component ID or XML file>` watches a component across sessions. Every 60 seconds the dashboard reads (never writes) its version in Boomi; when someone other than Companion's API user changes it, it shows under **Needs attention**: pull before you push. `/bc-dashboard seen` clears the changes you expected. With nothing watched, the dashboard makes no Platform API calls.
@@ -367,6 +424,7 @@ With a connection it loads its fonts from Google Fonts; offline it falls back to
 | `/bc-dashboard theme [name]` | | Picks the pane's theme, or lists them. |
 | `/bc-dashboard components [csv] [save]` | | Copies every component with its IDs, tab-separated for a spreadsheet (`csv`: as CSV; `save`: also writes a `.csv` file). |
 | `/bc-dashboard config [budget\|pane\|data]` | | Walks through the dashboard's settings a question at a time, or one group of them. `config <setting> <value>` sets one, such as `config budgetUsd 5`. `config list` shows them all. |
+| `/bc-dashboard prompt [use\|upgrade]` | | Your last Boomi prompt's [tips](#prompt-tips) and an upgraded prompt; `use` puts it in the prompt box, `upgrade` has a model rewrite it. |
 | `/bc-dashboard banner` | | Shows the banner again after **Hide**. |
 
 Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix?" and it answers from the summary.
@@ -404,6 +462,9 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `reportStyle` | `exosphere` | How the HTML report looks: `exosphere` (Boomi's design system) or `expressive` (Valence, Miami Deco). `--style` picks one for a single report. |
 | `suggestions` | `true` | Suggest the next step after a turn. |
 | `historyDays` | `90` | How far back **Past Companion sessions** reads. |
+| `promptCheck` | `suggest` | [Prompt tips](#prompt-tips): `suggest` shows tips and sends the prompt; `confirm` asks first; `off` never checks. A secret in a prompt asks unless this is `off`. |
+| `promptModel` | `haiku` | The model `/bc-dashboard prompt upgrade` asks, only when you run it. |
+| `promptSkip` | (none) | Prompt checks to leave out, separated by commas. |
 
 ## Limits
 
@@ -414,6 +475,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 - Past sessions are this machine's only (not the web's), and Claude Code deletes transcripts after 30 days unless `cleanupPeriodDays` says otherwise.
 - **Why?** and **Run again** need Companion's scripts, found where the last one ran or in Claude Code's plugin cache, and work where the CLI runs. **Why?** on a BDI run uses bc-bdi's scripts from the plugin cache, which read bc-bdi's own settings in the workspace.
 - A refusal by another mod shows as blocked only if it reaches the dashboard, which depends on hook order.
+- Prompt tips are rules about wording, so they can miss a vague prompt or flag a clear one. `promptSkip` turns off a check that gets in your way.
 
 ## How it works
 
@@ -461,7 +523,9 @@ The dashboard follows Claude's tool calls, so tracking the session costs no Plat
 | `$.http.fetch` | Read-only Platform API queries for watched components |
 | `$.fs` | Component XML, Companion's `.env` and its activity log |
 | `$.process.run` | **Why?**, **Run again** and the session scan |
-| `$.prompt.fill`, `$.prompt.suggest` | **Ask Claude to fix** and the next-step suggestion |
+| `prompt.submit` | Prompt tips, the secret question and the budget note |
+| `$.model.complete` | `/bc-dashboard prompt upgrade`, only when you run it |
+| `$.prompt.fill`, `$.prompt.suggest` | **Ask Claude to fix**, the next-step suggestion and an upgraded prompt |
 | `$.ui.ask` | Which failure `why` and `rerun` act on, and which session `resume` reopens |
 | `$.ui.copy` | **Copy** and `resume`: the command that reopens a past session |
 | `$.state`, `$.store` | What the views draw, what's kept across sessions, and the other Boomi mods' state for **Guardrails** |

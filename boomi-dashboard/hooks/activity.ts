@@ -1819,6 +1819,8 @@ export type ReportFacts = {
   date: string
   repo?: string
   usage: Usage
+  /** The Prompt tips section's lines (prompt-check.ts's reportLines), none before a prompt was checked. */
+  promptLines?: readonly string[]
 }
 
 const cell = (text: string) => text.replace(/\|/g, '\\|')
@@ -1910,6 +1912,8 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
     lines.push('', '## Budget overrides', '', 'Companion changes allowed past a spent budget, as the user chose:', '')
     for (const a of overrides) lines.push(`- ${new Date(a.startedAt).toISOString().slice(0, 16).replace('T', ' ')} UTC: ${a.detail}`)
   }
+
+  lines.push(...(facts.promptLines ?? []))
 
   lines.push('', '## Spend', '')
   if (u.usd !== undefined) lines.push(`- Cost: ${formatCost(u.usd)}`)

@@ -55,6 +55,9 @@ export const GROUPS: readonly Group[] = [
       { key: 'banner', label: 'Banner above the prompt', about: 'The latest Companion step and what needs attention; at the start of a session, the last session’s recap and tips.', kind: 'boolean', default: true },
       { key: 'toasts', label: 'Toasts', about: 'A pop-up when a step fails, a deploy or test finishes, or a watched component changes.', kind: 'boolean', default: true },
       { key: 'suggestions', label: 'Suggest the next step', about: 'With a component saved but not deployed, or deployed but not tested, offer that step in the prompt box (Tab takes it).', kind: 'boolean', default: true },
+      { key: 'promptCheck', label: 'Prompt tips', about: 'Check each Boomi prompt for what it leaves out and suggest an upgrade. Suggest shows tips and sends it; confirm asks first. A password or token in a prompt always asks unless this is off.', kind: 'choice', options: ['off', 'suggest', 'confirm'], default: 'suggest' },
+      { key: 'promptModel', label: 'Prompt rewrite model', about: 'The model /bc-dashboard prompt upgrade asks, only when you run it.', kind: 'text', default: 'haiku' },
+      { key: 'promptSkip', label: 'Prompt checks to skip', about: 'Checks to leave out, separated by commas: subject, environment, test, production, steps, error, build, map, secret.', kind: 'text', default: '' },
       { key: 'flamingo', label: 'Flamingo', about: 'The 8-bit flamingo in the pane, standing while Claude is idle and walking while it works.', kind: 'boolean', default: true, isNextSession: true },
     ],
   },
@@ -220,7 +223,7 @@ export const questionFor = (field: Field, current: Value, spend: PastSpend, plac
   else if (field.kind === 'choice') changes = (field.options ?? []).filter(o => o !== current).slice(0, 2).map(o => ({ label: o[0]!.toUpperCase() + o.slice(1), value: o }))
   else if (field.kind === 'text') changes = current !== field.default ? [{ label: `Back to ${field.default}`, value: field.default }] : []
   else changes = offers(field, current, spend)
-  const typed = field.kind === 'boolean' ? '' : field.kind === 'text' ? ' Or type a path under Other.' : field.kind === 'choice' ? '' : ' Or type a number under Other.'
+  const typed = field.kind === 'boolean' ? '' : field.kind === 'text' ? ' Or type one under Other.' : field.kind === 'choice' ? '' : ' Or type a number under Other.'
   const question = `${field.label}: ${field.about}${spendNote(field, spend)} Now ${show(field, current)}.${field.isNextSession ? ' A change takes effect in your next session.' : ''}${typed}`
   const options = [keep, ...changes.map(c => c.label), BACK]
   return {
