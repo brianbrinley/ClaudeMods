@@ -242,6 +242,9 @@ const promptNote = atom({ plugin: 'boomi-dashboard', key: 'promptNote' } as cons
  */
 const promptHeld = atom({ plugin: 'boomi-dashboard', key: 'promptHeld' } as const, null as string | null)
 
+/** The note for the next rewrite as it's typed, drawn whole under the field, which shows one line. */
+const promptNoteDraft = atom({ plugin: 'boomi-dashboard', key: 'promptNoteDraft' } as const, '')
+
 /** The tips (by their time) whose nudge the person closed in the banner. */
 const promptNudgeHidden = atom({ plugin: 'boomi-dashboard', key: 'promptNudgeHidden' } as const, 0)
 
@@ -301,7 +304,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   budgetEnforce: options.budgetEnforce === 'confirm' || options.budgetEnforce === 'block' ? options.budgetEnforce : 'warn',
   budgetGrace: Math.min(100, Math.max(0, Number(options.budgetGrace ?? 0) || 0)),
   reportStyle: options.reportStyle === 'expressive' ? 'expressive' : 'exosphere',
-  promptCheck: options.promptCheck === 'off' || options.promptCheck === 'confirm' ? options.promptCheck : 'suggest',
+  promptCheck: options.promptCheck === 'off' || options.promptCheck === 'suggest' ? options.promptCheck : 'confirm',
   promptModel: String(options.promptModel || 'haiku').trim() || 'haiku',
   promptView: options.promptView === 'manual' || options.promptView === 'off' ? options.promptView : 'auto',
   promptSkip: new Set(String(options.promptSkip ?? '').split(/[\s,]+/).filter(Boolean)),
@@ -3008,6 +3011,7 @@ export const register: Register = (on, options) => {
     const busy = await read($, promptBusy)
     const said = await read($, promptNote)
     const held = await read($, promptHeld)
+    const draft = await read($, promptNoteDraft)
     const width = Math.max(30, (e.viewport?.columns ?? 64) - 6)
     const isWide = width >= 90
     const t = (text: string, style: { color?: string; bold?: boolean; bg?: string } = {}) => (
@@ -3103,7 +3107,20 @@ export const register: Register = (on, options) => {
                 </Box>
               ) : undefined}
             </Box>
-            <Input key="prompt-note" label="Note for the rewrite: " placeholder="shorter, ask for a listener, split into steps…" submitLabel="Regenerate" onSubmit={value => void rewriteFromTab($, settings, value)} />
+            {tries.length > 1 && tries[shown]?.note ? t(`This try's note: ${tries[shown]!.note}`, { color: p.muted }) : undefined}
+            {t('Note for the rewrite (Enter regenerates)', { color: p.muted, bold: true })}
+            <Input
+              key="prompt-note"
+              placeholder="shorter, ask for a listener, split into steps…"
+              submitLabel="Regenerate"
+              onInput={value => void update($, promptNoteDraft, () => value)}
+              onSubmit={value => {
+                void update($, promptNoteDraft, () => '')
+                void rewriteFromTab($, settings, value)
+              }}
+            />
+            {/* The field shows one line: a longer note is drawn whole, wrapped, under it. */}
+            {draft.length > width - 12 ? t(draft) : undefined}
             {t(`This session: ${countsLine(counts)}`, { color: p.muted })}
           </Box>
         )}
