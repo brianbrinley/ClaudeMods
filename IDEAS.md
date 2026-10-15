@@ -55,6 +55,7 @@ quadrantChart
     Reusability spotter: [0.40, 0.46]
     License monitor: [0.50, 0.30]
     Schedule conflicts: [0.34, 0.24]
+    Prompt upgrade: [0.30, 0.66]
 ```
 
 | Rank | Idea | Business value | Effort | Status |
@@ -63,16 +64,17 @@ quadrantChart
 | Next | [The dashboard across all of Boomi Companion](#the-dashboard-across-all-of-boomi-companion) | High | Small first, medium in all | Steps 1-7 built (0.13.0-0.24.0), and **Why?** on a failed BDI run (0.35.0) |
 | 1 | [Execution debugger](#execution-debugger) | High | Small to medium | Log reading built into the dashboard; per-step documents next |
 | 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Secure-storage token tried and removed; API-user guide kept |
-| 3 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
-| 4 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
-| 5 | [Boomi onboarding copilot](#boomi-onboarding-copilot) | Medium to high | Medium | Idea |
-| 6 | [General secret guard](#general-secret-guard) | Medium | Small to medium | Idea |
-| 7 | [Reusability spotter](#reusability-spotter) | Medium | Small to medium | Idea |
-| 8 | [Promotion diff](#promotion-diff) | Medium | Medium | Idea |
-| 9 | [Environment extensions manager](#environment-extensions-manager) | Medium | Medium | Idea |
-| 10 | [Credential broker: full](#credential-broker) | Medium | Large | Idea |
-| 11 | [License and connection-usage monitor](#license-and-connection-usage-monitor) | Low to medium | Medium | Idea |
-| 12 | [Schedule conflict detector](#schedule-conflict-detector) | Low to medium | Small to medium | Idea |
+| 3 | [Boomi prompt upgrade](#boomi-prompt-upgrade) | Medium to high | Small | Idea |
+| 4 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
+| 5 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
+| 6 | [Boomi onboarding copilot](#boomi-onboarding-copilot) | Medium to high | Medium | Idea |
+| 7 | [General secret guard](#general-secret-guard) | Medium | Small to medium | Idea |
+| 8 | [Reusability spotter](#reusability-spotter) | Medium | Small to medium | Idea |
+| 9 | [Promotion diff](#promotion-diff) | Medium | Medium | Idea |
+| 10 | [Environment extensions manager](#environment-extensions-manager) | Medium | Medium | Idea |
+| 11 | [Credential broker: full](#credential-broker) | Medium | Large | Idea |
+| 12 | [License and connection-usage monitor](#license-and-connection-usage-monitor) | Low to medium | Medium | Idea |
+| 13 | [Schedule conflict detector](#schedule-conflict-detector) | Low to medium | Small to medium | Idea |
 
 ## The ideas
 
@@ -111,6 +113,28 @@ quadrantChart
   - Still to try: a banner tip when the token is due for rotation. Open question: whether the Platform API shows a token's age.
 - **Full broker:** The mod holds the token and offers a `boomi_api` tool that makes allow-listed Platform API calls for other mods and skills, so none of them needs the token.
 - **Limit:** Companion's scripts read the token from `.env`, and the broker can't change that. It protects everything except Companion's own calls, which is why the full version ranks lower than the quick wins.
+
+### Boomi prompt upgrade
+
+**Spot what a Companion prompt leaves out for Boomi work, and suggest a better one before Claude acts on it.**
+
+- **Problem:** Prompts in a Companion session are often short and lean on context only the person has: "deploy it", "test it", "fix it, it's still failing". Claude then guesses which process "it" is, which environment to deploy to, what to test with, and what failed, or runs three big steps (build, deploy, test) without stopping. A guess costs tokens, and a wrong environment can cost more.
+- **Idea:** A mod of its own, `boomi-prompt-upgrade`, opt-in and released separately, that checks each prompt typed in a Companion session and, when something is missing, says what and offers an upgraded prompt:
+  - **Cheap checks, no model call:** "it" or "the process" with no component named; a deploy with no environment; a test with no process or test data; wording that suggests production; several big steps in one prompt; "fix it" with no error, log or execution ID; a new process with no source, target, trigger or data format, or a map with no profiles; and a token- or password-shaped string.
+  - **Facts, not guesses:** each tip names the likely answer from what the session already knows, such as the component last edited, the environment the session points at, and the last failed test's execution ID. Anything unknown stays a `[placeholder]`; the mod never invents an ID or a name.
+  - **Example:** `deploy it and test it, still failing` gets four tips ("it" is Orders Sync; no environment, the session points at Dev; last failed test not mentioned; three steps in one) and the upgrade "Deploy the process Orders Sync to the Dev environment. The last test failed (execution exec-3f2a…): read its process log, tell me the cause, and fix it. Then test it again with [test data] and stop to show me the result before changing anything else."
+  - **Automatic, no command needed:** it hooks every prompt (`prompt.submit`) and stays silent outside a Companion folder. It knows a Companion session from the plugins that are on (`claude plugin list --json`, as the dashboard reads them, or the dashboard's own state when it's installed), else from Companion's `active-development/` folder or `.env`. It skips slash commands, prompts typed while Claude works, short replies ("yes", "go on") and anything starting with `>`.
+  - **Suggest, don't block:** `promptCheck` is `off`, `suggest` (default) or `confirm`. In `suggest` the tip shows in the status line and in `/bc-prompt`, and the prompt goes through. In `confirm` a flagged prompt asks **Send as is**, **Use the upgrade** or **Edit**, and the last two put the text back in the prompt box. **A secret in the prompt always asks**, even in `suggest`, since once sent it's in the transcript.
+  - **A model only on demand:** `/bc-prompt upgrade` asks a fast model to rewrite the masked prompt with the same facts and shows what it cost; `/bc-prompt use` puts the upgrade in the prompt box. An optional `addContext` attaches the resolved facts for Claude (about 30 tokens) without rewriting the prompt.
+  - **Loosely coupled to the dashboard:** the mod publishes its latest tips and per-check counts as state, and reads the dashboard's state when it's there; every check still works without it, less specifically. The dashboard, in a later release, shows the latest tip in its band, `Prompt tips: 4 · 3 followed` in the report, and a habit in Review ("You often deploy without naming the environment"). Only the dashboard fills the prompt box on its own; this mod fills it only when asked.
+  - **Privacy:** prompts are masked with the dashboard's `mask()` rules, stay in the session's state and are never logged; across sessions the mod keeps only the per-check counts.
+- **Why a mod:** it needs a hook on every prompt before it reaches the model, which a skill can't have, and the session's own state (the dashboard's components, environment and failed runs) to make tips concrete. The cheap checks cost no tokens. `/bc-prompt` covers Claude Code on the web, where no status line shows.
+- **Open questions:**
+  - How the mod's `prompt.submit` hook and the dashboard's (its budget note) order, and whether two mods' status lines show side by side.
+  - Whether the `confirm` question and the refilled prompt box work on the web as in the terminal.
+  - How often the checks flag real Companion prompts by mistake; that decides which checks are on by default.
+  - **Starting with the dashboard:** a mod can't load another, so the dashboard can't switch this one on by itself. Three ways to get close: load both together (two `--plugin-dir` folders, or both in `CLAUDE_CODE_PLUGIN_DIRS`); have the dashboard's new-session tips and `/bc-dashboard config` offer it when it isn't loaded; or fold the checks into the dashboard as a setting, which loses the separate, opt-in release. Which one fits best.
+  - Later: a pane showing the original and the upgrade side by side, and checks for the other Companion plugins (a BDI flow or a Data Hub model named as "it").
 
 ### Process test harness
 
