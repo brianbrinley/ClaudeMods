@@ -296,38 +296,46 @@ Upgraded:
   deploy it and test it, still failing. By "it" I mean the process Orders Sync (1a2b3c4d-…).
   Deploy to environment 9f8e7d6c-…. The last failure was the test of Orders Sync
   (execution execution-aaaa1111): …. Read its process log and tell me the cause before
-  you change anything. Test it with [test data], and a pass means [the expected result].
+  you change anything.
+
+  Details:
+  - Test data: [what to test with]; a pass means [the expected result]
 ```
 
-The upgrade adds only what the session knows. Anything it doesn't know is left as a `[placeholder]` for you to fill in; it never makes up a name or an ID.
+The upgrade adds only what the session knows, as sentences. What it doesn't know is a **Details** list of `[placeholders]` for you to fill in; it never makes up a name or an ID.
 
-**What you see:** the status line says `◐ 4 prompt tips: /bc-dashboard prompt` until your next prompt, and `/bc-dashboard prompt` shows the tips and the upgrade, on the web too.
+**What you see:** a gentle nudge in the banner just above the prompt box, `◆ BC Dashboard ◐ Boomi Dashboard suggests a clearer prompt · 4 tips`, with **Use it** (the upgrade goes in the prompt box), **See it** (the Prompt tab) and **✕**. It goes away with your next prompt. The status line says `◐ 4 prompt tips: /bc-dashboard prompt`, and `/bc-dashboard prompt` shows the tips and the upgrade, on the web too.
 
-**The Prompt tab.** A prompt with tips opens a second pane, so Claude Code's tab row shows **Boomi Dashboard Prompt tips · 4** beside the dashboard, like a browser's tabs; click it, or press ctrl+x tab, to switch. It shows the buttons first, then the tips, then your prompt and the upgrade side by side (one above the other in a narrow pane):
+**The Prompt tab.** **See it**, or a prompt with tips, opens **Boomi Dashboard Prompt tips** in the dashboard pane's place. Claude Code can't bring a tab to the front, so the dashboard pane steps aside and comes back with **◀ Dashboard**, **Dismiss**, or a prompt with nothing to add. The tab shows the tips, your prompt beside the upgrade (one above the other in a narrow pane), then the buttons right under them:
 
-- **Use the upgrade** puts it in the prompt box.
-- **Upgrade with a model** has `promptModel` rewrite it there.
-- **Copy** copies the upgrade.
-- **Dismiss** closes the tab.
+- **Use the upgrade** puts it in the prompt box. **Copy** copies it. **Dismiss** closes the tab.
+- **Upgrade with a model**, then **Regenerate**, has `promptModel` rewrite it. Type a note under them (`shorter`, `ask for a listener`, `split into steps`) and press Enter to regenerate following it. Every try is kept: **◀** and **▶** step through them.
 
-The tab closes on its own when your next prompt has nothing to add. The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Prompt tab** button to bring it back. `promptView` decides when it opens: `auto` (default) when a prompt gets tips, `manual` only from `/bc-dashboard prompt` or that button, `off` never.
+**What a rewrite reads,** besides your masked prompt and the session's facts:
+- **This folder's components** whose names share words with the prompt (up to 8, from the component XML under `componentsDir`), so "the Salesforce connection" can name the one you have. It uses a name only where the prompt clearly means it.
+- **Companion's own guidance:** the sections of bc-integration's reference docs (such as `BOOMI_THINKING.md`) that best match the prompt's words, up to 3, so the rewrite asks for what Companion needs for a listener, a map or a connection.
+- **Your note** and **the try before**, so each regenerate is different.
+
+The tab says how much of each it read. It's a plain word match, with no index or embeddings to set up. A rewrite reads a few thousand tokens, and only when you press the button.
+
+The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Prompt tips** button. `promptView` decides when the tab opens by itself: `auto` (default) when a prompt gets tips, `manual` only when you ask, `off` never.
 
 - `/bc-dashboard prompt use` puts the upgrade in the prompt box.
-- `/bc-dashboard prompt upgrade` has a model (`promptModel`, `haiku` by default) rewrite it as one plain request and puts that in the prompt box. It's the only part that calls a model, only when you run it, and it says how many tokens it took.
+- `/bc-dashboard prompt upgrade [a note]` has the model rewrite it, following the note, and puts that in the prompt box.
 
 **`promptCheck`** decides what a tip does:
 
 | `promptCheck` | A prompt with tips |
 |---|---|
 | `suggest` (default) | Goes to Claude as typed; the tips show afterwards. |
-| `confirm` | Asks first: **Send it as typed**, **Use the upgrade** or **Edit it first**. The last two hold the prompt and put the text in the prompt box. Closing the question sends it as typed. |
+| `confirm` | **Holds it:** Claude doesn't see it yet. The Prompt tab and the banner say `⏸ Held`, with **Send the upgrade**, **Send as typed**, **Edit in the prompt box** and **Discard**; the status line says `⏸ prompt held`. A new prompt takes the place of a held one. Where the tab can't show (the web, a narrow window), a question asks instead, and closing it sends the prompt as typed. |
 | `off` | Nothing is checked. |
 
 **A secret always asks, even in `suggest`,** because once it's sent it stays in the transcript: **Send it with the secret masked**, **Edit it first** or **Send it as typed**. Closing the question sends it masked.
 
 **What's left alone:** slash commands, prompts typed while Claude works, messages from other sessions and background tasks, short replies ("yes", "keep going"), prompts with no Boomi words in them, and anything outside a Companion folder. Start a prompt with `>` to send it unchecked (the `>` is taken off).
 
-**Privacy:** the prompt is masked before it's kept, kept only in this session's state, and never logged or saved across sessions. The model rewrite reads the masked prompt and the session's facts, never Companion's `.env` or its token; the dashboard reads only `BOOMI_ENVIRONMENT_ID` from it for the tips.
+**Privacy:** the prompt is masked before it's kept, kept only in this session's state, and never logged or saved across sessions. A held prompt is kept as typed, in this session only, until you send or discard it. The model rewrite reads the masked prompt, the session's facts, matching component names and Companion's docs, never Companion's `.env` or its token; the dashboard reads only `BOOMI_ENVIRONMENT_ID` from it for the tips.
 
 **Counted:** `/bc-dashboard prompt` and the session report say how many prompts were checked and had tips, how many tips your next prompt followed, and which tip came up most.
 

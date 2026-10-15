@@ -66,7 +66,7 @@ quadrantChart
 | Next | [The dashboard across all of Boomi Companion](#the-dashboard-across-all-of-boomi-companion) | High | Small first, medium in all | Steps 1-7 built (0.13.0-0.24.0), and **Why?** on a failed BDI run (0.35.0) |
 | 1 | [Execution debugger](#execution-debugger) | High | Small to medium | Log reading built into the dashboard; per-step documents next |
 | 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Secure-storage token tried and removed; API-user guide kept |
-| 3 | [Boomi prompt upgrade](#boomi-prompt-upgrade) | Medium to high | Small | Built: checks, tips and the secret question (0.41.0), the Prompt tab (0.42.0) |
+| 3 | [Boomi prompt upgrade](#boomi-prompt-upgrade) | Medium to high | Small | Built: checks, tips and the secret question (0.41.0), the Prompt tab (0.42.0), holding a prompt, the nudge and Regenerate with retrieval (0.43.0) |
 | 4 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
 | 5 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
 | 6 | [Boomi onboarding copilot](#boomi-onboarding-copilot) | Medium to high | Medium | Idea |
