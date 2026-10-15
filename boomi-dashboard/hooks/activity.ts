@@ -4,6 +4,7 @@
 // nothing here touches the engine, so the tests call them directly.
 
 import type { Activity, ActivityKind, CompanionPlugin, Dashboard, Ledger, Outcome, PastSession, Product, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
+import type { SpendPace } from './spend-history'
 import { PRODUCT_NAMES, bdiReasonOf, deployState, isAwaitingApproval, isProductScript, productRun, productWords } from './products'
 import { installedTip } from './plugins'
 
@@ -1435,6 +1436,27 @@ export type Usage = {
   isUsageUnreadable?: true
   /** The account's monthly Claude budget and what's used, from the headless /usage run's `extra_usage`. */
   extraUsage?: { limitUsd: number; usedUsd: number; percent: number }
+  /** The reset, today's spend and where the month leads, from the daily figures the dashboard keeps. */
+  pace?: SpendPace
+}
+
+/**
+ * The monthly Claude budget's reset, pace and today's spend in words: one
+ * line for where the month leads, one for today. The pace is the month's
+ * average so far carried to the reset, not a forecast of what you'll do.
+ */
+export const paceWords = (extra: { limitUsd: number }, pace: SpendPace | undefined, now: number): { pace?: string; isRunningOut?: true; today?: string } => {
+  if (!pace) return {}
+  const left = span(Math.max(0, pace.resetsAt - now))
+  const out: { pace?: string; isRunningOut?: true; today?: string } = {}
+  if (pace.exhaustsAt !== undefined && pace.dailyUsd !== undefined) {
+    out.pace = `at ${formatCost(pace.dailyUsd)}/day it's used up in ${span(Math.max(0, pace.exhaustsAt - now))}, before the reset in ${left}`
+    out.isRunningOut = true
+  } else if (pace.projectedUsd !== undefined) out.pace = `on pace for ${formatCost(pace.projectedUsd)} (${Math.round((pace.projectedUsd / extra.limitUsd) * 100)}%) by the reset in ${left}`
+  else out.pace = `resets in ${left}`
+  const today = [pace.todayUsd === undefined ? undefined : `${formatCost(pace.todayUsd)} today`, pace.dailyUsd === undefined ? undefined : `${formatCost(pace.dailyUsd)}/day this month`].filter(Boolean)
+  if (today.length > 0) out.today = today.join(' · ')
+  return out
 }
 
 /**
@@ -1449,6 +1471,11 @@ export const usageReadLines = (usage: Usage): string[] => {
   if (x) {
     const level: Level = x.percent >= 100 ? 'critical' : x.percent >= 80 ? 'warning' : 'healthy'
     lines.push(`${STATUS[level].icon} Claude budget: ${formatCost(x.usedUsd)} of ${formatCost(x.limitUsd)} this month (${Math.round(x.percent)}%)`)
+  }
+  if (x) {
+    const w = paceWords(x, usage.pace, usage.now ?? Date.now())
+    if (w.pace) lines.push(`Claude pace: ${w.pace}`)
+    if (w.today) lines.push(`Claude spend: ${w.today}`)
   }
   if (usage.companionUse) lines.push(`Companion: ${usage.companionUse} (Claude Code's estimate, this machine)`)
   if (usage.isUsageUnreadable) lines.push("Companion: couldn't read Claude Code's /usage (its wording changed); update the dashboard")
@@ -2681,6 +2708,9 @@ export const budgetLines = (
   if (extra) {
     const level: Level = extra.percent >= 100 ? 'critical' : extra.percent >= 80 ? 'warning' : 'healthy'
     lines.push({ label: 'Claude budget', level, percent: extra.percent, detail: `${formatCost(extra.usedUsd)} of ${formatCost(extra.limitUsd)} this month` })
+    const w = paceWords(extra, usage.pace, usage.now ?? Date.now())
+    if (w.pace) lines.push({ label: 'Claude pace', level: w.isRunningOut ? 'warning' : 'healthy', percent: 0, detail: w.pace, isUnmeasured: true })
+    if (w.today) lines.push({ label: 'Claude spend', level: 'healthy', percent: 0, detail: w.today, isUnmeasured: true })
   } else if (seat > 0) {
     const spend = usage.limits?.find(l => l.kind === 'spend_limit')
     if (spend) {

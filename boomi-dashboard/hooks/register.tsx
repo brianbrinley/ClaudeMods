@@ -128,6 +128,8 @@ import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import { contextLines, folderComponentOf, relevantComponents, relevantSections, sectionsOf } from './retrieve'
 import type { FolderComponent, Section } from './retrieve'
 import { companionUseLine, isFresh, parseUsage, topHabit, usageArgv } from './usage-breakdown'
+import { paceOf, recordDay } from './spend-history'
+import type { SpendDays } from './spend-history'
 import { NO_COUNTS, NUDGE_ONLY, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import type { Credentials } from './platform'
@@ -247,7 +249,7 @@ const promptHeld = atom({ plugin: 'boomi-dashboard', key: 'promptHeld' } as cons
 const promptNoteDraft = atom({ plugin: 'boomi-dashboard', key: 'promptNoteDraft' } as const, '')
 
 /** Claude Code's own breakdown of what used the person's limits, read from `claude -p "/usage"` now and then. */
-const usageBreakdown = atom({ plugin: 'boomi-dashboard', key: 'usageBreakdown' } as const, null as { breakdown: UsageBreakdownSeen; checkedAt: number } | null)
+const usageBreakdown = atom({ plugin: 'boomi-dashboard', key: 'usageBreakdown' } as const, null as { breakdown: UsageBreakdownSeen; checkedAt: number; days?: SpendDays } | null)
 
 /** How often the breakdown is read again: it covers a day and a week, so a quarter of an hour is plenty. */
 const BREAKDOWN_MS = 15 * 60_000
@@ -267,7 +269,7 @@ let isSafeModeKnown = true
  */
 const readBreakdown = async ($: Engine) => {
   const now = await $.clock.now()
-  const kept = (await $.store.get(BREAKDOWN_KEY).catch(() => undefined)) as { breakdown: UsageBreakdownSeen; checkedAt: number } | undefined
+  const kept = (await $.store.get(BREAKDOWN_KEY).catch(() => undefined)) as { breakdown: UsageBreakdownSeen; checkedAt: number; days?: SpendDays } | undefined
   if (kept && isFresh(kept.checkedAt, now, BREAKDOWN_MS)) {
     if (kept.checkedAt !== (await read($, usageBreakdown))?.checkedAt) await update($, usageBreakdown, () => kept)
     return
@@ -281,7 +283,10 @@ const readBreakdown = async ($: Engine) => {
   }
   const breakdown = ran?.exitCode === 0 ? parseUsage(ran.stdout) : undefined
   if (breakdown) {
-    const seen = { breakdown, checkedAt: await $.clock.now() }
+    const checkedAt = await $.clock.now()
+    // The last figure of each day, kept with the reading, so the dashboard can say what today and the month came to.
+    const days = breakdown.extra ? recordDay(kept?.days ?? (await read($, usageBreakdown))?.days, checkedAt, breakdown.extra.usedUsd) : (kept?.days ?? undefined)
+    const seen = { breakdown, checkedAt, ...(days ? { days } : {}) }
     await update($, usageBreakdown, () => seen)
     await $.store.set(BREAKDOWN_KEY, seen).catch(() => undefined)
   }
@@ -289,10 +294,12 @@ const readBreakdown = async ($: Engine) => {
 
 /** The usage with what only the dashboard's own reads add: Companion's share of all usage, from the /usage breakdown. */
 const withUse = async ($: Engine, usage: Usage): Promise<Usage> => {
-  const breakdown = (await read($, usageBreakdown))?.breakdown
+  const seen = await read($, usageBreakdown)
+  const breakdown = seen?.breakdown
+  const now = await $.clock.now()
   const use = companionUseLine(breakdown)
   const habit = topHabit(breakdown)
-  return { ...usage, ...(use ? { companionUse: use } : {}), ...(habit ? { usageHabit: habit } : {}), ...(breakdown?.isUnreadable ? { isUsageUnreadable: true as const } : {}), ...(breakdown?.extra ? { extraUsage: breakdown.extra } : {}) }
+  return { ...usage, ...(use ? { companionUse: use } : {}), ...(habit ? { usageHabit: habit } : {}), ...(breakdown?.isUnreadable ? { isUsageUnreadable: true as const } : {}), ...(breakdown?.extra ? { extraUsage: breakdown.extra, pace: paceOf(breakdown.extra, seen?.days, now), now: usage.now ?? now } : {}) }
 }
 
 /** Past Companion sessions folded to their totals, to leave the pane's room to this session; kept across sessions. */

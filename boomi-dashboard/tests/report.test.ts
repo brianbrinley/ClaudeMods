@@ -407,3 +407,24 @@ test('the report’s budget block names the Claude budget and Companion’s shar
   expect(page).not.toContain("Companion&#39;s share (Claude budget)")
   expect(page).not.toContain("Companion&#39;s share (Companion)")
 })
+
+test('the report’s budget block carries the pace and today’s spend, as estimates rather than unmeasured budgets', () => {
+  const view = scoped(DASHBOARD, 'session')
+  const page = reportHtml(view, {
+    session: 'cccccccc-3333',
+    sessionId: 'cccccccc-3333',
+    date: '2026-10-14',
+    scope: 'session' as const,
+    usage: { usd: 0.4 },
+    budgets: [
+      { label: 'Claude budget', level: 'healthy', percent: 34.6, detail: '$381 of $1100 this month' },
+      { label: 'Claude pace', level: 'healthy', percent: 0, detail: 'on pace for $796 (72%) by the reset in 16d 4h', isUnmeasured: true },
+      { label: 'Claude spend', level: 'healthy', percent: 0, detail: '$30 today · $26/day this month', isUnmeasured: true },
+    ],
+  }, NOW, 24 * HOUR)
+  expect(page).toContain('<span>Pace this month</span><span class="na">estimate</span>')
+  expect(page).toContain('on pace for $796 (72%) by the reset in 16d 4h')
+  expect(page).toContain('<span>Spend per day</span><span class="na">estimate</span>')
+  expect(page).toContain('$30 today · $26/day this month')
+  expect(page).not.toContain('<span>Pace this month</span><span class="na">not measured</span>')
+})

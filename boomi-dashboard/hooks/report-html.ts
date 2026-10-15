@@ -286,6 +286,9 @@ export const scoped = (dashboard: Dashboard, scope: ReportScope): Dashboard => {
   return { ...dashboard, activity: repaired(withoutEchoes(activity)), earlier: [] }
 }
 
+/** Budget lines that are readings or estimates, not budgets with nothing to measure them by. */
+const ESTIMATES: ReadonlySet<string> = new Set(['Companion', 'this week', 'Claude pace', 'Claude spend'])
+
 /** Whether there's anything from earlier sessions, so asking which steps to cover means something. */
 export const hasEarlierSteps = (dashboard: Dashboard): boolean =>
   dashboard.activity.some(a => a.isRestored) || (dashboard.earlier?.length ?? 0) > 0
@@ -837,8 +840,10 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
       : b.label === 'Claude budget' ? 'Your Claude budget'
       : b.label === 'Companion' ? 'Companion, all your usage'
       : b.label === 'this week' ? 'What drove this week'
+      : b.label === 'Claude pace' ? 'Pace this month'
+      : b.label === 'Claude spend' ? 'Spend per day'
       : `Companion's share (${b.label.replace(/^share,? ?/, '') || 'limit'})`
-    if (b.isUnmeasured) return `<li class="meter meter-none"><div class="meter-head"><span>${esc(label)}</span><span class="na">not measured</span></div><div class="sub">${esc(b.detail)}</div></li>`
+    if (b.isUnmeasured) return `<li class="meter meter-none"><div class="meter-head"><span>${esc(label)}</span><span class="na">${ESTIMATES.has(b.label) ? 'estimate' : 'not measured'}</span></div><div class="sub">${esc(b.detail)}</div></li>`
     const shown = Math.min(100, Math.max(0, b.percent))
     return `<li class="meter meter-${b.level}"><div class="meter-head"><span>${esc(label)}</span>${status(b.level, `${Math.round(b.percent)}%`)}</div><div class="meter-bar" role="img" aria-label="${esc(`${label}: ${Math.round(b.percent)}%, ${b.detail}`)}"><span style="width:${shown.toFixed(1)}%"></span></div><div class="sub">${esc(b.detail)}</div></li>`
   })

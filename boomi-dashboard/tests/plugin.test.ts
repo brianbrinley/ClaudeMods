@@ -2937,3 +2937,21 @@ test('the monthly Claude budget in dollars comes from the /usage run’s extra_u
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
   expect(await pane.find({ text: /Claude budget: \$380 of \$1100 this month/ })).toBeDefined()
 })
+
+test('the pane shows the monthly budget’s pace and what today came to, from the days kept with the reading', async ($, on) => {
+  world(on, { [FILE]: ORDERS, 'active-development': '' })
+  const lines = [
+    { type: 'assistant', usage_report: { rate_limits: { limits: [], extra_usage: { is_enabled: true, monthly_limit: 110000, used_credits: 38004, utilization: 34.549, currency: 'USD' } } } },
+    { type: 'result', result: 'You are currently using your subscription\n\nLast 24h · 9 requests · 2 sessions\n  Top plugins: bc-integration 20%' },
+  ].map(l => JSON.stringify(l)).join('\n')
+  const kept: Record<string, unknown> = {}
+  on('process.run', async (_$, e) => ({ value: { exitCode: 0, stdout: e.argv[2] === '/usage' ? lines : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await startSession($, on, kept)
+  await clock.advance(20_000)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  // Oct 12 noon UTC: 11.5 of 31 days gone, $380.04 spent: on pace for about $1024 (93%) by Oct 31, 8 PM EDT.
+  expect(await pane.find({ text: /Claude pace: on pace for \$1024 \(93%\) by the reset in 19d/ })).toBeDefined()
+  // The day's last figure is kept with the reading, for tomorrow's "today".
+  const saved = kept.usageBreakdown as { days: Record<string, number> }
+  expect(Object.values(saved.days)).toEqual([380.04])
+})
