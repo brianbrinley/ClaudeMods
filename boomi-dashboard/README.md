@@ -303,6 +303,15 @@ The upgrade adds only what the session knows. Anything it doesn't know is left a
 
 **What you see:** the status line says `◐ 4 prompt tips: /bc-dashboard prompt` until your next prompt, and `/bc-dashboard prompt` shows the tips and the upgrade, on the web too.
 
+**The Prompt tab.** A prompt with tips opens a second pane, so Claude Code's tab row shows **Prompt · 4 tips** beside the dashboard, like a browser's tabs; click it, or press ctrl+x tab, to switch. It shows the buttons first, then the tips, then your prompt and the upgrade side by side (one above the other in a narrow pane):
+
+- **Use the upgrade** puts it in the prompt box.
+- **Upgrade with a model** has `promptModel` rewrite it there.
+- **Copy** copies the upgrade.
+- **Dismiss** closes the tab.
+
+The tab closes on its own when your next prompt has nothing to add. The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Prompt tab** button to bring it back. `promptView` decides when it opens: `auto` (default) when a prompt gets tips, `manual` only from `/bc-dashboard prompt` or that button, `off` never.
+
 - `/bc-dashboard prompt use` puts the upgrade in the prompt box.
 - `/bc-dashboard prompt upgrade` has a model (`promptModel`, `haiku` by default) rewrite it as one plain request and puts that in the prompt box. It's the only part that calls a model, only when you run it, and it says how many tokens it took.
 
@@ -465,12 +474,13 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `suggestions` | `true` | Suggest the next step after a turn. |
 | `historyDays` | `90` | How far back **Past Companion sessions** reads. |
 | `promptCheck` | `suggest` | [Prompt tips](#prompt-tips): `suggest` shows tips and sends the prompt; `confirm` asks first; `off` never checks. A secret in a prompt asks unless this is `off`. |
+| `promptView` | `auto` | When the [Prompt tab](#prompt-tips) opens: `auto` when a prompt gets tips, `manual` only when you ask, `off` never. |
 | `promptModel` | `haiku` | The model `/bc-dashboard prompt upgrade` asks, only when you run it. |
 | `promptSkip` | (none) | Prompt checks to leave out, separated by commas. |
 
 ## Limits
 
-- **The web app doesn't show banners, panes, status lines or toasts yet.** Use `/bc-dashboard` or ask Claude.
+- **The web app doesn't show banners, panes, status lines or toasts yet.** Use `/bc-dashboard` or ask Claude; `/bc-dashboard prompt` stands in for the Prompt tab.
 - Companion's work is seen through its plugins' scripts, run from Bash, and their `SUCCESS:`/`ERROR:`/`WARNING:` lines and exit codes. A component sent another way (`curl`, another MCP server) doesn't show up, and a change to the scripts' output could need a change here.
 - Steps are saved per working folder, the last 200 whatever their age. After a restart, the last 24 hours (`recentHours`) come back; **Show N earlier** under **Components this session**, or `/bc-dashboard earlier`, shows the rest, as history: their failures don't go under **Needs attention**. Tokens and spend start over each session, counted from when the mod loads.
 - Cost is the whole session's, not just Companion's share.

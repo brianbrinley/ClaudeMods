@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.41.0",
+  "version": "0.42.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -171,6 +171,17 @@
         "confirm"
       ],
       "default": "suggest"
+    },
+    "promptView": {
+      "type": "string",
+      "title": "Prompt tab",
+      "description": "When the Prompt tab opens beside the dashboard pane: auto opens it when a prompt gets tips, manual only from /bc-dashboard prompt or the pane's Prompt tab button, off never",
+      "options": [
+        "auto",
+        "manual",
+        "off"
+      ],
+      "default": "auto"
     },
     "promptModel": {
       "type": "string",
