@@ -309,12 +309,15 @@ The upgrade adds only what the session knows, as sentences. What it doesn't know
 **The Prompt tab.** **See it**, or a prompt with tips, opens **Boomi Dashboard Prompt tips** in the dashboard pane's place. Claude Code can't bring a tab to the front, so the dashboard pane steps aside and comes back with **◀ Dashboard**, **Dismiss**, or a prompt with nothing to add. The tab shows the tips, your prompt beside the upgrade (one above the other in a narrow pane), then the buttons right under them:
 
 - **Use the upgrade** puts it in the prompt box. **Copy** copies it. **Dismiss** closes the tab.
+- A long prompt or upgrade is fitted to the pane so the buttons stay in view: `▼ 14 more lines` and **Show all**, then **Jump to the buttons** and **Fit to the pane**.
 - **Upgrade with a model**, then **Regenerate**, has `promptModel` rewrite it. Type a note under them (`shorter`, `ask for a listener`, `split into steps`) and press Enter to regenerate following it; a note longer than the field shows in full under it. Every try is kept: **◀** and **▶** step through them, each with the note it followed.
 
 **What a rewrite reads,** besides your masked prompt and the session's facts:
 - **This folder's components** whose names share words with the prompt (up to 8, from the component XML under `componentsDir`), so "the Salesforce connection" can name the one you have. It uses a name only where the prompt clearly means it.
 - **Companion's own guidance:** the sections of bc-integration's reference docs (such as `BOOMI_THINKING.md`) that best match the prompt's words, up to 3, so the rewrite asks for what Companion needs for a listener, a map or a connection.
 - **Your note** and **the try before**, so each regenerate is different.
+
+The rewrite never adds features, steps or logic you didn't ask for: the components and guidance only decide which existing names fit and what to ask you, and a gap becomes a question or a `[placeholder]`. It reads only the facts a tip needs, such as the last failure only for a fix.
 
 The tab says how much of each it read. It's a plain word match, with no index or embeddings to set up. A rewrite reads a few thousand tokens, and only when you press the button.
 

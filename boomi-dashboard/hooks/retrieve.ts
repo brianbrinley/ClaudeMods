@@ -89,5 +89,7 @@ export const contextLines = (components: readonly FolderComponent[], sections: r
   ...(components.length > 0
     ? ['', 'Components in this folder that may be meant (use a name only where the prompt clearly means it):', ...components.map(c => `- ${c.name}${c.type ? ` (${c.type})` : ''}${c.folder ? `, in ${c.folder}` : ''}`)]
     : []),
-  ...(sections.length > 0 ? ['', "From Boomi Companion's guidance (what a good request for this work includes):", ...sections.map(s => `[${s.source}: ${s.heading}]\n${s.text}`)] : []),
+  ...(sections.length > 0
+    ? ['', "From Boomi Companion's guidance (only to decide what to ask the person about, never work to add):", ...sections.map(s => `[${s.source}: ${s.heading}]\n${s.text}`)]
+    : []),
 ]

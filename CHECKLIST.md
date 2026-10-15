@@ -300,4 +300,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** the first rewrite says it read this folder's components and names the existing connection; the second follows the note and differs from the first; **◀** shows the earlier tries. No name or ID appears that isn't in the folder or the session. **Fail:** a made-up name, the note ignored, or a try lost.
 - [ ] **O18. Confirm by default, and a long note.** *(0.44.0)* With `promptCheck` never set (or reset with `/bc-dashboard config promptCheck confirm`), type `build a process that syncs orders`; then in the Prompt tab type a note longer than the field.
   **Pass:** Claude doesn't start, and the tab says `⏸ Held`. The whole note shows, wrapped, under the field; after Enter, the try says `This try's note:` with all of it. **Fail:** Claude starts on its own, or the note is cut off.
+- [ ] **O19. A long upgrade fits.** *(0.45.0)* In the Prompt tab press **Upgrade with a model** on `build a process that syncs orders`, in a pane about 30 rows tall.
+  **Pass:** the buttons stay in view under the cards; a card too long ends with `▼ N more lines` and **Show all**; **Show all** draws it whole with `▼ Shown in full`; **Jump to the buttons** scrolls to them; **Fit to the pane** fits it again. **Fail:** the buttons are off screen with no sign of more, or a button does nothing.
+- [ ] **O20. The rewrite keeps to what you asked.** Same prompt, **Upgrade with a model** two or three times.
+  **Pass:** no upsert, write-back, subprocess or other logic you didn't ask for; gaps are questions or `[placeholders]`; no failure from an earlier session. **Fail:** any of those.
 

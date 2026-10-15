@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { NO_COUNTS, checkPrompt, countsAfter, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from '../hooks/prompt-check'
+import { NO_COUNTS, REWRITE_SYSTEM, checkPrompt, countsAfter, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt, wrapLines } from '../hooks/prompt-check'
 import type { PromptFacts } from '../hooks/prompt-check'
 import { contextLines, folderComponentOf, keywords, relevantComponents, relevantSections, sectionsOf } from '../hooks/retrieve'
 
@@ -145,4 +145,24 @@ test('a rewrite reads the extras: the folder, the guidance, the try before and t
   expect(request).toContain('- Orders Sync (process)')
   expect(request).toContain('The try before (write a different one):\nthe first try')
   expect(request).toContain("The person's note for this try:\nshorter, and token=****")
+})
+
+test('a rewrite gets only the facts a tip needs, and is told never to add work', () => {
+  const build = 'build a process that syncs orders'
+  const request = rewriteRequest(build, FACTS, checkPrompt(build, FACTS), 'draft')
+  expect(request).not.toContain('Last failure')
+  expect(request).not.toContain('Environment the session points at')
+  expect(request).not.toContain('Component worked on last')
+  expect(request).toContain('- none')
+  const fix = 'fix the process, still failing'
+  expect(rewriteRequest(fix, FACTS, checkPrompt(fix, FACTS), 'draft')).toContain('- Last failure: the test of Orders Sync (execution execution-aaaa1111)')
+  expect(REWRITE_SYSTEM).toContain('Never add features, steps, systems, logic or requirements the person did not ask for')
+  const guidance = contextLines([], [{ source: 'BOOMI_THINKING.md', heading: 'Upserts', text: 'Prefer an upsert and write the target ID back.' }]).join('\n')
+  expect(guidance).toContain("only to decide what to ask the person about, never work to add")
+})
+
+test('wrapLines breaks at spaces, cuts a word longer than a line, and keeps blank lines', () => {
+  expect(wrapLines('one two three four', 9)).toEqual(['one two', 'three', 'four'])
+  expect(wrapLines('abcdefghijkl', 8)).toEqual(['abcdefgh', 'ijkl'])
+  expect(wrapLines('a\n\nb', 20)).toEqual(['a', '', 'b'])
 })

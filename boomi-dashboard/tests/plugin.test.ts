@@ -2799,3 +2799,25 @@ test('a note longer than the field is drawn whole under it, and each try shows t
   await tab.input({ key: 'prompt-note', text: note })
   expect(await tab.find({ text: new RegExp(`This try's note: ${note}`) })).toBeDefined()
 })
+
+test('a long upgrade is fitted to the pane: the buttons stay in view, Show all draws it whole, and the pane can jump to the buttons', { options: { promptCheck: 'suggest' } }, async ($, on) => {
+  const long = Array.from({ length: 40 }, (_, i) => `Step ${i + 1}: do one more careful thing with the Orders Sync process and show me.`).join(' ')
+  on('model.complete', async () => ({
+    value: { isAnswered: true, text: long, usage: { input_tokens: 100, output_tokens: 30, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
+  }) as never)
+  const { typed } = await promptWorld($, on)
+  await typed('build a process that syncs orders')
+  const sized = { ...PROMPT_TAB, props: { scroll: { offset: 0, bodyRows: 32 }, bodyColumns: 80 } as unknown as RenderPropsOf['Pane'] }
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...sized })
+  await tab.press({ key: 'prompt-rewrite' })
+  expect(await tab.find({ text: /▼ \d+ more lines/ })).toBeDefined()
+  expect(await tab.find({ text: /Step 40:/ })).toBeUndefined()
+  expect(await tab.find({ text: /Use the upgrade/ })).toBeDefined()
+  await tab.press({ key: 'prompt-expand' })
+  expect(await tab.find({ text: /▼ \d+ more lines/ })).toBeUndefined()
+  expect(await tab.find({ text: /Step 40:/ })).toBeDefined()
+  expect(await tab.find({ text: /Shown in full: scroll with ↓ or the wheel/ })).toBeDefined()
+  expect(await tab.press({ key: 'prompt-jump' })).toBeDefined()
+  await tab.press({ key: 'prompt-collapse' })
+  expect(await tab.find({ text: /▼ \d+ more lines/ })).toBeDefined()
+})

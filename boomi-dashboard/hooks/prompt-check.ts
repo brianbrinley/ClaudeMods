@@ -198,7 +198,8 @@ export const REWRITE_SYSTEM = [
   'Keep exactly what they meant and asked for. Add only what the notes, facts, components and guidance below give.',
   'Never invent component names, IDs, environments, systems, fields, data or numbers. Use a listed component only where the prompt clearly means it. Where something is unknown, leave a [placeholder] in square brackets.',
   "When the person adds a note for this try, follow it. When an earlier try is given, write a different one that follows the note.",
-  'Write one request in plain language and the first person, as the person would type it. Ask Claude to stop and show results between big steps.',
+  'Never add features, steps, systems, logic or requirements the person did not ask for (no upserts, write-backs, subprocesses or error handling they did not mention). The components and guidance below only tell you which existing names fit and what to ask the person about: turn a gap into a question or a [placeholder], never into a decision.',
+  'Write one request in plain language and the first person, as the person would type it, about as long as it needs to be and no longer. Ask Claude to stop and show results between big steps.',
   'Reply with the rewritten prompt only: no preamble, no quotes, no list of changes.',
 ].join('\n')
 
@@ -207,10 +208,14 @@ export type RewriteExtras = { context?: readonly string[]; note?: string; previo
 
 /** What the model reads: the masked prompt, what it leaves out, the session's facts, the cheap upgrade, and any extras. */
 export const rewriteRequest = (masked: string, facts: PromptFacts, tips: readonly PromptTip[], draft: string, extras: RewriteExtras = {}): string => {
+  // Only the facts a tip needs: the last failure for a fix, the environment for a deploy, the component for "it".
+  const needs = new Set(tips.map(t => t.code))
   const known = [
-    facts.component ? `- Component worked on last: the ${typeName(facts.component.type)} ${facts.component.name}${facts.component.id ? ` (${facts.component.id})` : ''}` : '',
-    facts.environmentId ? `- Environment the session points at: ${facts.environmentId}` : '',
-    facts.failed ? `- Last failure: ${facts.failed.name}${facts.failed.executionId ? ` (execution ${facts.failed.executionId})` : ''}: ${maskPrompt(facts.failed.detail).slice(0, 200)}` : '',
+    needs.has('subject') && facts.component ? `- Component worked on last: the ${typeName(facts.component.type)} ${facts.component.name}${facts.component.id ? ` (${facts.component.id})` : ''}` : '',
+    needs.has('environment') && facts.environmentId ? `- Environment the session points at: ${facts.environmentId}` : '',
+    needs.has('error') && facts.failed
+      ? `- Last failure: ${facts.failed.name}${facts.failed.executionId ? ` (execution ${facts.failed.executionId})` : ''}: ${maskPrompt(facts.failed.detail).slice(0, 200)}`
+      : '',
   ].filter(Boolean)
   return [
     'The prompt:',
@@ -231,6 +236,34 @@ export const rewriteRequest = (masked: string, facts: PromptFacts, tips: readonl
     ...(extras.previous ? ['', 'The try before (write a different one):', maskPrompt(extras.previous)] : []),
     ...(extras.note ? ['', "The person's note for this try:", maskPrompt(extras.note)] : []),
   ].join('\n')
+}
+
+/**
+ * A text in lines no wider than `columns`, as a narrow card draws it:
+ * broken at spaces, a word longer than a line cut. Blank lines are kept.
+ */
+export const wrapLines = (text: string, columns: number): string[] => {
+  const width = Math.max(8, columns)
+  const out: string[] = []
+  for (const para of text.split('\n')) {
+    let line = ''
+    for (let word of para.split(/\s+/).filter(Boolean)) {
+      while (word.length > width) {
+        if (line) out.push(line)
+        out.push(word.slice(0, width))
+        word = word.slice(width)
+        line = ''
+      }
+      if (!line) line = word
+      else if (line.length + 1 + word.length <= width) line += ` ${word}`
+      else {
+        out.push(line)
+        line = word
+      }
+    }
+    out.push(line)
+  }
+  return out
 }
 
 /** The model's rewrite, trimmed of quotes and fences and masked again; undefined when it gave nothing. */
