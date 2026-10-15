@@ -304,4 +304,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** the buttons stay in view under the cards; a card too long ends with `▼ N more lines` and **Show all**; **Show all** draws it whole with `▼ Shown in full`; **Jump to the buttons** scrolls to them; **Fit to the pane** fits it again. **Fail:** the buttons are off screen with no sign of more, or a button does nothing.
 - [ ] **O20. The rewrite keeps to what you asked.** Same prompt, **Upgrade with a model** two or three times.
   **Pass:** no upsert, write-back, subprocess or other logic you didn't ask for; gaps are questions or `[placeholders]`; no failure from an earlier session. **Fail:** any of those.
+- [ ] **O21. The look-around nudge.** *(0.46.0)* With `promptCheck` at `confirm`, type `use boomi companion to check out my account.`
+  **Pass:** Claude starts (nothing is held), and the banner nudges with the look-around tip; `/bc-dashboard prompt` shows **What to find out**. Then `check out the failed executions in my account` gets no tip. **Fail:** the first is held, or the second gets a tip.
+- [ ] **O22. Past sessions fold.** Open the dashboard pane with past sessions scanned.
+  **Pass:** **Past Companion sessions** shows its totals and `N sessions listed`, with **▸ Show**. **Show** lists them; **Hide** folds them; in a new session the section stays as you left it. **Fail:** the list shows unfolded at first, a button does nothing, or the choice is forgotten.
 

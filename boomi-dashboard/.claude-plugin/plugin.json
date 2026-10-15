@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.45.1",
+  "version": "0.46.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -192,7 +192,7 @@
     "promptSkip": {
       "type": "string",
       "title": "Prompt checks to skip",
-      "description": "Checks to leave out, separated by commas: subject, environment, test, production, steps, error, build, map, secret",
+      "description": "Checks to leave out, separated by commas: subject, environment, test, production, steps, error, build, map, secret, aim",
       "default": ""
     }
   }

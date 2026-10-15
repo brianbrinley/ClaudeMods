@@ -19,7 +19,10 @@ export type PromptFacts = {
 }
 
 /** The checks in the order their tips show. */
-export const CHECKS: readonly PromptCheckCode[] = ['secret', 'production', 'subject', 'environment', 'error', 'test', 'build', 'map', 'steps']
+export const CHECKS: readonly PromptCheckCode[] = ['secret', 'production', 'subject', 'environment', 'error', 'test', 'build', 'map', 'steps', 'aim']
+
+/** Checks that only nudge: a look around changes nothing in Boomi, so confirm doesn't hold a prompt for them alone. */
+export const NUDGE_ONLY: ReadonlySet<PromptCheckCode> = new Set(['aim'])
 
 const SHORT_REPLY =
   /^(y|yes|yep|yeah|no|nope|ok|okay|sure|go|go on|go ahead|keep going|continue|carry on|next|thanks|thank you|do it|looks good|lgtm|stop|done|great|perfect|please do)[.!]*$/i
@@ -64,12 +67,14 @@ const QUOTED = /["“‘`'][^"”’`']{2,}["”’`']/
 const TITLED = /\s[A-Z][A-Za-z0-9]+(?: [A-Z][A-Za-z0-9]+)+/
 /** "it", or "this" and "that" standing alone ("fix this", not "this error" or "a process that syncs"), or "the process". */
 const VAGUE = /\bit\b|\b(this|that)\b(?=\s*([.,;!?]|$|(and|then|to|in|on|with|again|now|first)\b))|\bthe (process|component|map|flow|integration|connector|connection|profile|one)\b/i
-const DEPLOY = /\b(re)?deploy\w*\b/i
+/** Deploying as something to do: "deploy it", not "the deployed processes". */
+const DEPLOY = /\b(re)?deploy(s|ing)?\b/i
 const ENVIRONMENT = /\b(environments?|env|dev|development|qa|uat|stag\w*|sandbox|prod\w*)\b|\b(to|in|on|into) (the )?test\b/i
 const TEST = /\b(re-?)?test(s|ing)?\b(?!\s+(fail\w*|run|result\w*|execution\w*|data))/i
 const TEST_DATA = /\b(data|samples?|payloads?|files?|inputs?|documents?|records?|expect\w*|should|pass(es)?|results?)\b|\.(json|xml|csv|edi|txt)\b/i
 const PRODUCTION = /\b(prod|production|live (system|data|environment|orders|customers)|real (orders|customers|customer data|data)|customer data)\b/i
-const FAILING = /\b(fix\w*|broken|fail\w*|errors?|doesn'?t work|not working|wrong)\b/i
+/** Asking for a fix, not a look at what failed: a fix word, or something still failing or broken. */
+const FAILING = /\b(fix\w*|broken|doesn'?t work|not working|wrong|(still|keeps?|is|are) fail\w*|throws? (an )?errors?|getting (an )?errors?)\b/i
 const ERROR_GIVEN = /["“][^"”]{6,}["”]|error:|exception|execution-[0-9a-z]|\bexecution\b|\blogs?\b|\bsays\b|\bsaid\b|\bmessage\b|stack ?trace|HTTP \d{3}|status=|\d{3} error/i
 const BUILD = /\b(build|create|make|set up)\b.*\b(process|integration|flow)\b/i
 const ENDPOINTS =
@@ -78,6 +83,10 @@ const TRIGGER = /\b(schedul\w*|every|daily|hourly|nightly|weekly|listen\w*|webho
 const FORMAT = /\b(json|xml|csv|flat ?file|edi|x12|edifact|profiles?|database|db)\b/i
 const MAP = /\b(a|the|this|new) map\b|\bmap (the|it|this|these|fields?)\b|\bmapping\b/i
 const MAP_DETAIL = /\b(profiles?|fields?)\b|\bfrom\b.+\bto\b/i
+/** A look around the account with nothing named to find: "check out my account", "explore the environment". */
+const LOOK = /\b(check (out|on)|look (at|into|around)|explore|see what'?s|take a look|poke around|browse|show me what'?s|go through)\b/i
+const WHERE = /\b(account|environments?|workspace|tenant|everything|stuff|what'?s there|what i have|boomi|companion)\b/i
+const SPECIFIC = /\b(processe?s?|deploy\w*|executions?|fail\w*|errors?|runtimes?|atoms?|folders?|components?|connections?|maps?|profiles?|listeners?|schedules?|packages?|extensions?|logs?)\b/i
 const STEPS: readonly RegExp[] = [/\b(build|create|make|add|write)\b/i, DEPLOY, TEST, /\bfix\b/i]
 
 /** A component's type as a person says it: "process", "connection". */
@@ -126,6 +135,9 @@ export const checkPrompt = (text: string, facts: PromptFacts, skip: ReadonlySet<
     if (missing.length > 0) add('build', 'warning', `new process: doesn't say ${listed(missing)}`)
   }
   if (MAP.test(text) && !MAP_DETAIL.test(text)) add('map', 'warning', 'map: name the source and target profiles or fields')
+  if (LOOK.test(text) && WHERE.test(text) && !SPECIFIC.test(text) && !named) {
+    add('aim', 'warning', 'look-around: say what you want to find out (deployed processes, failed runs, a folder\'s components, runtimes)')
+  }
   const steps = STEPS.filter(s => s.test(text)).length
   if (steps >= 3) add('steps', 'warning', `${steps} big steps in one prompt: stop between them to check each`)
   return CHECKS.flatMap(code => tips.filter(t => t.code === code))
@@ -178,6 +190,9 @@ export const upgradePrompt = (text: string, facts: PromptFacts, tips: readonly P
         break
       case 'map':
         details.push('Map: [the source profile] to [the target profile]')
+        break
+      case 'aim':
+        details.push('What to find out: [deployed processes and where, recent failed executions, the components in a folder, or the runtimes and whether they are online]')
         break
       case 'steps':
         parts.push('Do one step at a time, and stop after each to show me the result.')
@@ -313,6 +328,7 @@ const LABELS: Record<PromptCheckCode, string> = {
   build: 'new process missing details',
   map: 'map with no profiles',
   steps: 'several big steps at once',
+  aim: 'a look around with nothing to find',
 }
 
 /** The tip seen most this session, as a person says it, with its count. */
