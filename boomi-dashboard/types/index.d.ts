@@ -196,6 +196,7 @@ export type Dashboard = {
 export type UsageBreakdownSeen = {
   isSubscription: boolean
   isUnreadable?: true
+  extra?: { limitUsd: number; usedUsd: number; percent: number }
   day?: { companion?: number; plugins: { name: string; percent: number }[]; habits: { percent: number; text: string }[]; requests?: number; sessions?: number }
   week?: { companion?: number; plugins: { name: string; percent: number }[]; habits: { percent: number; text: string }[]; requests?: number; sessions?: number }
 }

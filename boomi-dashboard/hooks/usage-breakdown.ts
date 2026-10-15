@@ -1,4 +1,4 @@
-// What `claude -p "/usage" --output-format json` says about what used the
+// What `claude -p "/usage" --output-format stream-json --verbose` says about what used the
 // person's limits: Claude Code's own estimate, from this machine's sessions.
 // Its text is written for people, so it's read leniently, and a line that
 // doesn't match is left out rather than guessed. Plain functions: the tests
@@ -16,12 +16,17 @@ export type UsageWindow = {
   sessions?: number
 }
 
+/** The account's monthly Claude budget in dollars, from the `extra_usage` the headless /usage run reports: the interactive /usage's own figure. */
+export type ExtraUsage = { limitUsd: number; usedUsd: number; percent: number }
+
 export type UsageBreakdown = {
   day?: UsageWindow
   week?: UsageWindow
   isSubscription: boolean
   /** The windows are there but nothing in them was understood: Claude Code probably reworded its output. */
   isUnreadable?: true
+  /** The monthly budget and how much is used, when the account has extra usage on. Account-wide, not this machine's. */
+  extra?: ExtraUsage
 }
 
 /** `name 20%, other 6%` as pairs; an item that isn't one is skipped. */
@@ -49,21 +54,54 @@ const windowOf = (block: string): UsageWindow => {
 }
 
 /**
- * The breakdown from the command's output: its JSON `result`, or the text
- * itself. Undefined when it has no window to read, such as off a
- * subscription, where /usage gives only the session's totals.
+ * The text and the structured report in the command's output: one JSON
+ * result (`--output-format json`), or the JSON lines of `stream-json`, whose
+ * `usage_report` holds the figures the interactive /usage shows.
+ */
+const outputOf = (stdout: string): { text: string; report?: unknown } => {
+  const parse = (line: string): Record<string, unknown> | undefined => {
+    try {
+      const v = JSON.parse(line) as unknown
+      return v && typeof v === 'object' ? (v as Record<string, unknown>) : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const whole = parse(stdout)
+  const objects = whole ? [whole] : stdout.split('\n').map(parse).filter((o): o is Record<string, unknown> => o !== undefined)
+  if (objects.length === 0) return { text: stdout }
+  const result = objects.find(o => typeof o.result === 'string')?.result
+  return { text: typeof result === 'string' ? result : whole ? stdout : '', report: objects.find(o => o.usage_report !== undefined)?.usage_report }
+}
+
+/**
+ * The monthly budget from the report's `rate_limits.extra_usage`. Its amounts
+ * are cents (110000 is $1,100.00); anything not in dollars, off, or without a
+ * limit is left out rather than guessed.
+ */
+export const extraOf = (report: unknown): ExtraUsage | undefined => {
+  const x = (report as { rate_limits?: { extra_usage?: Record<string, unknown> } } | undefined)?.rate_limits?.extra_usage
+  if (!x || x.is_enabled !== true || (x.currency !== undefined && x.currency !== 'USD')) return undefined
+  const limit = Number(x.monthly_limit)
+  const used = Number(x.used_credits)
+  if (!Number.isFinite(limit) || limit <= 0 || !Number.isFinite(used) || used < 0) return undefined
+  const percent = Number.isFinite(Number(x.utilization)) ? Number(x.utilization) : (used / limit) * 100
+  return { limitUsd: limit / 100, usedUsd: used / 100, percent }
+}
+
+/**
+ * The breakdown from the command's output. Undefined when it has no window
+ * and no monthly budget to read, such as off a subscription, where /usage
+ * gives only the session's totals.
  */
 export const parseUsage = (stdout: string): UsageBreakdown | undefined => {
-  let text = stdout
-  try {
-    const json = JSON.parse(stdout) as { result?: unknown }
-    if (typeof json.result === 'string') text = json.result
-  } catch {}
+  const { text, report } = outputOf(stdout)
+  const extra = extraOf(report)
   const blocks = text.split(/^(?=Last (?:24h|7d)\b)/m)
   const find = (label: string) => blocks.find(b => b.startsWith(`Last ${label}`))
   const day = find('24h')
   const week = find('7d')
-  if (!day && !week) return undefined
+  if (!day && !week && !extra) return undefined
   const dayOf = day ? windowOf(day) : undefined
   const weekOf = week ? windowOf(week) : undefined
   const isUnderstood = [dayOf, weekOf].some(w => w && (w.plugins.length > 0 || w.habits.length > 0 || w.requests !== undefined))
@@ -71,7 +109,8 @@ export const parseUsage = (stdout: string): UsageBreakdown | undefined => {
     isSubscription: /using your subscription/i.test(text),
     ...(dayOf ? { day: dayOf } : {}),
     ...(weekOf ? { week: weekOf } : {}),
-    ...(isUnderstood ? {} : { isUnreadable: true as const }),
+    ...(extra ? { extra } : {}),
+    ...((dayOf || weekOf) && !isUnderstood ? { isUnreadable: true as const } : {}),
   }
 }
 
@@ -100,7 +139,7 @@ export const companionUseLine = (b: UsageBreakdown | null | undefined): string |
  * SessionStart hook run every quarter of an hour. Without it, for a Claude
  * Code that doesn't know the flag.
  */
-export const usageArgv = (isSafe: boolean): string[] => ['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence', ...(isSafe ? ['--safe-mode'] : [])]
+export const usageArgv = (isSafe: boolean): string[] => ['claude', '-p', '/usage', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', ...(isSafe ? ['--safe-mode'] : [])]
 
 /** Whether a reading from `checkedAt` is still good at `now`: another session on this machine may have taken it. */
 export const isFresh = (checkedAt: number | undefined, now: number, ms: number): boolean => checkedAt !== undefined && now >= checkedAt && now - checkedAt < ms
