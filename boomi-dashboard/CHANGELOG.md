@@ -2,6 +2,11 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.45.0
+
+- **The Prompt tab fits the pane.** A long prompt or upgrade pushed the buttons off the bottom. The cards now take only the rows the pane has, ending with `▼ 14 more lines` and **Show all**, so the buttons stay in view. **Show all** draws them whole and says `▼ Shown in full: scroll with ↓ or the wheel`, with **Jump to the buttons** and **Fit to the pane**.
+- **A rewrite no longer adds work you didn't ask for.** It had read Companion's guidance as requirements (an upsert, a write-back, a subprocess). It's now told never to add features, steps or logic, and that the guidance and components only decide what to ask you and which names fit. It also gets only the facts a tip needs: the last failure only for a fix, the environment only for a deploy, the component only for "it". An unrelated failure from an earlier session no longer creeps in.
+
 ## 0.44.0
 
 - **Confirm is now the default for prompt tips.** A Boomi prompt that leaves something out is held, and Claude doesn't see it until you choose **Send the upgrade**, **Send as typed**, **Edit in the prompt box** or **Discard** in the Prompt tab or the banner. This changes what happens if you never set `promptCheck`: run `/bc-dashboard config promptCheck suggest` to let prompts through with tips, as before.

@@ -127,7 +127,7 @@ import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import { contextLines, folderComponentOf, relevantComponents, relevantSections, sectionsOf } from './retrieve'
 import type { FolderComponent, Section } from './retrieve'
-import { NO_COUNTS, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
+import { NO_COUNTS, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import type { Credentials } from './platform'
 
@@ -244,6 +244,9 @@ const promptHeld = atom({ plugin: 'boomi-dashboard', key: 'promptHeld' } as cons
 
 /** The note for the next rewrite as it's typed, drawn whole under the field, which shows one line. */
 const promptNoteDraft = atom({ plugin: 'boomi-dashboard', key: 'promptNoteDraft' } as const, '')
+
+/** True once the person pressed Show all: the Prompt tab's cards draw whole and the pane scrolls. */
+const promptExpanded = atom({ plugin: 'boomi-dashboard', key: 'promptExpanded' } as const, false)
 
 /** The tips (by their time) whose nudge the person closed in the banner. */
 const promptNudgeHidden = atom({ plugin: 'boomi-dashboard', key: 'promptNudgeHidden' } as const, 0)
@@ -1946,8 +1949,9 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   if (/^\s*>/.test(typed)) return { text: typed.replace(/^\s*>\s?/, '') }
   const hasSecret = findSecrets(typed).length > 0
   if (!hasSecret && !isCheckable(typed)) return undefined
-  // A new prompt takes the place of one still held.
+  // A new prompt takes the place of one still held, and its cards start fitted to the pane.
   await update($, promptHeld, () => null)
+  await update($, promptExpanded, () => false)
   const facts = await promptFacts($, settings)
   const tips = checkPrompt(typed, facts, settings.promptSkip)
   const before = await read($, promptTips)
@@ -3012,7 +3016,8 @@ export const register: Register = (on, options) => {
     const said = await read($, promptNote)
     const held = await read($, promptHeld)
     const draft = await read($, promptNoteDraft)
-    const width = Math.max(30, (e.viewport?.columns ?? 64) - 6)
+    const isExpanded = await read($, promptExpanded)
+    const width = Math.max(30, (e.props.bodyColumns || e.viewport?.columns || 64) - 2)
     const isWide = width >= 90
     const t = (text: string, style: { color?: string; bold?: boolean; bg?: string } = {}) => (
       <Text color={style.color ?? p.text} backgroundColor={style.bg ?? p.bg} bold={style.bold}>
@@ -3025,14 +3030,42 @@ export const register: Register = (on, options) => {
         {t(text.toUpperCase(), { color: p.heading, bold: true })}
       </Box>
     )
-    const card = (title: string, text: string, isUpgrade: boolean) => (
-      <Box flexDirection="column" borderStyle="round" borderColor={isUpgrade ? p.heading : p.rule} backgroundColor={p.bg} paddingX={1} flexGrow={1} width={isWide ? '50%' : '100%'}>
-        {t(title, { color: isUpgrade ? p.heading : p.muted, bold: true })}
-        {t(text)}
-      </Box>
-    )
     const tries = tips?.tries ?? []
     const shown = tips?.shown ?? Math.max(0, tries.length - 1)
+    const intro = held !== null
+      ? "⏸ Held: Claude hasn't seen this prompt yet. Send it, or the upgrade, below."
+      : 'The Boomi Dashboard suggests a clearer prompt. Your prompt went to Claude as typed; use the upgrade next time, or now.'
+    // Fitted to the pane: the rows everything but the cards' text takes, so the buttons under the cards stay in view.
+    const room = e.props.scroll?.bodyRows || e.viewport?.rows || 40
+    const cardColumns = Math.max(12, (isWide ? Math.floor(width / 2) - 1 : width) - 4)
+    const tipRows = (tips?.tips ?? []).reduce((n, tip) => n + wrapLines(`  ${tip.text}`, width).length, 0)
+    const noteRows = draft.length > width - 12 ? wrapLines(draft, width).length : 0
+    const fixedRows = 3 + wrapLines(intro, width).length + 2 + tipRows + 4 + 1 + (said ? wrapLines(said, width).length : 0) + 2 + 2 + noteRows + 1 + (tries[shown]?.note ? 1 : 0)
+    const textRows = Math.max(4, room - fixedRows - 1)
+    // Side by side the cards share the rows; one above the other, your prompt takes up to a third.
+    const promptRows = isWide ? textRows : Math.max(2, Math.min(Math.floor(textRows / 3), wrapLines(tips?.masked ?? '', cardColumns).length))
+    const upgradeRows = isWide ? textRows : Math.max(3, textRows - promptRows - 3)
+    const fit = (text: string, rows: number) => {
+      const lines = wrapLines(text, cardColumns)
+      return isExpanded || lines.length <= rows ? { text, hidden: 0 } : { text: lines.slice(0, rows - 1).join('\n'), hidden: lines.length - (rows - 1) }
+    }
+    const wasLong = isExpanded && !!tips && (wrapLines(tips.masked, cardColumns).length > promptRows || wrapLines(tips.upgrade, cardColumns).length > upgradeRows)
+    const card = (title: string, text: string, isUpgrade: boolean, rows: number) => {
+      const shownText = fit(text, rows)
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor={isUpgrade ? p.heading : p.rule} backgroundColor={p.bg} paddingX={1} flexGrow={1} width={isWide ? '50%' : '100%'}>
+          {t(title, { color: isUpgrade ? p.heading : p.muted, bold: true })}
+          {t(shownText.text)}
+          {shownText.hidden > 0 ? (
+            <Box columnGap={1}>
+              {t(`▼ ${shownText.hidden} more line${shownText.hidden === 1 ? '' : 's'}`, { color: p.muted, bold: true })}
+              <Button key={isUpgrade ? 'prompt-expand' : 'prompt-expand-yours'} label="Show all" onPress={() => update($, promptExpanded, () => true)} />
+            </Box>
+          ) : undefined}
+        </Box>
+      )
+    }
+    const firstButton = held !== null ? 'prompt-send-upgrade' : 'prompt-use'
     return (
       <Box flexDirection="column" backgroundColor={p.bg} paddingX={1} minHeight={e.viewport?.rows} width="100%">
         <Box justifyContent="space-between" backgroundColor={p.band ?? p.bg} paddingX={1}>
@@ -3058,9 +3091,14 @@ export const register: Register = (on, options) => {
           </Box>
         ) : (
           <Box flexDirection="column">
-            {held !== null
-              ? t("⏸ Held: Claude hasn't seen this prompt yet. Send it, or the upgrade, below.", { color: STATUS.warning.color, bold: true })
-              : t('The Boomi Dashboard suggests a clearer prompt. Your prompt went to Claude as typed; use the upgrade next time, or now.', { color: p.muted })}
+            {held !== null ? t(intro, { color: STATUS.warning.color, bold: true }) : t(intro, { color: p.muted })}
+            {wasLong ? (
+              <Box flexWrap="wrap" columnGap={1}>
+                {t('▼ Shown in full: scroll with ↓ or the wheel', { color: p.muted, bold: true })}
+                <Button key="prompt-jump" label="Jump to the buttons" onPress={() => $.ui.scroll({ in: PROMPT_PANE, to: { key: firstButton }, block: 'nearest' }).catch(() => undefined)} />
+                <Button key="prompt-collapse" label="Fit to the pane" onPress={() => update($, promptExpanded, () => false)} />
+              </Box>
+            ) : undefined}
             {heading('What it leaves out')}
             {tips.tips.map(tip => (
               <Text backgroundColor={p.bg}>
@@ -3071,8 +3109,8 @@ export const register: Register = (on, options) => {
               </Text>
             ))}
             <Box flexDirection={isWide ? 'row' : 'column'} columnGap={1} marginTop={1}>
-              {card('YOUR PROMPT', tips.masked, false)}
-              {card(tips.rewrittenBy ? `UPGRADED BY ${tips.rewrittenBy.toUpperCase()}` : 'UPGRADED', tips.upgrade, true)}
+              {card('YOUR PROMPT', tips.masked, false, promptRows)}
+              {card(tips.rewrittenBy ? `UPGRADED BY ${tips.rewrittenBy.toUpperCase()}` : 'UPGRADED', tips.upgrade, true, upgradeRows)}
             </Box>
             <Box flexWrap="wrap" columnGap={1}>
               {held !== null ? (
