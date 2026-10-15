@@ -10,7 +10,7 @@ Ideas for mods we could build next, starting with Boomi and integration work. Th
 - Guardrails at a glance: the dashboard's **Guardrails** section shows the runtime's state, and what boomi-standards blocked once that mod is back.
 - Companion's activity log as a second source, and a new-session banner with the last session's recap and tips.
 - A report style switch: `reportStyle` (`exosphere` or `expressive`) for the dashboard's HTML report.
-- The first half of the prompt upgrade, in the dashboard (0.41.0): prompt tips for Boomi work, an upgraded prompt, and a question before a secret is sent. The Prompt tab is next; see [Boomi prompt upgrade](#boomi-prompt-upgrade).
+- The first half of the prompt upgrade, in the dashboard (0.41.0): prompt tips for Boomi work, an upgraded prompt, and a question before a secret is sent. Then the Prompt tab beside the pane (0.42.0); see [Boomi prompt upgrade](#boomi-prompt-upgrade).
 - Platform changes in the report (0.40.0): every change the session made in Boomi, with the budget override that let it through, in both reports and as a CSV.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
@@ -66,7 +66,7 @@ quadrantChart
 | Next | [The dashboard across all of Boomi Companion](#the-dashboard-across-all-of-boomi-companion) | High | Small first, medium in all | Steps 1-7 built (0.13.0-0.24.0), and **Why?** on a failed BDI run (0.35.0) |
 | 1 | [Execution debugger](#execution-debugger) | High | Small to medium | Log reading built into the dashboard; per-step documents next |
 | 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Secure-storage token tried and removed; API-user guide kept |
-| 3 | [Boomi prompt upgrade](#boomi-prompt-upgrade) | Medium to high | Small | Checks, tips and the secret question built (0.41.0); the Prompt tab next |
+| 3 | [Boomi prompt upgrade](#boomi-prompt-upgrade) | Medium to high | Small | Built: checks, tips and the secret question (0.41.0), the Prompt tab (0.42.0) |
 | 4 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
 | 5 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
 | 6 | [Boomi onboarding copilot](#boomi-onboarding-copilot) | Medium to high | Medium | Idea |

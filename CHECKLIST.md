@@ -280,4 +280,12 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** `/bc-dashboard prompt` shows the tips, and the secret question appears. **Fail:** either is missing, or the prompt is held with no way to send it.
 - [ ] **O8. With the budget note.** With `budgetEnforce` at `block` and a spent budget, type a vague prompt.
   **Pass:** Claude still hears the budget is spent, and the tips still show. **Fail:** either is missing.
+- [ ] **O9. The Prompt tab opens beside the dashboard.** *(0.42.0)* With the dashboard pane open, type `deploy it and test it, still failing`.
+  **Pass:** a tab row shows the dashboard and **Prompt · 4 tips**. Note whether the Prompt tab came to the front on its own or you had to click it: either passes, but say which. In it the buttons sit above the tips and the two cards, and nothing wraps off the side. **Fail:** no tab, a blank pane, or the buttons pushed below the cards.
+- [ ] **O10. The tab's buttons.** Press **Use the upgrade**, then **Upgrade with a model**, then **Copy**, then **Dismiss**.
+  **Pass:** the upgrade lands in the prompt box; the rewrite replaces the right-hand card and says its tokens; Copy says it copied; Dismiss closes the tab, and the dashboard pane's **Prompt tab** button reopens it. **Fail:** any button does nothing or the wrong thing.
+- [ ] **O11. It closes, and the settings.** Type a clear prompt; then set `promptView` to `manual` and type a vague one; then set it to `off`.
+  **Pass:** the clear prompt closes the tab. With `manual`, no tab opens until you press **Prompt tab** or run `/bc-dashboard prompt`. With `off`, it never opens and the pane shows no **Prompt tab** button. **Fail:** any of those differs.
+- [ ] **O12. Narrow and wide.** Look at the tab in a narrow terminal (under 90 columns) and a wide one, and in Night and Terminal themes.
+  **Pass:** narrow, the two cards stack; wide, they sit side by side; colors follow the theme. **Fail:** cut-off text, overlapping cards, or the wrong colors.
 

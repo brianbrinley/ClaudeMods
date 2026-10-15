@@ -125,7 +125,7 @@ import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from '.
 import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
-import { NO_COUNTS, REWRITE_SYSTEM, checkPrompt, countsAfter, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
+import { NO_COUNTS, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import type { Credentials } from './platform'
 
@@ -227,6 +227,12 @@ const promptTips = atom({ plugin: 'boomi-dashboard', key: 'promptTips' } as cons
 /** How many prompts were checked, had tips, and followed the tips before them, this session. */
 const promptCounts = atom({ plugin: 'boomi-dashboard', key: 'promptCounts' } as const, NO_COUNTS as PromptCounts)
 
+/** True while a model rewrites the upgrade from the Prompt tab. */
+const promptBusy = atom({ plugin: 'boomi-dashboard', key: 'promptBusy' } as const, false)
+
+/** What the Prompt tab's last button did, under its buttons; cleared by the next prompt. */
+const promptNote = atom({ plugin: 'boomi-dashboard', key: 'promptNote' } as const, '')
+
 type Settings = {
   envFile: string
   componentsDir: string
@@ -254,6 +260,7 @@ type Settings = {
   promptCheck: 'off' | 'suggest' | 'confirm'
   promptModel: string
   promptSkip: ReadonlySet<string>
+  promptView: 'auto' | 'manual' | 'off'
   /** The options these settings came from, for a change to one of them. */
   options: Readonly<Record<string, unknown>>
 }
@@ -284,11 +291,15 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   reportStyle: options.reportStyle === 'expressive' ? 'expressive' : 'exosphere',
   promptCheck: options.promptCheck === 'off' || options.promptCheck === 'confirm' ? options.promptCheck : 'suggest',
   promptModel: String(options.promptModel || 'haiku').trim() || 'haiku',
+  promptView: options.promptView === 'manual' || options.promptView === 'off' ? options.promptView : 'auto',
   promptSkip: new Set(String(options.promptSkip ?? '').split(/[\s,]+/).filter(Boolean)),
   options: { ...options },
 })
 
 const PANE = 'boomi-dashboard'
+
+/** The Prompt tab: a second pane, so Claude Code's tab row shows it beside the dashboard's. */
+const PROMPT_PANE = 'boomi-dashboard-prompt'
 const WATCH_KEY = 'watched'
 const SCRIPTS_KEY = 'scriptsDir'
 const THEME_KEY = 'theme'
@@ -1921,8 +1932,13 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   const upgrade = tips.length > 0 ? upgradePrompt(typed, facts, tips) : ''
   const at = await $.clock.now()
   await update($, promptTips, (): PromptTips | null => (tips.length > 0 ? { at, masked: maskPrompt(typed).trim().slice(0, 4000), tips, upgrade } : null))
+  await update($, promptNote, () => '')
   await refreshStatus($, settings).catch(() => undefined)
-  if (tips.length === 0) return undefined
+  if (tips.length === 0) {
+    await closePromptTab($)
+    return undefined
+  }
+  if (settings.promptView === 'auto') await openPromptTab($, tips.length)
 
   // A secret asks in any mode: once sent, it's in the transcript. No answer sends it masked.
   if (hasSecret) {
@@ -1942,6 +1958,33 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   if (answer === USE_UPGRADE && (await refill($, upgrade))) return { drop: 'Held by the dashboard: the upgraded prompt is in the prompt box. Fill in any [placeholder], then press Enter.' }
   if (answer === EDIT_FIRST && (await refill($, typed))) return { drop: 'Held by the dashboard: your prompt is back in the prompt box to edit.' }
   return undefined
+}
+
+/** The Prompt tab's title, in its tab: "Prompt · 3 tips". */
+const promptTitle = (count: number) => `Prompt · ${count} tip${count === 1 ? '' : 's'}`
+
+/** Opens (or retitles) the Prompt tab; whether a surface draws it. */
+const openPromptTab = async ($: Engine, count: number) =>
+  (await $.ui.open({ id: PROMPT_PANE, title: promptTitle(count) }).catch(() => undefined))?.isPlaced === true
+
+/** Closes the Prompt tab if it's open: a prompt with nothing to add, or Dismiss. */
+const closePromptTab = async ($: Engine) => {
+  const open = await $.ui.panes().catch(() => [])
+  if (open.some(pane => pane.id === PROMPT_PANE)) await $.ui.close({ id: PROMPT_PANE }).catch(() => undefined)
+}
+
+/** The Prompt tab's Upgrade with a model: the same rewrite as /bc-dashboard prompt upgrade, its first line kept as the note. */
+const rewriteFromTab = async ($: Engine, settings: Settings) => {
+  if (await read($, promptBusy)) return
+  await update($, promptBusy, () => true)
+  try {
+    const said = await rewritePrompt($, settings)
+    await update($, promptNote, () => said.split('\n')[0] ?? '')
+  } catch (error) {
+    await update($, promptNote, () => `The rewrite didn't work: ${messageOf(error)}. Your prompt is safe.`)
+  } finally {
+    await update($, promptBusy, () => false)
+  }
 }
 
 /** A model's rewrite of the last prompt's upgrade, on demand: it reads the masked prompt and the session's facts only. */
@@ -1971,7 +2014,13 @@ const rewritePrompt = async ($: Engine, settings: Settings): Promise<string> => 
 const promptCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
   const verb = target.trim().split(/\s+/)[0] ?? ''
   try {
-    if (!verb) return tipsText(await read($, promptTips), await read($, promptCounts), settings.promptCheck)
+    if (!verb) {
+      const tips = await read($, promptTips)
+      const text = tipsText(tips, await read($, promptCounts), settings.promptCheck)
+      // The tab opens beside the answer, which comes first.
+      if (tips && settings.promptView !== 'off') void openPromptTab($, tips.tips.length)
+      return text
+    }
     if (verb === 'use') {
       const tips = await read($, promptTips)
       if (!tips) return 'No upgraded prompt yet: no Boomi prompt this session has had tips.'
@@ -2733,6 +2782,84 @@ export const register: Register = (on, options) => {
     )
   })
 
+  // The Prompt tab: the last prompt's tips, its buttons, then the prompt and its upgrade side by side.
+  on('ui.render', { component: 'Pane', requestId: PROMPT_PANE }, async ($, e) => {
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const p = PALETTES[await themeOf($, settings)]
+    const tips = await read($, promptTips)
+    const counts = await read($, promptCounts)
+    const busy = await read($, promptBusy)
+    const said = await read($, promptNote)
+    const width = Math.max(30, (e.viewport?.columns ?? 64) - 6)
+    const isWide = width >= 90
+    const t = (text: string, style: { color?: string; bold?: boolean; bg?: string } = {}) => (
+      <Text color={style.color ?? p.text} backgroundColor={style.bg ?? p.bg} bold={style.bold}>
+        {text}
+      </Text>
+    )
+    const heading = (text: string) => (
+      <Box marginTop={1}>
+        {t('◇ ', { color: p.rule, bold: true })}
+        {t(text.toUpperCase(), { color: p.heading, bold: true })}
+      </Box>
+    )
+    const card = (title: string, text: string, isUpgrade: boolean) => (
+      <Box flexDirection="column" borderStyle="round" borderColor={isUpgrade ? p.heading : p.rule} backgroundColor={p.bg} paddingX={1} flexGrow={1} width={isWide ? '50%' : '100%'}>
+        {t(title, { color: isUpgrade ? p.heading : p.muted, bold: true })}
+        {t(text)}
+      </Box>
+    )
+    return (
+      <Box flexDirection="column" backgroundColor={p.bg} paddingX={1} minHeight={e.viewport?.rows} width="100%">
+        <Box justifyContent="space-between" backgroundColor={p.band ?? p.bg} paddingX={1}>
+          {t('◆ PROMPT TIPS ◆', { color: p.bandText, bold: true, bg: p.band })}
+          {t(`promptCheck: ${settings.promptCheck}`, { color: p.bandText, bg: p.band })}
+        </Box>
+        <Text color={p.rule} backgroundColor={p.bg} wrap="truncate-end">
+          {decoRule(width)}
+        </Text>
+        {!tips ? (
+          <Box flexDirection="column">
+            {t(counts.checked > 0 ? 'Your last Boomi prompt had nothing to add.' : 'No Boomi prompt checked yet this session.', { color: p.muted })}
+            <Box marginTop={1}>
+              <Button key="prompt-dismiss" label="Close" onPress={() => closePromptTab($)} />
+            </Box>
+          </Box>
+        ) : (
+          <Box flexDirection="column">
+            <Box flexWrap="wrap" columnGap={1}>
+              <Button key="prompt-use" label="Use the upgrade" onPress={async () => {
+                const isFilled = await refill($, tips.upgrade)
+                await update($, promptNote, () => (isFilled ? 'In the prompt box: fill in any [placeholder], then press Enter.' : "The prompt box couldn't take it here: use Copy."))
+              }} />
+              <Button key="prompt-rewrite" label={busy ? '◐ Rewriting…' : 'Upgrade with a model'} onPress={() => void rewriteFromTab($, settings)} />
+              <Button key="prompt-copy" label="Copy" onPress={async () => {
+                const done = await $.ui.copy({ text: tips.upgrade, surface: e.surface }).catch(() => ({ isCopied: false as const }))
+                await update($, promptNote, () => (done.isCopied ? 'Copied the upgrade.' : "Couldn't copy here."))
+              }} />
+              <Button key="prompt-dismiss" label="Dismiss" onPress={() => closePromptTab($)} />
+            </Box>
+            {said ? t(said, { color: p.muted }) : undefined}
+            {heading('What it leaves out')}
+            {tips.tips.map(tip => (
+              <Text backgroundColor={p.bg}>
+                <Text color={STATUS[tip.level].color} backgroundColor={p.bg} bold>
+                  {STATUS[tip.level].icon}
+                </Text>
+                {t(` ${tip.text}`)}
+              </Text>
+            ))}
+            <Box flexDirection={isWide ? 'row' : 'column'} columnGap={1} marginTop={1}>
+              {card('YOUR PROMPT', tips.masked, false)}
+              {card(tips.rewrittenBy ? `UPGRADED BY ${tips.rewrittenBy.toUpperCase()}` : 'UPGRADED', tips.upgrade, true)}
+            </Box>
+            {t(`This session: ${countsLine(counts)}`, { color: p.muted })}
+          </Box>
+        )}
+      </Box>
+    )
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Link, Text } = $.ui.resolve(e)
     const themeNow = await themeOf($, settings)
@@ -2758,6 +2885,7 @@ export const register: Register = (on, options) => {
     const plugins = await read($, companionPlugins)
     const newer = await read($, updateAvailable)
     const stepsLimit = await read($, stepsShown)
+    const lastTips = settings.promptCheck === 'off' ? null : await read($, promptTips)
     const steps = current.activity.filter(a => !a.recipe).reverse()
     const feed = steps.slice(0, stepsLimit)
     const all = spends(current.activity)
@@ -2860,6 +2988,15 @@ export const register: Register = (on, options) => {
         <Text color={p.rule} backgroundColor={p.bg} wrap="truncate-end">
           {decoRule(width)}
         </Text>
+        {lastTips && settings.promptView !== 'off' ? (
+          <Box>
+            <Text backgroundColor={p.bg}>
+              {icon(lastTips.tips.some(tip => tip.level === 'serious') ? 'serious' : 'warning')}
+              {t(` ${lastTips.tips.length} prompt tip${lastTips.tips.length === 1 ? '' : 's'} for your last prompt  `)}
+            </Text>
+            <Button key="prompt-open" label="Prompt tab" onPress={() => openPromptTab($, lastTips.tips.length)} />
+          </Box>
+        ) : undefined}
 
         <Box>
           <Box flexDirection="column" flexGrow={1} flexShrink={1}>
