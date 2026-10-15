@@ -51,6 +51,10 @@ quadrantChart
     Promotion diff: [0.58, 0.48]
     Env extensions: [0.52, 0.40]
     Full broker: [0.88, 0.42]
+    Onboarding copilot: [0.50, 0.62]
+    Reusability spotter: [0.40, 0.46]
+    License monitor: [0.50, 0.30]
+    Schedule conflicts: [0.34, 0.24]
 ```
 
 | Rank | Idea | Business value | Effort | Status |
@@ -61,10 +65,14 @@ quadrantChart
 | 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Secure-storage token tried and removed; API-user guide kept |
 | 3 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
 | 4 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
-| 5 | [General secret guard](#general-secret-guard) | Medium | Small to medium | Idea |
-| 6 | [Promotion diff](#promotion-diff) | Medium | Medium | Idea |
-| 7 | [Environment extensions manager](#environment-extensions-manager) | Medium | Medium | Idea |
-| 8 | [Credential broker: full](#credential-broker) | Medium | Large | Idea |
+| 5 | [Boomi onboarding copilot](#boomi-onboarding-copilot) | Medium to high | Medium | Idea |
+| 6 | [General secret guard](#general-secret-guard) | Medium | Small to medium | Idea |
+| 7 | [Reusability spotter](#reusability-spotter) | Medium | Small to medium | Idea |
+| 8 | [Promotion diff](#promotion-diff) | Medium | Medium | Idea |
+| 9 | [Environment extensions manager](#environment-extensions-manager) | Medium | Medium | Idea |
+| 10 | [Credential broker: full](#credential-broker) | Medium | Large | Idea |
+| 11 | [License and connection-usage monitor](#license-and-connection-usage-monitor) | Low to medium | Medium | Idea |
+| 12 | [Schedule conflict detector](#schedule-conflict-detector) | Low to medium | Small to medium | Idea |
 
 ## The ideas
 
@@ -76,6 +84,9 @@ quadrantChart
 - **Why it's out:** set aside in October 2026 to focus on the dashboard. Nothing was wrong with it.
 - **To restore:** `git checkout cd07899 -- boomi-standards`, then add it back to the **Mods** table in the [README](README.md), to `PAGES` and `COPY_PATHS` in `site/build.py`, and to the `paths` in `.github/workflows/pages.yml`. Restore the standards half of checklist item B10, and the boomi-standards links in the dashboard README (**Guardrails**, and **⚠ save blocked** in the stages table).
 - **Already waiting for it:** the dashboard still reads boomi-standards' `activity` state for its **Guardrails** section, with tests, so that comes back without changes.
+- **Rules to add when it returns:**
+  - **Sensitive fields:** a profile field whose name looks like personal or payment data (SSN, date of birth, card number, bank account) needs a classification the team sets, or the save is refused.
+  - **Standards from one place:** read `boomi-standards.json` from a shared repository or URL the team names, so every session uses the same rules without copying the file.
 - **Before it returns:** run `claude plugin validate` and `claude plugin test` on it against the Claude Code of the day, and recheck it against Companion's current XML format.
 
 ### Execution debugger
@@ -96,6 +107,8 @@ quadrantChart
   - **Tried and removed:** the token in Claude Code's secure storage, handed to Companion's scripts only while one ran. Tests and a fake-token probe passed, but in real use it broke Companion, so it came out (boomi-runtime 0.3.0). Don't retry it without a live Companion session to test against.
   - **Kept:** a dedicated API user with only the permissions the work needs, and how to rotate its token, in the [boomi-runtime README](boomi-runtime/README.md#a-dedicated-api-user).
   - Still to try: the cloud environment's network secrets, which add credentials in the proxy.
+  - Still to try: check the API user's roles against what the session's work needs, and say which ones it could drop (least privilege).
+  - Still to try: a banner tip when the token is due for rotation. Open question: whether the Platform API shows a token's age.
 - **Full broker:** The mod holds the token and offers a `boomi_api` tool that makes allow-listed Platform API calls for other mods and skills, so none of them needs the token.
 - **Limit:** Companion's scripts read the token from `.env`, and the broker can't change that. It protects everything except Companion's own calls, which is why the full version ranks lower than the quick wins.
 
@@ -108,6 +121,7 @@ quadrantChart
 - **Why a mod:** The Platform API's execute call takes process properties, not documents. The local runtime gets around that: a Disk connector in the wrapper reads inputs from a harness folder and writes outputs to another, so the mod controls both ends with no extra infrastructure.
 - **Open questions:**
   - Overlap with Companion's own testing.
+  - Generating inputs: a new case could start from sample documents (JSON, XML, flat file, EDI) built from the process's profiles. Generating them is skill work; the harness only runs them.
   - The Platform API can't delete components, so the wrapper must be created once and reused.
 
 ### Mock endpoints
@@ -131,6 +145,7 @@ quadrantChart
 
 - **Idea:** Compare the packaged component versions deployed to two environments and write release notes from the differences. Optionally, refuse to promote anything this session hasn't smoke-tested or run through the test harness.
 - **Care needed:** It touches production. Start read-only, so it reports and never deploys.
+- **Environment snapshot:** the same read saved to a file (deployed versions, and extensions with secrets masked), so an environment can be compared with how it was last week, not only with another environment.
 
 ### Environment extensions manager
 
@@ -138,6 +153,48 @@ quadrantChart
 
 - **Idea:** `/boomi ext show <environment>` and `/boomi ext set` use the same masking as `/boomi env`, so Claude can configure an environment without seeing its passwords.
 - **Open question:** How much Companion already covers.
+
+### Boomi onboarding copilot
+
+**Get anyone productive with Companion from their first message.**
+
+- **Problem:** A new Companion user needs a `.env` with the right credentials, an environment and a runtime that's online, the team's standards and the dashboard, before the first build works. Each gap shows up later as a failure that looks like something else: a test refused with HTTP 400 because the atom is offline, a deploy to the wrong environment, a missing `BOOMI_ENVIRONMENT_ID`.
+- **Idea:** At session start in a Companion workspace, check the setup and say what's missing in one list: credentials present (never shown), the account reachable, the environment and test runtime set and online, Companion's plugins installed, the dashboard and standards loaded. `/boomi onboard` walks through fixing each item, using bc-integration's `env-setup-guide` skill for credentials.
+- **Why a mod:** It runs at session start without anyone asking, before Claude's first turn, and its checks run the same way every time without spending tokens. A skill only helps once someone thinks to call it.
+- **Open questions:**
+  - How much of this belongs in boomi-runtime's `/boomi doctor`, which already checks the host, credentials and network.
+  - Whether it should install missing pieces or only list them.
+
+### Reusability spotter
+
+**Point out an existing component before Claude builds a new one like it.**
+
+- **Problem:** Claude builds a new connection, profile or map without checking for one that already does the job, so accounts fill with near-duplicates.
+- **Idea:** Before Companion creates a component, search the account for components of the same type with a similar name or the same endpoint, and tell Claude about them (it doesn't refuse). In `confirm` mode, ask first, the way the budget gate does.
+- **Why a mod:** A hook on Companion's create runs every time, whether or not Claude thinks to search first.
+- **Open questions:**
+  - What "similar" means for each component type: name, connection URL, profile fields.
+  - The cost of a component search before every create, and whether to cache the account's components for the session.
+
+### License and connection-usage monitor
+
+**Show what the session's deploys do to the account's connection licenses, and what's sitting unused.**
+
+- **Problem:** Boomi licenses connections by class (standard, enterprise), and a deploy that brings in a new connection uses up a license. Nobody finds out until the account runs out. Deployed processes and connections nobody runs any more keep licenses tied up.
+- **Idea:** Before a deploy, warn when it would use a new connection license and how many are left. `/boomi licenses` lists what's used and free per class, and the deployed components with no runs in a set time (idle resources).
+- **Why a mod:** The warning is a hook on Companion's deploy. The listing alone could be a script.
+- **Open questions:**
+  - Which Platform API objects give license counts and per-connection use, and whether the API user needs extra rights.
+  - Whether the dashboard's budget gate should be able to stop a deploy that would go over.
+
+### Schedule conflict detector
+
+**Warn before a deploy adds a schedule that collides with others on the same runtime.**
+
+- **Problem:** Processes scheduled for the same minute on one runtime compete for it, and a new schedule can slow down or delay the ones already there.
+- **Idea:** When Claude sets or deploys a process schedule, compare it with the other schedules on the runtimes in that environment and warn about overlaps, with the busiest times.
+- **Why a mod:** A hook on the schedule change and the deploy, so the check happens before the change, not after a slow night.
+- **Open question:** How often teams set schedules through Companion rather than in the Boomi UI; if rarely, a report command is enough.
 
 ### The dashboard across all of Boomi Companion
 
@@ -181,6 +238,14 @@ quadrantChart
 Smaller additions to the [boomi-dashboard](boomi-dashboard/README.md) mod that build on what it already tracks:
 
 - **Process runs in Boomi, again:** up to 0.10.0 the dashboard polled the runs on the runtimes attached to `BOOMI_ENVIRONMENT_ID` and showed this session's components' runs (tests, listener calls, schedules), toasting new failures. It was set aside in 0.11.0 to come back to later. The plain functions (`recentRuns`, `sessionRuns`, `runsOf`, `newFailures`) and the Platform API client's `environmentAtoms` and `recentRuns` are still in the mod with their tests; what's needed is the polling, the pane section and the text and report sections again.
+- **Production runs: SLAs and resubmits.** Once runs are polled again, flag a run that takes longer than a set time for its process, and offer **Run again** for a failed production run, asking first the way `confirm` does.
+- **Where the session is pointed:** show the Boomi account, the environment and the test runtime in the pane and the status line, not only in the HTML report, with the runtime's state (✓ online, ⚠ offline). A test refused with HTTP 400, "cannot be executed on atom", because the runtime is offline then reads as that, not as a failed test.
+- **An environment and release-window guard:** the budget gate's `warn`, `confirm` and `block`, applied to deploys to an environment marked as production, or outside a release window the team sets. Open question: where the production mark and the windows live (a setting, or Boomi's environment classification).
+- **Who uses this component, before a push:** before Claude saves a component, list the deployed processes that use it, so a change to a shared profile or connection isn't a surprise. The same references could draw a map of the session's components and what uses what, in the HTML report. Open question: whether the Platform API's component references are quick enough to read before every push.
+- **Progress on long operations:** elapsed time and the latest status for deploys, Data Hub deploys and BDI runs while they run, in the pane and the banner. `◐ deploying` and `◐ run started` already show; what's missing is how long, and the same for bc-integration's deploys.
+- **Platform changes in the report:** a **Platform changes** section in `/bc-dashboard report` and the HTML report listing every change the session made in Boomi, oldest first: creates, saves, deploys, undeploys, tests and the other plugins' changes, each with its time, target, ID and outcome. A change a budget override let through says so (allowed once or for the session, and which budget). The HTML report gets **Copy for a spreadsheet** and **Save as CSV** for it, as Components has. It builds on the existing **Budget overrides** list and the budget gate's sorting of changes from reads. Open question: who approved an override, beyond "in the confirm question" (the OS or git user name).
+- **What each process does, in the report:** under each process in the HTML report's **Components this session**, a short summary read from its XML: its shapes in order, the connections and endpoints it calls, its maps and their profiles, and its process properties. It's written when the report is made, from the version saved last, so it matches what the session left behind. A reviewer who doesn't open Boomi can see what changed hands. (Docs kept up to date on every save, as their own mod, are on hold.)
+- **Demo mode:** a sample session, the one the test kit already draws `assets/pane-*.png` from, that also produces a sample HTML report and components CSV without a Boomi account, with one command to make them all again after a release.
 - **Promotion diff and mock endpoints** would each show up as a section in the pane once they exist.
 
 ## Add an idea or claim one
