@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.49.0
+
+- **When your Claude budget resets, and where the month leads.** The dashboard keeps the last dollar figure of each day with the `/usage` reading and shows, under the monthly Claude budget: `Claude pace: on pace for $811 (74%) by the reset in 15d 4h` (or, at a pace that would pass the limit, when it's used up, before the reset) and `Claude spend: $30 today · $26/day this month`. The reset is 00:00 UTC on the 1st, which Claude Code's rate-limit event and Claude Desktop confirmed for this account (Oct 31, 8:00 PM EDT). The pace is the month's average so far carried to the reset, and waits for a tenth of the month. They're readings and estimates, never a spent budget: they don't count for `budgetEnforce`. In the pane, `/bc-dashboard text`, and the Markdown and HTML reports.
+
 ## 0.48.1
 
 - **The budgets in the reports and the text.** The HTML report labelled the monthly Claude budget "Companion's share (Claude budget)" and Companion's share of all usage "Companion's share (Companion)". They now read **Your Claude budget**, **Companion, all your usage** and **What drove this week**. A spent monthly Claude budget under `budgetEnforce` is named as that, not as a Companion share. `/bc-dashboard text` and the Markdown report, which showed none of these, now list the monthly Claude budget in dollars, Companion's share and the week's habit.

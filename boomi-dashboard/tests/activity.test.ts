@@ -9,6 +9,7 @@ import {
   fixPrompt,
   report,
   usageReadLines,
+  paceWords,
   guardrails,
   guardrailText,
   pastSessions,
@@ -1172,4 +1173,24 @@ test('the text summary and the Markdown report carry the monthly Claude budget, 
   for (const line of lines) expect(md).toContain(`- ${line}`)
   expect(usageReadLines({ usd: 1 })).toEqual([])
   expect(usageReadLines({ isUsageUnreadable: true })[0]).toContain("couldn't read Claude Code's /usage")
+})
+
+test('the pace in words: where the month leads, when it runs out, today, and only the reset when there is no pace yet', () => {
+  const now = Date.parse('2026-10-15T20:00:00Z')
+  const resetsAt = Date.parse('2026-11-01T00:00:00Z')
+  expect(paceWords({ limitUsd: 1100 }, { resetsAt, todayUsd: 30.46, dailyUsd: 25.68, projectedUsd: 796.16 }, now)).toEqual({
+    pace: 'on pace for $796 (72%) by the reset in 16d 4h',
+    today: '$30 today · $26/day this month',
+  })
+  const out = paceWords({ limitUsd: 1100 }, { resetsAt, dailyUsd: 60.67, projectedUsd: 1880, exhaustsAt: now + 3 * 86_400_000 }, now)
+  expect(out.pace).toBe("at $61/day it's used up in 3d 0h, before the reset in 16d 4h")
+  expect(out.isRunningOut).toBe(true)
+  expect(paceWords({ limitUsd: 1100 }, { resetsAt }, now)).toEqual({ pace: 'resets in 16d 4h' })
+  expect(paceWords({ limitUsd: 1100 }, undefined, now)).toEqual({})
+  // Budget lines and the text carry the same words; a pace is information, never a spent budget.
+  const usage = { extraUsage: { limitUsd: 1100, usedUsd: 380.96, percent: 34.6 }, pace: { resetsAt, dailyUsd: 25.68, projectedUsd: 796.16 }, now }
+  const lines = budgetLines(usage as never, { budgetUsd: 0, companionShare: 0, companionSharePeriod: 'week', companionMonthlyUsd: 0 })
+  expect(lines.map(l => l.label)).toEqual(['Claude budget', 'Claude pace', 'Claude spend'])
+  expect(lines[1]).toMatchObject({ percent: 0, isUnmeasured: true, detail: 'on pace for $796 (72%) by the reset in 16d 4h' })
+  expect(usageReadLines(usage as never)).toContain('Claude pace: on pace for $796 (72%) by the reset in 16d 4h')
 })
