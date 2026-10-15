@@ -4,11 +4,9 @@
 
 ## 0.40.0
 
-- **Prompt tips.** Each prompt you type in a Companion folder is checked for what Boomi work needs and it leaves out: which component "it" is, the environment for a deploy, the error for a fix, test data, a new process's source, trigger and format, a map's profiles, production named, or several big steps at once. Each tip names the session's likely answer, such as the component you worked on last or the last failed test's execution ID, and an upgraded prompt fills those in, leaving a `[placeholder]` for anything it doesn't know. The checks make no model call. See [Prompt tips](README.md#prompt-tips).
-  - The status line says `◐ 3 prompt tips: /bc-dashboard prompt`. `/bc-dashboard prompt` shows them and the upgrade, `prompt use` puts the upgrade in the prompt box, and `prompt upgrade` has a model (`promptModel`, `haiku` by default) rewrite it.
-  - `promptCheck` is `suggest` by default: the prompt goes to Claude as typed. `confirm` asks first; `off` turns it all off. `promptSkip` leaves out checks you don't want.
-  - **New: a prompt with a password or token in it asks before it's sent,** even in `suggest`, and closing the question sends it masked. Set `promptCheck` to `off` to stop that.
-  - The session report counts prompts checked, those with tips, and tips followed.
+- **Platform changes in the report.** `/bc-dashboard report` and `report html` have a **Platform changes** section: every change the session made in Boomi, oldest first. That covers creates, saves, deploys, undeploys and tests; folders, branches and extensions created, deleted or set; Event Streams setup; web service calls; and the other plugins' changes (Data Hub, BDI, Agentstudio, connectors, Marketplace installs). Steps now keep the subcommand of bc-integration's branch, extensions and Event Streams scripts, so a `branch create` is listed and a `branch list` isn't. Each shows when it ran, what it did, how it went (with its icon and label) and the ID it left: the version, package, execution or run. A change the budget gate refused shows as blocked and not run.
+- **Overrides on the change they let through.** A change allowed past a spent budget says so in its row: allowed once, or allowed for the session, and which budget was spent. **Budget overrides** still lists each choice.
+- **Copy or save the changes.** The HTML report has **Copy for a spreadsheet**, **Copy as CSV** and **Save as CSV** above the changes, as it has for Components. The file is `boomi-changes-<date>.csv`.
 
 ## 0.39.6
 

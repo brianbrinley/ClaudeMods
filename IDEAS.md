@@ -10,6 +10,7 @@ Ideas for mods we could build next, starting with Boomi and integration work. Th
 - Guardrails at a glance: the dashboard's **Guardrails** section shows the runtime's state, and what boomi-standards blocked once that mod is back.
 - Companion's activity log as a second source, and a new-session banner with the last session's recap and tips.
 - A report style switch: `reportStyle` (`exosphere` or `expressive`) for the dashboard's HTML report.
+- Platform changes in the report (0.40.0): every change the session made in Boomi, with the budget override that let it through, in both reports and as a CSV.
 
 The [boomi-runtime](boomi-runtime/README.md) mod shows what a mod can do. It provisions a temporary Boomi runtime in the session, smoke-tests it, hands it to Boomi Companion through a shared `.env` and tears everything down at the end, while keeping the Platform API token out of the conversation. Mods can add:
 
@@ -55,6 +56,7 @@ quadrantChart
     Reusability spotter: [0.40, 0.46]
     License monitor: [0.50, 0.30]
     Schedule conflicts: [0.34, 0.24]
+    Prompt upgrade: [0.30, 0.66]
 ```
 
 | Rank | Idea | Business value | Effort | Status |
@@ -63,16 +65,17 @@ quadrantChart
 | Next | [The dashboard across all of Boomi Companion](#the-dashboard-across-all-of-boomi-companion) | High | Small first, medium in all | Steps 1-7 built (0.13.0-0.24.0), and **Why?** on a failed BDI run (0.35.0) |
 | 1 | [Execution debugger](#execution-debugger) | High | Small to medium | Log reading built into the dashboard; per-step documents next |
 | 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Secure-storage token tried and removed; API-user guide kept |
-| 3 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
-| 4 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
-| 5 | [Boomi onboarding copilot](#boomi-onboarding-copilot) | Medium to high | Medium | Idea |
-| 6 | [General secret guard](#general-secret-guard) | Medium | Small to medium | Idea |
-| 7 | [Reusability spotter](#reusability-spotter) | Medium | Small to medium | Idea |
-| 8 | [Promotion diff](#promotion-diff) | Medium | Medium | Idea |
-| 9 | [Environment extensions manager](#environment-extensions-manager) | Medium | Medium | Idea |
-| 10 | [Credential broker: full](#credential-broker) | Medium | Large | Idea |
-| 11 | [License and connection-usage monitor](#license-and-connection-usage-monitor) | Low to medium | Medium | Idea |
-| 12 | [Schedule conflict detector](#schedule-conflict-detector) | Low to medium | Small to medium | Idea |
+| 3 | [Boomi prompt upgrade](#boomi-prompt-upgrade) | Medium to high | Small | Idea |
+| 4 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
+| 5 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
+| 6 | [Boomi onboarding copilot](#boomi-onboarding-copilot) | Medium to high | Medium | Idea |
+| 7 | [General secret guard](#general-secret-guard) | Medium | Small to medium | Idea |
+| 8 | [Reusability spotter](#reusability-spotter) | Medium | Small to medium | Idea |
+| 9 | [Promotion diff](#promotion-diff) | Medium | Medium | Idea |
+| 10 | [Environment extensions manager](#environment-extensions-manager) | Medium | Medium | Idea |
+| 11 | [Credential broker: full](#credential-broker) | Medium | Large | Idea |
+| 12 | [License and connection-usage monitor](#license-and-connection-usage-monitor) | Low to medium | Medium | Idea |
+| 13 | [Schedule conflict detector](#schedule-conflict-detector) | Low to medium | Small to medium | Idea |
 
 ## The ideas
 
@@ -111,6 +114,30 @@ quadrantChart
   - Still to try: a banner tip when the token is due for rotation. Open question: whether the Platform API shows a token's age.
 - **Full broker:** The mod holds the token and offers a `boomi_api` tool that makes allow-listed Platform API calls for other mods and skills, so none of them needs the token.
 - **Limit:** Companion's scripts read the token from `.env`, and the broker can't change that. It protects everything except Companion's own calls, which is why the full version ranks lower than the quick wins.
+
+### Boomi prompt upgrade
+
+**Spot what a Companion prompt leaves out for Boomi work, and suggest a better one before Claude acts on it. To be built into the dashboard.**
+
+- **Problem:** Prompts in a Companion session are often short and lean on context only the person has: "deploy it", "test it", "fix it, it's still failing". Claude then guesses which process "it" is, which environment to deploy to, what to test with, and what failed, or runs three big steps (build, deploy, test) without stopping. A guess costs tokens, and a wrong environment can cost more.
+- **Idea:** The dashboard checks each prompt typed in a Companion session and, when something is missing, says what and offers an upgraded prompt.
+  - **Cheap checks, no model call:** "it" or "the process" with no component named; a deploy with no environment; a test with no process or test data; wording that suggests production; several big steps in one prompt; "fix it" with no error, log or execution ID; a new process with no source, target, trigger or data format, or a map with no profiles; and a token- or password-shaped string.
+  - **Facts, not guesses:** each tip names the likely answer from what the dashboard already knows: the component last edited, the environment the session points at, the last failed test's execution ID. Anything unknown stays a `[placeholder]`; it never invents an ID or a name.
+  - **Example:** `deploy it and test it, still failing` gets four tips ("it" is Orders Sync; no environment, the session points at Dev; last failed test not mentioned; three steps in one) and the upgrade "Deploy the process Orders Sync to the Dev environment. The last test failed (execution exec-3f2a…): read its process log, tell me the cause, and fix it. Then test it again with [test data] and stop to show me the result before changing anything else."
+  - **Automatic:** it hooks every prompt (`prompt.submit`) and stays silent outside a Companion folder, using the dashboard's own check of which Companion plugins are on. It skips slash commands, prompts typed while Claude works, short replies ("yes", "go on") and anything starting with `>`.
+  - **Suggest, don't block:** `promptCheck` is `off`, `suggest` (default) or `confirm`, next to `budgetEnforce`. In `suggest` the tip shows in the status line, the banner and `/bc-dashboard prompt`, and the prompt goes through. In `confirm` a flagged prompt asks **Send as is**, **Use the upgrade** or **Edit**; the last two put the text back in the prompt box. **A secret in the prompt always asks**, even in `suggest`, since once sent it's in the transcript.
+  - **A Prompt tab:** the pane opens a second pane, so Claude Code's own tab row shows **Session** and **Prompt · 2 tips** side by side, like a browser's. The Prompt tab shows the original and the upgrade side by side with **Use the upgrade**, **Upgrade with a model**, **Send as is** and **Dismiss** above them. `promptView` is `auto` (bring the tab forward when a tip lands, and Session back when Claude starts working), `manual` (open the tab without switching) or `off`. A prompt with nothing to flag opens no tab.
+  - **A model only on demand:** `/bc-dashboard prompt upgrade` asks a fast model to rewrite the masked prompt with the same facts and shows what it cost; `/bc-dashboard prompt use` puts the upgrade in the prompt box.
+  - **Habits:** the report counts tips and how many were followed (`Prompt tips: 4 · 3 followed`), and Review names a habit ("You often deploy without naming the environment").
+  - **Privacy:** prompts are masked with `mask()`, stay in the session's state and are never logged; across sessions only the per-check counts are kept.
+- **Why in the dashboard, not a mod of its own:** the dashboard already has everything it needs (which Companion plugins are on, the session's components, environment and failed runs, `mask()`, a `prompt.submit` hook, the pane, the prompt box, the report and Review), so a separate mod would mostly be plumbing between the two: shared state, a versioned contract, and button presses passed through state. It also starts with the dashboard, with nothing more to load. `promptCheck: off` turns it off completely, and the checks live in their own file of plain functions with tests. Asking about secrets changes how the dashboard behaves, so the CHANGELOG and the upgrade notice say so.
+- **Why a mod:** it needs a hook on every prompt before it reaches the model, which a skill can't have. The cheap checks cost no tokens, and `/bc-dashboard prompt` covers Claude Code on the web, where no pane or status line shows.
+- **Open questions:**
+  - Whether opening a pane that's already open brings its tab forward; `auto` depends on it, and without it acts like `manual`.
+  - Whether `manual` can add the tab without taking focus, and how the tab row looks beside the banner on a narrow pane.
+  - Whether the `confirm` question and the refilled prompt box work on the web as in the terminal.
+  - How often the checks flag real Companion prompts by mistake; that decides which checks are on by default.
+  - Later: checks for the other Companion plugins (a BDI flow or a Data Hub model named as "it").
 
 ### Process test harness
 
@@ -243,7 +270,6 @@ Smaller additions to the [boomi-dashboard](boomi-dashboard/README.md) mod that b
 - **An environment and release-window guard:** the budget gate's `warn`, `confirm` and `block`, applied to deploys to an environment marked as production, or outside a release window the team sets. Open question: where the production mark and the windows live (a setting, or Boomi's environment classification).
 - **Who uses this component, before a push:** before Claude saves a component, list the deployed processes that use it, so a change to a shared profile or connection isn't a surprise. The same references could draw a map of the session's components and what uses what, in the HTML report. Open question: whether the Platform API's component references are quick enough to read before every push.
 - **Progress on long operations:** elapsed time and the latest status for deploys, Data Hub deploys and BDI runs while they run, in the pane and the banner. `◐ deploying` and `◐ run started` already show; what's missing is how long, and the same for bc-integration's deploys.
-- **Platform changes in the report:** a **Platform changes** section in `/bc-dashboard report` and the HTML report listing every change the session made in Boomi, oldest first: creates, saves, deploys, undeploys, tests and the other plugins' changes, each with its time, target, ID and outcome. A change a budget override let through says so (allowed once or for the session, and which budget). The HTML report gets **Copy for a spreadsheet** and **Save as CSV** for it, as Components has. It builds on the existing **Budget overrides** list and the budget gate's sorting of changes from reads. Open question: who approved an override, beyond "in the confirm question" (the OS or git user name).
 - **What each process does, in the report:** under each process in the HTML report's **Components this session**, a short summary read from its XML: its shapes in order, the connections and endpoints it calls, its maps and their profiles, and its process properties. It's written when the report is made, from the version saved last, so it matches what the session left behind. A reviewer who doesn't open Boomi can see what changed hands. (Docs kept up to date on every save, as their own mod, are on hold.)
 - **Demo mode:** a sample session, the one the test kit already draws `assets/pane-*.png` from, that also produces a sample HTML report and components CSV without a Boomi account, with one command to make them all again after a release.
 - **Promotion diff and mock endpoints** would each show up as a section in the pane once they exist.

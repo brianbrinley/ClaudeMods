@@ -115,6 +115,7 @@ import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { componentTable, hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
 import { toCsv, toTsv } from './export'
+import { changeLines } from './changes'
 import type { BoomiFacts, ReportScope, ReportStyle } from './report-html'
 import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, groupWithValue, listing, menuQuestion, parseValue, pastSpend, questionFor, show, valueOf } from './config'
 import type { Group, PastSpend, Value } from './config'
@@ -625,7 +626,9 @@ const noteStart = async ($: Engine, settings: Settings, runs: readonly ScriptRun
     const args = run.kind === 'test' && run.args ? { args: run.args } : {}
     const product = run.product
       ? { product: run.product, verb: run.verb ?? '', ...(run.ref ? { ref: run.ref } : {}), ...(run.project ? { project: run.project } : {}), ...(run.group ? { group: run.group } : {}), ...(run.version ? { version: run.version } : {}) }
-      : {}
+      : run.verb
+        ? { verb: run.verb }
+        : {}
     started.push({ id: id++, kind: run.kind, outcome: 'running', detail: 'running', startedAt, script: run.script, ...spent, ...found, ...args, ...product })
   }
   if (!current.activity.some(a => a.kind !== 'other' || a.product)) void openPane($, settings)
@@ -1501,9 +1504,10 @@ const reviewCommand = async ($: Engine, settings: Settings, target: string): Pro
 const reportNow = async ($: Engine, settings: Settings) => {
   const now = await $.clock.now()
   const footer = await footerOf($)
+  const state = await read($, dashboard)
   return report(
-    await read($, dashboard),
-    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await withBudget($, settings), promptLines: reportLines(await read($, promptCounts)) },
+    state,
+    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await withBudget($, settings), changes: changeLines(state.activity) },
     now,
     settings.windowMs,
   )

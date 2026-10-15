@@ -36,6 +36,7 @@ import type { BudgetLine, Level, ReportFacts, Stage } from './activity'
 import { PRODUCT_NAMES } from './products'
 import { mask } from './upgrade'
 import { toCsv, toTsv } from './export'
+import { changeTable, overridesFor, platformChanges, referenceOf, resultOf } from './changes'
 import type { Table } from './export'
 
 /** Text made safe for HTML, credential-shaped strings masked first. */
@@ -498,6 +499,22 @@ export const componentTable = (activity: readonly Activity[], boomi?: BoomiFacts
   }
 }
 
+/**
+ * The buttons that copy or save a table, with the table as data the page's
+ * script reads: tab-separated to paste into a spreadsheet, CSV to copy or
+ * save. Empty for a table with no rows.
+ */
+const exportGroup = (id: string, noun: string, what: string, exported: Table, file: string) => {
+  if (exported.rows.length === 0) return ''
+  const data = JSON.stringify({ tsv: toTsv(exported), csv: toCsv(exported), file, rows: exported.rows.length, noun }).replace(/</g, '\\u003c')
+  return `<div class="export" role="group" aria-label="Copy or save the ${what}" data-source="${id}"><span class="export-label">Take this list elsewhere, with every ID:</span>
+<button type="button" data-export="tsv" title="Tab-separated: paste straight into Excel, Google Sheets or Numbers">Copy for a spreadsheet</button>
+<button type="button" data-export="csv">Copy as CSV</button>
+<button type="button" data-export="download">Save as CSV</button>
+<span class="export-done" role="status" aria-live="polite"></span></div>
+<script type="application/json" id="${id}">${data}</script>`
+}
+
 /** The deployment package a deploy made, from its SUCCESS line. */
 export const packageOf = (detail: string): string | undefined => detail.match(/\(package: ([^)\s]+)\)/)?.[1]
 
@@ -722,16 +739,18 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   const overrides = steps.filter(a => a.isBudgetOverride)
   const pipelineLine = rows.length > 0 ? `${savedOk} saved · ${deployedOk} deployed · ${passing} passing` : ''
   // The components as text to take elsewhere: tab-separated to paste into a spreadsheet, CSV to copy or save.
-  const exported = componentTable(dashboard.activity, boomi)
-  const exportData = JSON.stringify({ tsv: toTsv(exported), csv: toCsv(exported), file: `boomi-components-${facts.date}.csv`, rows: exported.rows.length }).replace(/</g, '\\u003c')
-  const exportTools = exported.rows.length === 0
-    ? ''
-    : `<div class="export" role="group" aria-label="Copy or save the components"><span class="export-label">Take this list elsewhere, with every ID:</span>
-<button type="button" data-export="tsv" title="Tab-separated: paste straight into Excel, Google Sheets or Numbers">Copy for a spreadsheet</button>
-<button type="button" data-export="csv">Copy as CSV</button>
-<button type="button" data-export="download">Save as CSV</button>
-<span class="export-done" role="status" aria-live="polite"></span></div>
-<script type="application/json" id="component-export">${exportData}</script>`
+  const exportTools = exportGroup('component-export', 'component', 'components', componentTable(dashboard.activity, boomi), `boomi-components-${facts.date}.csv`)
+
+  // Every change made in Boomi, oldest first, with the override that let it through.
+  const changes = platformChanges(dashboard.activity)
+  const changeOverrides = overridesFor(dashboard.activity)
+  const changeRows = changes.map(a => {
+    const ref = referenceOf(a)
+    const [refWord, ...refId] = ref.split(' ')
+    const at = new Date(a.startedAt).toISOString()
+    return `<tr><td data-sort="${a.startedAt}"><time datetime="${at}">${esc(at.slice(0, 16).replace('T', ' '))}</time></td><td>${esc(mask(describe(a)))}</td><td data-sort="${esc(resultOf(a))}">${status(levelOf(a), resultOf(a))}</td><td>${ref ? `${esc(refWord!)} ${idCode(refId.join(' '))}` : ''}</td><td>${esc(changeOverrides.get(a.id) ?? '')}</td></tr>`
+  })
+  const changeTools = exportGroup('change-export', 'change', 'changes', changeTable(dashboard.activity), `boomi-changes-${facts.date}.csv`)
 
   const account = boomi && (boomi.accountId || boomi.environmentId)
     ? `<p class="account-line" id="account"><span class="label">Boomi account</span> ${[
@@ -847,6 +866,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     ['timeline', isAll ? 'Sessions' : 'Timeline'],
     ...(needs.length > 0 ? ([['attention', 'Attention']] as [string, string][]) : []),
     ...(overrides.length > 0 ? ([['overrides', 'Overrides']] as [string, string][]) : []),
+    ...(changeRows.length > 0 ? ([['changes', 'Changes']] as [string, string][]) : []),
     ['components', 'Components'],
     ...(charts.length > 0 ? ([['charts', 'Charts']] as [string, string][]) : []),
     ['steps', 'Steps'],
@@ -898,6 +918,7 @@ ${strip ? `<section id="timeline" class="first">${strip}</section>` : ''}
 ${account}
 ${needs.length > 0 ? `<section id="attention"><h2>Needs attention</h2>${attentionList}</section>` : ''}
 ${overrides.length > 0 ? `<section id="overrides"><h2>Budget overrides <span class="count">${overrides.length}</span> <span class="aside">Companion changes allowed past a spent budget, as you chose</span></h2><ul class="plain overrides">${overrides.map(a => `<li><time datetime="${new Date(a.startedAt).toISOString()}">${esc(new Date(a.startedAt).toISOString().slice(0, 16).replace('T', ' '))} UTC</time> ${esc(a.detail)}</li>`).join('')}</ul></section>` : ''}
+${table('changes', 'Platform changes', ['When (UTC)', 'Change', 'Result', 'Reference', 'Budget override'], changeRows, '', 'Every change made in Boomi, oldest first', changeTools)}
 ${componentRows.length === 0 ? `<section id="components"><h2>Components</h2><p class="muted">None ${isAll ? 'in these sessions' : 'this session'}.</p></section>` : table('components', 'Components', ['Component', 'Saved', 'Deployed', 'Tested', 'Cost'], componentRows, 'lanes', pipelineLine, exportTools)}
 ${table('connectors', 'Custom connectors', ['Connector', 'Group', 'Where it stands', 'Tokens', 'Cost'], connectorRows)}
 ${table('agents', 'Agentstudio agents', ['Agent', 'Where it stands', 'Tokens', 'Cost'], agentRows)}
@@ -1232,17 +1253,17 @@ const SCRIPT = `
   var folded=[];
   window.addEventListener('beforeprint',function(){folded=[];document.querySelectorAll('details.step-group:not([open])').forEach(function(g){folded.push(g);g.open=true})});
   window.addEventListener('afterprint',function(){folded.forEach(function(g){g.open=false});folded=[]});
-  // The components, copied or saved for a spreadsheet: with the clipboard where the browser allows it, else a selected text box.
-  var exportEl=document.getElementById('component-export');
-  if(exportEl){var data=JSON.parse(exportEl.textContent);var said=document.querySelector('.export-done');
+  // The components and the platform changes, copied or saved for a spreadsheet: with the clipboard where the browser allows it, else a selected text box.
+  function fallback(text){var box=document.createElement('textarea');box.value=text;box.setAttribute('readonly','');box.style.position='fixed';box.style.opacity='0';document.body.appendChild(box);box.select();var ok=false;try{ok=document.execCommand('copy')}catch(e){}document.body.removeChild(box);return ok}
+  document.querySelectorAll('.export[data-source]').forEach(function(group){var exportEl=document.getElementById(group.getAttribute('data-source'));if(!exportEl)return;
+    var data=JSON.parse(exportEl.textContent);var said=group.querySelector('.export-done');
     function say(t){if(!said)return;said.textContent=t;clearTimeout(say.t);say.t=setTimeout(function(){said.textContent=''},2500)}
-    function fallback(text){var box=document.createElement('textarea');box.value=text;box.setAttribute('readonly','');box.style.position='fixed';box.style.opacity='0';document.body.appendChild(box);box.select();var ok=false;try{ok=document.execCommand('copy')}catch(e){}document.body.removeChild(box);return ok}
-    function copy(text,what){var done=function(){say('Copied '+data.rows+' component'+(data.rows===1?'':'s')+' '+what+'.')};var failed=function(){if(fallback(text))done();else say('Your browser blocked copying. Use Save as CSV instead.')};
+    function copy(text,what){var done=function(){say('Copied '+data.rows+' '+data.noun+(data.rows===1?'':'s')+' '+what+'.')};var failed=function(){if(fallback(text))done();else say('Your browser blocked copying. Use Save as CSV instead.')};
       if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(text).then(done,failed);else failed()}
-    document.querySelectorAll('[data-export]').forEach(function(b){b.addEventListener('click',function(){var kind=b.getAttribute('data-export');
+    group.querySelectorAll('[data-export]').forEach(function(b){b.addEventListener('click',function(){var kind=b.getAttribute('data-export');
       if(kind==='tsv')copy(data.tsv,'for a spreadsheet: paste into the first cell');
       else if(kind==='csv')copy(data.csv,'as CSV');
-      else{var a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\\ufeff'+data.csv],{type:'text/csv;charset=utf-8'}));a.download=data.file;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},0);say('Saved '+data.file+'.')}})})}
+      else{var a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\\ufeff'+data.csv],{type:'text/csv;charset=utf-8'}));a.download=data.file;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},0);say('Saved '+data.file+'.')}})})});
   var printer=document.querySelector('[data-print]');if(printer)printer.addEventListener('click',function(){window.print()});
   document.querySelectorAll('.ledger-link,.session-pick').forEach(function(l){l.addEventListener('click',function(){
     var g=document.querySelector(l.getAttribute('href'));if(g&&g.tagName==='DETAILS')g.open=true})});
