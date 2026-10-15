@@ -1431,6 +1431,8 @@ export type Usage = {
   companionUse?: string
   /** The habit that drove most of the week's usage, from the same breakdown: "44% of your usage was at >150k context". */
   usageHabit?: string
+  /** Set when /usage's text had windows but nothing the dashboard understood, so a reworded output says so instead of going quiet. */
+  isUsageUnreadable?: true
 }
 
 /** What the status line and banner say while a spent budget pauses Companion changes. */
@@ -2662,6 +2664,7 @@ export const budgetLines = (
     }
   }
   if (usage.companionUse) lines.push({ label: 'Companion', level: 'healthy', percent: 0, detail: `${usage.companionUse} (Claude Code's estimate, this machine)`, isUnmeasured: true })
+  if (usage.isUsageUnreadable) lines.push({ label: 'Companion', level: 'healthy', percent: 0, detail: "couldn't read Claude Code's /usage (its wording changed); update the dashboard", isUnmeasured: true })
   if (usage.usageHabit) lines.push({ label: 'this week', level: 'healthy', percent: 0, detail: usage.usageHabit, isUnmeasured: true })
   const session = budgetOf(usage.usd ?? 0, settings.budgetUsd)
   if (session) lines.push({ label: 'session', level: session.level, percent: session.percent, detail: `${formatCost(usage.usd ?? 0)} of ${formatCost(settings.budgetUsd)}` })

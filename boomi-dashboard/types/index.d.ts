@@ -195,6 +195,7 @@ export type Dashboard = {
 /** Claude Code's /usage breakdown as the dashboard last read it (hooks/usage-breakdown.ts's UsageBreakdown). */
 export type UsageBreakdownSeen = {
   isSubscription: boolean
+  isUnreadable?: true
   day?: { companion?: number; plugins: { name: string; percent: number }[]; habits: { percent: number; text: string }[]; requests?: number; sessions?: number }
   week?: { companion?: number; plugins: { name: string; percent: number }[]; habits: { percent: number; text: string }[]; requests?: number; sessions?: number }
 }

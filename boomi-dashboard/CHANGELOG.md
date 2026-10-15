@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.47.1
+
+- **A lighter /usage read.** The run now adds `--safe-mode`, so it skips your hooks, plugins and MCP servers: the same breakdown in about half the time (5 s against 9 s here), and none of your SessionStart hooks firing every 15 minutes. A Claude Code that doesn't know the flag gets the plain run. Companion's share now reads `≥20%`, since Claude Code lists only its top plugins. And if `/usage` is reworded so none of it can be read, BUDGET says so instead of going quiet. The reading is also kept in the store, so several sessions on this machine share one run per 15 minutes instead of one each.
+
 ## 0.47.0
 
 - **Companion's share of all your usage.** Every 15 minutes the dashboard runs `claude -p "/usage" --output-format json --no-session-persistence` (no model call, no session kept) and reads Claude Code's own breakdown. BUDGET then shows `Companion: 20% of your usage today · 18% this week` (the `bc-*` plugins added up) and the habit behind most of the week's usage, such as `44% of your usage was at >150k context`. It's Claude Code's estimate from this machine's sessions. Off a subscription there's no breakdown and nothing shows; `usageBreakdown` turns it off. It's information only: the `companionShare` budget still measures a share of your weekly limit.

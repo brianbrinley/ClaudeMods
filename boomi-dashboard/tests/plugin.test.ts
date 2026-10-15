@@ -2884,7 +2884,43 @@ test('the pane reads Claude Code’s /usage breakdown after the start, with no s
   })
   await startSession($, on)
   await clock.advance(20_000)
-  expect(runs).toContainEqual(['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence'])
+  expect(runs).toContainEqual(['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--safe-mode'])
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
-  expect(await pane.find({ text: /Companion: 20% of your usage today · 18% this week \(Claude Code's estimate, this machine\)/ })).toBeDefined()
+  expect(await pane.find({ text: /Companion: ≥20% of your usage today · ≥18% this week \(Claude Code's estimate, this machine\)/ })).toBeDefined()
+})
+
+test('the /usage run leaves out hooks and plugins, and falls back to the plain run on a Claude Code that refuses the flag', async ($, on) => {
+  world(on, { [FILE]: ORDERS, 'active-development': '' })
+  const runs: string[][] = []
+  const result = 'You are currently using your subscription\n\nLast 24h · 9 requests · 2 sessions\n  Top plugins: bc-integration 20%'
+  on('process.run', async (_$, e) => {
+    runs.push([...e.argv])
+    const isUsage = e.argv[2] === '/usage'
+    const isRefused = e.argv.includes('--safe-mode')
+    return { value: { exitCode: isUsage && isRefused ? 1 : 0, stdout: isUsage && !isRefused ? JSON.stringify({ result }) : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await startSession($, on)
+  await clock.advance(20_000)
+  const usageRuns = runs.filter(r => r[2] === '/usage')
+  expect(usageRuns).toEqual([
+    ['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--safe-mode'],
+    ['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence'],
+  ])
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /Companion: ≥20% of your usage today/ })).toBeDefined()
+})
+
+test('a /usage reading another session took a few minutes ago is used, with no new run', async ($, on) => {
+  world(on, { [FILE]: ORDERS, 'active-development': '' })
+  const runs: string[][] = []
+  on('process.run', async (_$, e) => {
+    runs.push([...e.argv])
+    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  const breakdown = { isSubscription: true, day: { companion: 33, plugins: [{ name: 'bc-integration', percent: 33 }], habits: [] } }
+  await startSession($, on, { usageBreakdown: { breakdown, checkedAt: NOW + 20_000 - 5 * 60_000 } })
+  await clock.advance(20_000)
+  expect(runs.filter(r => r[2] === '/usage')).toEqual([])
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /Companion: ≥33% of your usage today/ })).toBeDefined()
 })

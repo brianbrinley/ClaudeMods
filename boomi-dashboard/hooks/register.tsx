@@ -127,7 +127,7 @@ import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import { contextLines, folderComponentOf, relevantComponents, relevantSections, sectionsOf } from './retrieve'
 import type { FolderComponent, Section } from './retrieve'
-import { companionUseLine, parseUsage, topHabit } from './usage-breakdown'
+import { companionUseLine, isFresh, parseUsage, topHabit, usageArgv } from './usage-breakdown'
 import { NO_COUNTS, NUDGE_ONLY, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import type { Credentials } from './platform'
@@ -252,18 +252,38 @@ const usageBreakdown = atom({ plugin: 'boomi-dashboard', key: 'usageBreakdown' }
 /** How often the breakdown is read again: it covers a day and a week, so a quarter of an hour is plenty. */
 const BREAKDOWN_MS = 15 * 60_000
 
+/** Where the breakdown is kept across sessions, so the sessions on this machine share one reading. */
+const BREAKDOWN_KEY = 'usageBreakdown'
+
+/** Whether this Claude Code knew `--safe-mode`: once it has refused, the plain run is used. */
+let isSafeModeKnown = true
+
 /**
  * Reads Claude Code's /usage breakdown with a headless run of it: no model
- * call and no session kept (`--no-session-persistence`). Nothing changes when
- * the command fails or has no breakdown (off a subscription).
+ * call, no session kept (`--no-session-persistence`) and none of the person's
+ * hooks or plugins (`--safe-mode`). A reading another session took in the last
+ * quarter of an hour, from the store, is used instead of a new run. Nothing
+ * changes when the command fails or has no breakdown (off a subscription).
  */
 const readBreakdown = async ($: Engine) => {
+  const now = await $.clock.now()
+  const kept = (await $.store.get(BREAKDOWN_KEY).catch(() => undefined)) as { breakdown: UsageBreakdownSeen; checkedAt: number } | undefined
+  if (kept && isFresh(kept.checkedAt, now, BREAKDOWN_MS)) {
+    if (kept.checkedAt !== (await read($, usageBreakdown))?.checkedAt) await update($, usageBreakdown, () => kept)
+    return
+  }
   const cwd = await $.session.cwd()
-  const ran = await $.process.run(['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence'], { cwd, timeoutMs: 30_000 }).catch(() => undefined)
+  const run = (isSafe: boolean) => $.process.run(usageArgv(isSafe), { cwd, timeoutMs: 30_000 }).catch(() => undefined)
+  let ran = await run(isSafeModeKnown)
+  if (isSafeModeKnown && ran?.exitCode !== 0) {
+    isSafeModeKnown = false
+    ran = await run(false)
+  }
   const breakdown = ran?.exitCode === 0 ? parseUsage(ran.stdout) : undefined
   if (breakdown) {
-    const checkedAt = await $.clock.now()
-    await update($, usageBreakdown, () => ({ breakdown, checkedAt }))
+    const seen = { breakdown, checkedAt: await $.clock.now() }
+    await update($, usageBreakdown, () => seen)
+    await $.store.set(BREAKDOWN_KEY, seen).catch(() => undefined)
   }
 }
 
@@ -272,7 +292,7 @@ const withUse = async ($: Engine, usage: Usage): Promise<Usage> => {
   const breakdown = (await read($, usageBreakdown))?.breakdown
   const use = companionUseLine(breakdown)
   const habit = topHabit(breakdown)
-  return { ...usage, ...(use ? { companionUse: use } : {}), ...(habit ? { usageHabit: habit } : {}) }
+  return { ...usage, ...(use ? { companionUse: use } : {}), ...(habit ? { usageHabit: habit } : {}), ...(breakdown?.isUnreadable ? { isUsageUnreadable: true as const } : {}) }
 }
 
 /** Past Companion sessions folded to their totals, to leave the pane's room to this session; kept across sessions. */
