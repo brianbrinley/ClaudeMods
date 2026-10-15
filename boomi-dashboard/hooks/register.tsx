@@ -292,7 +292,7 @@ const withUse = async ($: Engine, usage: Usage): Promise<Usage> => {
   const breakdown = (await read($, usageBreakdown))?.breakdown
   const use = companionUseLine(breakdown)
   const habit = topHabit(breakdown)
-  return { ...usage, ...(use ? { companionUse: use } : {}), ...(habit ? { usageHabit: habit } : {}), ...(breakdown?.isUnreadable ? { isUsageUnreadable: true as const } : {}) }
+  return { ...usage, ...(use ? { companionUse: use } : {}), ...(habit ? { usageHabit: habit } : {}), ...(breakdown?.isUnreadable ? { isUsageUnreadable: true as const } : {}), ...(breakdown?.extra ? { extraUsage: breakdown.extra } : {}) }
 }
 
 /** Past Companion sessions folded to their totals, to leave the pane's room to this session; kept across sessions. */
@@ -507,7 +507,7 @@ const snapshot = async ($: Engine) => {
 const refreshStatus = async ($: Engine, settings: Settings) => {
   const now = await $.clock.now()
   const read0 = { ...(await usageOf($)), budgetUsd: settings.budgetUsd }
-  const usage: Usage = { ...read0, companion: await companionBudget($, settings, read0) }
+  const usage: Usage = await withUse($, { ...read0, companion: await companionBudget($, settings, read0) })
   usage.isPaused = await notePause($, settings, usage)
   const line = statusLine(await read($, dashboard), now, settings.windowMs, usage, (await read($, recap)) ?? undefined)
   const tips = settings.promptCheck === 'off' ? undefined : statusPart(await read($, promptTips), (await read($, promptHeld)) !== null)
@@ -516,6 +516,7 @@ const refreshStatus = async ($: Engine, settings: Settings) => {
   await warnLimits($, settings, usage)
   await trackShare($, settings, usage)
   await warnCompanion($, settings, usage)
+  await warnExtra($, settings, usage)
 }
 
 /**
@@ -577,6 +578,17 @@ const warnCompanion = async ($: Engine, settings: Settings, usage: Usage) => {
     await update($, limitAlerts, all => ({ ...all, [key]: mark }))
     toast($, settings, `${STATUS[b.level].icon} ${b.text}`)
   }
+}
+
+/** Toasts once as the account's monthly Claude budget passes 80%, and once when it's spent, per month. */
+const warnExtra = async ($: Engine, settings: Settings, usage: Usage) => {
+  const x = usage.extraUsage
+  if (!x) return
+  const mark = x.percent >= 100 ? 100 : x.percent >= 80 ? 80 : 0
+  const key = `extra-usage|${monthOf(usage.now ?? (await $.clock.now()))}`
+  if (mark === 0 || mark <= ((await read($, limitAlerts))[key] ?? 0)) return
+  await update($, limitAlerts, all => ({ ...all, [key]: mark }))
+  toast($, settings, `${STATUS[mark >= 100 ? 'critical' : 'warning'].icon} ${mark >= 100 ? 'Your monthly Claude budget is used up' : `${Math.round(x.percent)}% of your monthly Claude budget used`} (${formatCost(x.usedUsd)} of ${formatCost(x.limitUsd)})`)
 }
 
 /** Toasts once as each usage-limit window passes 80%, and once when it's used up, per window until it resets. */

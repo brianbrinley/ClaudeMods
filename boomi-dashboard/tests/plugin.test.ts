@@ -2884,7 +2884,7 @@ test('the pane reads Claude Code’s /usage breakdown after the start, with no s
   })
   await startSession($, on)
   await clock.advance(20_000)
-  expect(runs).toContainEqual(['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--safe-mode'])
+  expect(runs).toContainEqual(['claude', '-p', '/usage', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--safe-mode'])
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
   expect(await pane.find({ text: /Companion: ≥20% of your usage today · ≥18% this week \(Claude Code's estimate, this machine\)/ })).toBeDefined()
 })
@@ -2903,8 +2903,8 @@ test('the /usage run leaves out hooks and plugins, and falls back to the plain r
   await clock.advance(20_000)
   const usageRuns = runs.filter(r => r[2] === '/usage')
   expect(usageRuns).toEqual([
-    ['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--safe-mode'],
-    ['claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence'],
+    ['claude', '-p', '/usage', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--safe-mode'],
+    ['claude', '-p', '/usage', '--output-format', 'stream-json', '--verbose', '--no-session-persistence'],
   ])
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
   expect(await pane.find({ text: /Companion: ≥20% of your usage today/ })).toBeDefined()
@@ -2923,4 +2923,17 @@ test('a /usage reading another session took a few minutes ago is used, with no n
   expect(runs.filter(r => r[2] === '/usage')).toEqual([])
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
   expect(await pane.find({ text: /Companion: ≥33% of your usage today/ })).toBeDefined()
+})
+
+test('the monthly Claude budget in dollars comes from the /usage run’s extra_usage, and a spent one toasts and counts for enforcement', async ($, on) => {
+  world(on, { [FILE]: ORDERS, 'active-development': '' })
+  const lines = [
+    { type: 'assistant', usage_report: { rate_limits: { limits: [], extra_usage: { is_enabled: true, monthly_limit: 110000, used_credits: 38004, utilization: 34.549, currency: 'USD' } } } },
+    { type: 'result', result: 'You are currently using your subscription\n\nLast 24h · 9 requests · 2 sessions\n  Top plugins: bc-integration 20%' },
+  ].map(l => JSON.stringify(l)).join('\n')
+  on('process.run', async (_$, e) => ({ value: { exitCode: 0, stdout: e.argv[2] === '/usage' ? lines : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await startSession($, on)
+  await clock.advance(20_000)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /Claude budget: \$380 of \$1100 this month/ })).toBeDefined()
 })

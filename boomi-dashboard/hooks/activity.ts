@@ -1433,6 +1433,8 @@ export type Usage = {
   usageHabit?: string
   /** Set when /usage's text had windows but nothing the dashboard understood, so a reworded output says so instead of going quiet. */
   isUsageUnreadable?: true
+  /** The account's monthly Claude budget and what's used, from the headless /usage run's `extra_usage`. */
+  extraUsage?: { limitUsd: number; usedUsd: number; percent: number }
 }
 
 /** What the status line and banner say while a spent budget pauses Companion changes. */
@@ -2652,9 +2654,13 @@ export const budgetLines = (
   settings: { budgetUsd: number; companionShare: number; companionSharePeriod: SharePeriod; companionMonthlyUsd: number; seatBudgetUsd?: number },
 ): BudgetLine[] => {
   const lines: BudgetLine[] = []
-  // The budget the person's admin assigned them: in dollars from the spend limit Claude Code reports, when it reports one.
+  // The monthly budget the account reports, in dollars, when /usage has it; else the one the person's admin assigned, from the spend limit Claude Code reports.
+  const extra = usage.extraUsage
   const seat = settings.seatBudgetUsd ?? 0
-  if (seat > 0) {
+  if (extra) {
+    const level: Level = extra.percent >= 100 ? 'critical' : extra.percent >= 80 ? 'warning' : 'healthy'
+    lines.push({ label: 'Claude budget', level, percent: extra.percent, detail: `${formatCost(extra.usedUsd)} of ${formatCost(extra.limitUsd)} this month` })
+  } else if (seat > 0) {
     const spend = usage.limits?.find(l => l.kind === 'spend_limit')
     if (spend) {
       const level: Level = spend.percentUsed >= 100 ? 'critical' : spend.percentUsed >= 80 ? 'warning' : 'healthy'

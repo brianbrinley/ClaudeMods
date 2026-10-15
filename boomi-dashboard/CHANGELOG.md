@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.48.0
+
+- **Your monthly Claude budget, in dollars, automatically.** The `/usage` run now uses `--output-format stream-json --verbose`, whose `usage_report` carries the account's monthly budget and what's used, the figures the interactive `/usage` shows. BUDGET reads `Claude budget: $380 of $1100 this month`, measured, with a toast at 80% and when it's used up, and it counts for `budgetEnforce`. It's the account's figure (other devices and claude.ai included) and needs extra usage on for the account. Amounts arrive in cents and anything not in dollars, off or malformed is left out. `seatBudgetUsd` is now only for logins that report a spend limit in percent. This corrects 0.47.0, which said the credits weren't available to mods.
+
 ## 0.47.1
 
 - **A lighter /usage read.** The run now adds `--safe-mode`, so it skips your hooks, plugins and MCP servers: the same breakdown in about half the time (5 s against 9 s here), and none of your SessionStart hooks firing every 15 minutes. A Claude Code that doesn't know the flag gets the plain run. Companion's share now reads `≥20%`, since Claude Code lists only its top plugins. And if `/usage` is reworded so none of it can be read, BUDGET says so instead of going quiet. The reading is also kept in the store, so several sessions on this machine share one run per 15 minutes instead of one each.

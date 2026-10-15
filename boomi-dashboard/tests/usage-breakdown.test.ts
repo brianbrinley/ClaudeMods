@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import { budgetLines } from '../hooks/activity'
-import { companionUseLine, parseUsage, topHabit } from '../hooks/usage-breakdown'
+import { companionUseLine, extraOf, parseUsage, topHabit, usageArgv } from '../hooks/usage-breakdown'
 
 // The shape of `claude -p "/usage" --output-format json` on a subscription, as of Claude Code 2.1.300, with made-up figures.
 const RESULT = [
@@ -76,4 +76,45 @@ test('reworded output: windows with nothing understood say so, instead of showin
 
 test('a share is a lower bound: Claude Code lists only its top plugins', () => {
   expect(companionUseLine(parseUsage(OUTPUT))).toContain('≥')
+})
+
+// The shape of `--output-format stream-json --verbose` for /usage, as of Claude Code 2.1.300: amounts in cents.
+const REPORT = { session: { total_cost_usd: 0 }, rate_limits: { limits: [], extra_usage: { is_enabled: true, monthly_limit: 110000, used_credits: 38004, utilization: 34.54909090909091, currency: 'USD' } } }
+const STREAM = [
+  { type: 'system', subtype: 'init' },
+  { type: 'assistant', usage_report: REPORT },
+  { type: 'result', subtype: 'success', result: RESULT },
+].map(l => JSON.stringify(l)).join('\n')
+
+test('the monthly budget in dollars: extra_usage in cents, from the stream or alone, with the text read as before', () => {
+  const b = parseUsage(STREAM)!
+  expect(b.extra).toEqual({ limitUsd: 1100, usedUsd: 380.04, percent: 34.54909090909091 })
+  expect(b.week?.companion).toBe(21)
+  expect(usageArgv(true)).toContain('stream-json')
+  expect(usageArgv(true)).toContain('--verbose')
+  // The report alone is enough, where the text has no windows.
+  expect(parseUsage(JSON.stringify({ type: 'assistant', usage_report: REPORT }))?.extra?.limitUsd).toBe(1100)
+  // The single-result shape still reads.
+  expect(parseUsage(OUTPUT)!.extra).toBeUndefined()
+})
+
+test('extra_usage that is off, not in dollars, without a limit or malformed is left out, never guessed', () => {
+  const x = (o: Record<string, unknown>) => ({ rate_limits: { extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 100, currency: 'USD', ...o } } })
+  expect(extraOf(x({}))).toEqual({ limitUsd: 50, usedUsd: 1, percent: 2 })
+  expect(extraOf(x({ is_enabled: false }))).toBeUndefined()
+  expect(extraOf(x({ currency: 'EUR' }))).toBeUndefined()
+  expect(extraOf(x({ monthly_limit: 0 }))).toBeUndefined()
+  expect(extraOf(x({ monthly_limit: 'lots' }))).toBeUndefined()
+  expect(extraOf(x({ used_credits: -5 }))).toBeUndefined()
+  expect(extraOf({})).toBeUndefined()
+  expect(extraOf(undefined)).toBeUndefined()
+})
+
+test('BUDGET shows the monthly budget in dollars, measured, ahead of the seat setting, and a spent one counts', () => {
+  const extra = { limitUsd: 1100, usedUsd: 380.04, percent: 34.5 }
+  const lines = budgetLines({ extraUsage: extra } as never, { ...SETTINGS, seatBudgetUsd: 200 })
+  expect(lines).toEqual([{ label: 'Claude budget', level: 'healthy', percent: 34.5, detail: '$380 of $1100 this month' }])
+  const spent = budgetLines({ extraUsage: { limitUsd: 1100, usedUsd: 1100, percent: 100 } } as never, SETTINGS)
+  expect(spent[0]).toMatchObject({ level: 'critical', percent: 100 })
+  expect(budgetLines({ extraUsage: { limitUsd: 1100, usedUsd: 900, percent: 82 } } as never, SETTINGS)[0]!.level).toBe('warning')
 })
