@@ -262,7 +262,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
 
 ## O. Prompt tips
 
-*boomi-dashboard 0.40.0. Use a Companion workspace where Claude has saved a process and a test of it has failed, so there's a last component and a last failure.*
+*boomi-dashboard 0.41.0. Use a Companion workspace where Claude has saved a process and a test of it has failed, so there's a last component and a last failure.*
 
 - [ ] **O1. A vague prompt goes through, with tips.** Type `deploy it and test it, still failing`.
   **Pass:** Claude starts on it straight away. The status line shows `◐ 4 prompt tips: /bc-dashboard prompt` beside the dashboard's own entry. `/bc-dashboard prompt` names the process, the environment and the failed test's execution ID, and the upgrade has them filled in. **Fail:** the prompt is held or changed, the status line shows no tips, or a tip names the wrong component.

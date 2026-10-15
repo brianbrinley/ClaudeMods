@@ -1507,7 +1507,7 @@ const reportNow = async ($: Engine, settings: Settings) => {
   const state = await read($, dashboard)
   return report(
     state,
-    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await withBudget($, settings), changes: changeLines(state.activity) },
+    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await withBudget($, settings), changes: changeLines(state.activity), promptLines: reportLines(await read($, promptCounts)) },
     now,
     settings.windowMs,
   )

@@ -1824,6 +1824,8 @@ export type ReportFacts = {
   usage: Usage
   /** The Platform changes section's lines (changes.ts), placed after the budget overrides. */
   changes?: readonly string[]
+  /** The Prompt tips section's lines (prompt-check.ts's reportLines), none before a prompt was checked. */
+  promptLines?: readonly string[]
 }
 
 const cell = (text: string) => text.replace(/\|/g, '\\|')
