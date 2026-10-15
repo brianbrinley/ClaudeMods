@@ -1437,6 +1437,25 @@ export type Usage = {
   extraUsage?: { limitUsd: number; usedUsd: number; percent: number }
 }
 
+/**
+ * The lines the headless /usage run adds to the usage, for the text summary and
+ * the Markdown report: the monthly Claude budget in dollars, Companion's share
+ * of all usage, and the habit behind most of it. The pane and the HTML report
+ * draw the same facts from budgetLines.
+ */
+export const usageReadLines = (usage: Usage): string[] => {
+  const x = usage.extraUsage
+  const lines: string[] = []
+  if (x) {
+    const level: Level = x.percent >= 100 ? 'critical' : x.percent >= 80 ? 'warning' : 'healthy'
+    lines.push(`${STATUS[level].icon} Claude budget: ${formatCost(x.usedUsd)} of ${formatCost(x.limitUsd)} this month (${Math.round(x.percent)}%)`)
+  }
+  if (usage.companionUse) lines.push(`Companion: ${usage.companionUse} (Claude Code's estimate, this machine)`)
+  if (usage.isUsageUnreadable) lines.push("Companion: couldn't read Claude Code's /usage (its wording changed); update the dashboard")
+  if (usage.usageHabit) lines.push(`This week: ${usage.usageHabit}`)
+  return lines
+}
+
 /** What the status line and banner say while a spent budget pauses Companion changes. */
 export const PAUSED = '⛔ budget reached, Companion changes paused'
 
@@ -1519,6 +1538,7 @@ export const summary = (dashboard: Dashboard, usage: Usage, now: number, windowM
   const limits = limitsLine(usage.limits, usage.now ?? now)
   if (limits) lines.push(limits)
   for (const b of [usage.companion?.week, usage.companion?.month]) if (b) lines.push(`${STATUS[b.level].icon} ${b.text}`)
+  lines.push(...usageReadLines(usage))
   if (usage.split) lines.push(`Tokens: ${usage.split}`)
   for (const line of usage.modelSplits ?? []) lines.push(`  ${line}`)
   if (usage.model && !usage.modelSplits?.length) lines.push(`Model: ${usage.model}`)
@@ -1934,6 +1954,7 @@ export const report = (dashboard: Dashboard, facts: ReportFacts, now: number, wi
   const limits = limitsLine(u.limits, u.now ?? now)
   if (limits) lines.push(`- ${limits}`)
   for (const b of [u.companion?.week, u.companion?.month]) if (b) lines.push(`- ${STATUS[b.level].icon} ${b.text}`)
+  for (const line of usageReadLines(u)) lines.push(`- ${line}`)
   const byProduct = productSpendLine(dashboard.activity, all)
   if (byProduct) lines.push(`- ${byProduct}`)
   if (u.split) lines.push(`- Tokens: ${u.split}`)
