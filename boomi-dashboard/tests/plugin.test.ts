@@ -2445,7 +2445,19 @@ const promptWorld = async (
   files: Record<string, string> = { 'active-development': '' },
   options: WorldOptions = {},
 ) => {
-  world(on, { [FILE]: ORDERS, '.env': `BOOMI_ENVIRONMENT_ID=${ENV_ID}\nBOOMI_API_TOKEN=secret-token-value\n`, ...files }, options)
+  const all: Record<string, string> = { [FILE]: ORDERS, '.env': `BOOMI_ENVIRONMENT_ID=${ENV_ID}\nBOOMI_API_TOKEN=secret-token-value\n`, ...files }
+  world(on, all, options)
+  // A folder's entries, from the files under it.
+  on('fs.list', async (_$, e) => {
+    const dir = String(e.path).replace(/^\/work\/?/, '').replace(/\/$/, '')
+    const entries = new Map<string, 'file' | 'dir'>()
+    for (const f of Object.keys(all)) {
+      if (!f.startsWith(`${dir}/`)) continue
+      const [head, ...rest] = f.slice(dir.length + 1).split('/')
+      entries.set(head!, rest.length > 0 ? 'dir' : 'file')
+    }
+    return { value: [...entries].map(([name, kind]) => ({ name, kind })) } as never
+  })
   scriptedShell(on, { [PUSH]: "SUCCESS: Pushed component 'Orders Sync' — now version 4", [TEST_RUN]: 'Execution completed: status=ERROR, executionId=execution-aaaa1111' })
   const asked: string[] = []
   on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
@@ -2608,7 +2620,9 @@ test('auto: a prompt with tips opens the Prompt tab; it shows the tips, its butt
   expect(filled[0]).toContain('By "it" I mean the process Orders Sync')
   expect(await tab.find({ text: /In the prompt box: fill in any \[placeholder\], then press Enter\./ })).toBeDefined()
   await tab.press({ key: 'prompt-dismiss' })
-  expect(closed).toEqual(['boomi-dashboard-prompt'])
+  // The dashboard pane made way for the tab, and is back once it's dismissed.
+  expect(closed).toEqual(['boomi-dashboard', 'boomi-dashboard-prompt'])
+  expect(opens[opens.length - 1]!.id).toBe('boomi-dashboard')
   await tab.unmount()
   // Wide, the two cards sit side by side; narrow, one above the other. Both draw.
   for (const columns of [40, 140]) {
@@ -2622,7 +2636,7 @@ test('a prompt with nothing to add closes the Prompt tab', async ($, on) => {
   const { closed, typed } = await promptWorld($, on)
   await typed(VAGUE)
   await typed('Deploy Orders Sync to dev')
-  expect(closed).toEqual(['boomi-dashboard-prompt'])
+  expect(closed).toEqual(['boomi-dashboard', 'boomi-dashboard-prompt'])
 })
 
 test('manual: the Prompt tab opens only when asked, from /bc-dashboard prompt or the pane’s button', { options: { promptView: 'manual' } }, async ($, on) => {
@@ -2677,4 +2691,90 @@ test('after /clear the dashboard sets the new session up again: it sees the fold
   await $.tool.call({ tool: 'Bash', command: PUSH })
   await $.command.run(dashboard('text'))
   expect(saved().length).toBeGreaterThanOrEqual(3)
+})
+
+// --- Holding a prompt, the nudge, and regenerating ---
+
+const BAND_TARGET = { component: 'AbovePrompt', props: BAND } as const
+
+test('confirm: with the Prompt tab shown, a flagged prompt is held until it is sent from there', { options: { promptCheck: 'confirm' } }, async ($, on) => {
+  const { asked, sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
+  const result = await typed(VAGUE)
+  expect(result).toEqual({ drop: "Held by the Boomi Dashboard: Claude hasn't seen it yet. Send it, or the upgrade, from Boomi Dashboard Prompt tips." })
+  expect(asked).toEqual([])
+  expect(sent).toEqual([])
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  expect(await tab.find({ text: /⏸ Held: Claude hasn't seen this prompt yet/ })).toBeDefined()
+  await tab.press({ key: 'prompt-send-upgrade' })
+  expect(sent).toHaveLength(1)
+  expect(sent[0]).toContain('By "it" I mean the process Orders Sync')
+  // The upgrade it sent isn't checked again, and nothing is held any more.
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('Your last prompt: deploy it and test it, still failing')
+})
+
+test('confirm: a held prompt can go back to the prompt box, or be discarded; the banner can send it as typed', { options: { promptCheck: 'confirm' } }, async ($, on) => {
+  const { filled, sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
+  await typed(VAGUE)
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  await tab.press({ key: 'prompt-edit' })
+  expect(filled).toEqual([VAGUE])
+  expect(await tab.find({ text: /Your prompt is back in the prompt box to edit\. Nothing was sent\./ })).toBeDefined()
+  await typed('deploy it')
+  await tab.press({ key: 'prompt-discard' })
+  expect(sent).toEqual([])
+  await tab.unmount()
+  await typed(VAGUE)
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...BAND_TARGET })
+  expect(await band.find({ text: /Boomi Dashboard suggests a clearer prompt/ })).toBeDefined()
+  await band.press({ key: 'nudge-send-typed' })
+  expect(sent).toEqual([VAGUE])
+})
+
+test('suggest: the banner nudges with the suggestion, Use it fills the prompt box, and ✕ puts the nudge away', async ($, on) => {
+  const { filled, typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...BAND_TARGET })
+  expect(await band.find({ text: /Boomi Dashboard suggests a clearer prompt/ })).toBeDefined()
+  await band.press({ key: 'nudge-use' })
+  expect(filled[0]).toContain('By "it" I mean the process Orders Sync')
+  expect(await band.find({ text: /suggests a clearer prompt/ })).toBeUndefined()
+  await clock.advance(1_000)
+  await typed('deploy it')
+  expect(await band.find({ text: /suggests a clearer prompt/ })).toBeDefined()
+  await band.press({ key: 'nudge-hide' })
+  expect(await band.find({ text: /suggests a clearer prompt/ })).toBeUndefined()
+})
+
+test('the Prompt tab takes the dashboard pane’s place, and leaving it brings the dashboard back', async ($, on) => {
+  const { closed, typed } = await promptWorld($, on)
+  await $.command.run(dashboard(''))
+  await typed(VAGUE)
+  expect(closed).toEqual(['boomi-dashboard'])
+  expect(tabOpens()).toEqual(['Boomi Dashboard Prompt tips · 4'])
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  await tab.press({ key: 'prompt-back' })
+  expect(closed).toEqual(['boomi-dashboard', 'boomi-dashboard-prompt'])
+  expect(opens[opens.length - 1]!.id).toBe('boomi-dashboard')
+})
+
+test('Regenerate reads the folder’s components and the person’s note, and every try is kept', async ($, on) => {
+  const asks: string[] = []
+  on('model.complete', async (_$, e) => {
+    asks.push(String(e.prompt))
+    return { value: { isAnswered: true, text: `Try ${asks.length}: build the QTC process.`, usage: { input_tokens: 100, output_tokens: 30, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } as never
+  })
+  const SF = '<bns:Component xmlns:bns="http://api.platform.boomi.com/" componentId="c-1" name="Salesforce Connection" type="connector-settings" folderFullPath="QTC/Connections"></bns:Component>'
+  const { typed } = await promptWorld($, on, () => undefined, { 'active-development': '', 'active-development/connections/Salesforce.xml': SF })
+  await typed('lets make a shell integration for QTC from salesforce to netsuite. build generic connections')
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  await tab.press({ key: 'prompt-rewrite' })
+  expect(asks[0]).toContain('- Salesforce Connection (connector-settings), in QTC/Connections')
+  expect(await tab.find({ text: /reading 1 of this folder's components/ })).toBeDefined()
+  await tab.input({ key: 'prompt-note', text: 'split it into steps' })
+  expect(asks[1]).toContain("The person's note for this try:\nsplit it into steps")
+  expect(asks[1]).toContain('The try before (write a different one):\nTry 1: build the QTC process.')
+  expect(await tab.find({ text: /try 3 of 3/ })).toBeDefined()
+  await tab.press({ key: 'prompt-try-back' })
+  expect(await tab.find({ text: /try 2 of 3/ })).toBeDefined()
+  expect(await tab.find({ text: /Try 1: build the QTC process\./ })).toBeDefined()
 })

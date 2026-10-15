@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import { NO_COUNTS, checkPrompt, countsAfter, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from '../hooks/prompt-check'
 import type { PromptFacts } from '../hooks/prompt-check'
+import { contextLines, folderComponentOf, keywords, relevantComponents, relevantSections, sectionsOf } from '../hooks/retrieve'
 
 const ID = '1a2b3c4d-1111-2222-3333-444455556666'
 const ENV = '9f8e7d6c-1111-2222-3333-444455556666'
@@ -68,11 +69,15 @@ test('the upgrade fills in what the session knows, leaves a [placeholder] for th
   expect(upgrade).toBe(
     'deploy it and test it, still failing. By "it" I mean the process Orders Sync (1a2b3c4d-1111-2222-3333-444455556666). ' +
       `Deploy to environment ${ENV}. ` +
-      'The last failure was the test of Orders Sync (execution execution-aaaa1111): Execution completed: status=ERROR. Read its process log and tell me the cause before you change anything. ' +
-      'Test it with [test data], and a pass means [the expected result].',
+      'The last failure was the test of Orders Sync (execution execution-aaaa1111): Execution completed: status=ERROR. Read its process log and tell me the cause before you change anything.\n\n' +
+      'Details:\n- Test data: [what to test with]; a pass means [the expected result]',
   )
   const bare = upgradePrompt('deploy it', NONE, checkPrompt('deploy it', NONE))
-  expect(bare).toBe('deploy it. By "it" I mean [the process or component]. Deploy to the [environment] environment.')
+  expect(bare).toBe('deploy it.\n\nDetails:\n- The process or component: [which one]\n- Environment: [which environment]')
+  const build = 'build a process that syncs orders'
+  expect(upgradePrompt(build, NONE, checkPrompt(build, NONE))).toBe(
+    'build a process that syncs orders.\n\nDetails:\n- Source and target: [source system] to [target system]\n- What starts it: [a schedule or a listener]\n- Data format: [JSON, XML, CSV, flat file or EDI]',
+  )
   const secret = 'deploy it with password=hunter22'
   expect(upgradePrompt(secret, FACTS, checkPrompt(secret, FACTS))).not.toContain('hunter22')
 })
@@ -104,9 +109,40 @@ test('the status line and /bc-dashboard prompt say it with an icon and a label',
   expect(statusPart(state)).toBe('◐ 2 prompt tips: /bc-dashboard prompt')
   expect(statusPart({ ...state, tips: checkPrompt('password=hunter22 deploy Orders Sync to dev', FACTS) })).toBe('⚠ 1 prompt tip: /bc-dashboard prompt')
   expect(statusPart(null)).toBeUndefined()
+  expect(statusPart(state, true)).toBe('⏸ prompt held: Boomi Dashboard Prompt tips')
   const text = tipsText(state, countsAfter(NO_COUNTS, undefined, tips), 'suggest')
   expect(text).toContain('Your last prompt: deploy it')
   expect(text).toContain('  ◐ deploy: no environment named; the session points at 9f8e7d6c…')
   expect(text).toContain('/bc-dashboard prompt use puts it in the prompt box.')
   expect(tipsText(null, NO_COUNTS, 'off')).toContain('Prompts are not checked.')
+})
+
+test('retrieval: the folder’s components and Companion’s guidance that match the prompt, nothing that doesn’t', () => {
+  const sf = folderComponentOf('<bns:Component xmlns:bns="x" componentId="1" name="Salesforce Connection" type="connector-settings" folderFullPath="QTC/Connections">')
+  expect(sf).toEqual({ name: 'Salesforce Connection', type: 'connector-settings', folder: 'QTC/Connections' })
+  expect(folderComponentOf('<root/>')).toBeUndefined()
+  const all = [sf!, { name: 'NetSuite Connection', type: 'connector-settings' }, { name: 'Magic8Ball', type: 'process' }]
+  const prompt = 'lets make an integration for QTC from salesforce to netsuite with generic connections'
+  expect(keywords('Lets make the Connections for SALESFORCE')).toEqual(['connection', 'salesforce'])
+  expect(relevantComponents(all, prompt).map(c => c.name)).toEqual(['NetSuite Connection', 'Salesforce Connection'])
+  expect(relevantComponents(all, 'deploy the weather agent')).toEqual([])
+  const doc = '# Boomi thinking\nIntro.\n## Connections\nA connection holds the endpoint and credentials; build it once and reuse it.\n## Listeners\nA web service listener starts a process on a call.'
+  const sections = sectionsOf('BOOMI_THINKING.md', doc)
+  expect(sections.map(x => x.heading)).toEqual(['Boomi thinking', 'Connections', 'Listeners'])
+  expect(relevantSections(sections, prompt).map(x => x.heading)).toEqual(['Connections'])
+  const lines = contextLines([sf!], relevantSections(sections, prompt)).join('\n')
+  expect(lines).toContain('- Salesforce Connection (connector-settings), in QTC/Connections')
+  expect(lines).toContain('[BOOMI_THINKING.md: Connections]')
+  expect(contextLines([], [])).toEqual([])
+})
+
+test('a rewrite reads the extras: the folder, the guidance, the try before and the person’s note, masked', () => {
+  const request = rewriteRequest('deploy it', FACTS, checkPrompt('deploy it', FACTS), 'draft', {
+    context: ['', 'Components in this folder that may be meant:', '- Orders Sync (process)'],
+    previous: 'the first try',
+    note: 'shorter, and token=abcd1234',
+  })
+  expect(request).toContain('- Orders Sync (process)')
+  expect(request).toContain('The try before (write a different one):\nthe first try')
+  expect(request).toContain("The person's note for this try:\nshorter, and token=****")
 })

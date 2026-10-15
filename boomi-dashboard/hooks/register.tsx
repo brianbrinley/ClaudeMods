@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, PromptSubmitInput, Register } from 'claude-code'
 
-import type { Activity, CompanionPlugin, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, PromptCounts, PromptTips, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
+import type { Activity, CompanionPlugin, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, PromptCounts, PromptTips, PromptTry, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -125,6 +125,8 @@ import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from '.
 import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
+import { contextLines, folderComponentOf, relevantComponents, relevantSections, sectionsOf } from './retrieve'
+import type { FolderComponent, Section } from './retrieve'
 import { NO_COUNTS, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import type { Credentials } from './platform'
@@ -232,6 +234,16 @@ const promptBusy = atom({ plugin: 'boomi-dashboard', key: 'promptBusy' } as cons
 
 /** What the Prompt tab's last button did, under its buttons; cleared by the next prompt. */
 const promptNote = atom({ plugin: 'boomi-dashboard', key: 'promptNote' } as const, '')
+
+/**
+ * A prompt held in confirm mode, as typed, until the person sends it, the
+ * upgrade, or neither from the Prompt tab or the banner. Claude hasn't seen
+ * it. Only this session's state holds it, and only until then.
+ */
+const promptHeld = atom({ plugin: 'boomi-dashboard', key: 'promptHeld' } as const, null as string | null)
+
+/** The tips (by their time) whose nudge the person closed in the banner. */
+const promptNudgeHidden = atom({ plugin: 'boomi-dashboard', key: 'promptNudgeHidden' } as const, 0)
 
 type Settings = {
   envFile: string
@@ -427,7 +439,7 @@ const refreshStatus = async ($: Engine, settings: Settings) => {
   const usage: Usage = { ...read0, companion: await companionBudget($, settings, read0) }
   usage.isPaused = await notePause($, settings, usage)
   const line = statusLine(await read($, dashboard), now, settings.windowMs, usage, (await read($, recap)) ?? undefined)
-  const tips = settings.promptCheck === 'off' ? undefined : statusPart(await read($, promptTips))
+  const tips = settings.promptCheck === 'off' ? undefined : statusPart(await read($, promptTips), (await read($, promptHeld)) !== null)
   $.ui.status(tips ? `${line} · ${tips}` : line)
   await warnBudget($, settings, usage.usd)
   await warnLimits($, settings, usage)
@@ -1886,7 +1898,11 @@ const EDIT_FIRST = 'Edit it first'
 
 /** Typed by the person: the prompt box, Remote Control, an SDK host, or a plugin sending the person's own words. */
 const isTyped = (origin: PromptSubmitInput['origin']) =>
-  origin.kind === 'composer' || origin.kind === 'bridge' || origin.kind === 'sdk' || (origin.kind === 'plugin' && (origin as { asUser?: boolean }).asUser === true)
+  origin.kind === 'composer' ||
+  origin.kind === 'bridge' ||
+  origin.kind === 'sdk' ||
+  // A prompt the dashboard sends from the Prompt tab is never checked again, so it can't come back to the tab.
+  (origin.kind === 'plugin' && (origin as { asUser?: boolean }).asUser === true && (origin as { name?: string }).name !== 'boomi-dashboard')
 
 /** The environment Companion points at: the session's own variable, else its .env. Only that key is read. */
 const environmentOf = async ($: Engine, settings: Settings): Promise<string | undefined> => {
@@ -1927,20 +1943,24 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   if (/^\s*>/.test(typed)) return { text: typed.replace(/^\s*>\s?/, '') }
   const hasSecret = findSecrets(typed).length > 0
   if (!hasSecret && !isCheckable(typed)) return undefined
+  // A new prompt takes the place of one still held.
+  await update($, promptHeld, () => null)
   const facts = await promptFacts($, settings)
   const tips = checkPrompt(typed, facts, settings.promptSkip)
   const before = await read($, promptTips)
   await update($, promptCounts, c => countsAfter(c, before?.tips, tips))
   const upgrade = tips.length > 0 ? upgradePrompt(typed, facts, tips) : ''
   const at = await $.clock.now()
-  await update($, promptTips, (): PromptTips | null => (tips.length > 0 ? { at, masked: maskPrompt(typed).trim().slice(0, 4000), tips, upgrade } : null))
+  await update($, promptTips, (): PromptTips | null =>
+    tips.length > 0 ? { at, masked: maskPrompt(typed).trim().slice(0, 4000), tips, upgrade, tries: [{ text: upgrade, by: 'the checks' }], shown: 0 } : null,
+  )
   await update($, promptNote, () => '')
   await refreshStatus($, settings).catch(() => undefined)
   if (tips.length === 0) {
-    await closePromptTab($)
+    await closePromptTab($, settings)
     return undefined
   }
-  if (settings.promptView === 'auto') await openPromptTab($, tips.length)
+  if (settings.promptView === 'auto') await showPromptTab($, tips.length)
 
   // A secret asks in any mode: once sent, it's in the transcript. No answer sends it masked.
   if (hasSecret) {
@@ -1953,6 +1973,13 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
     return { text: maskPrompt(typed) }
   }
   if (settings.promptCheck !== 'confirm') return undefined
+  // Confirm holds the prompt in the Prompt tab, where the person sends it, the upgrade, or neither. Claude doesn't see it until then.
+  if (settings.promptView !== 'off' && (await showPromptTab($, tips.length))) {
+    await update($, promptHeld, () => typed)
+    await refreshStatus($, settings).catch(() => undefined)
+    return { drop: 'Held by the Boomi Dashboard: Claude hasn\'t seen it yet. Send it, or the upgrade, from Boomi Dashboard Prompt tips.' }
+  }
+  // Where the tab can't show (the web, a narrow window), a question instead.
   const said = tips.map(t => t.text).join('; ')
   const answer = await $.ui
     .ask(`This prompt leaves out: ${said}. Send it as typed?`, { header: 'Prompt', options: [SEND_AS_TYPED, USE_UPGRADE, EDIT_FIRST] })
@@ -1969,18 +1996,108 @@ const promptTitle = (count: number) => `Boomi Dashboard Prompt tips · ${count}`
 const openPromptTab = async ($: Engine, count: number) =>
   (await $.ui.open({ id: PROMPT_PANE, title: promptTitle(count) }).catch(() => undefined))?.isPlaced === true
 
-/** Closes the Prompt tab if it's open: a prompt with nothing to add, or Dismiss. */
-const closePromptTab = async ($: Engine) => {
+/** True while the dashboard pane is closed to show the Prompt tab, so leaving the tab brings the dashboard back. */
+let isDashboardSwappedOut = false
+
+/**
+ * Shows the Prompt tab. Claude Code has no call that brings a tab forward,
+ * and a pane opened while another is shown can wait behind it, so a shown
+ * dashboard pane closes first and comes back when the tab is left.
+ */
+const showPromptTab = async ($: Engine, count: number) => {
   const open = await $.ui.panes().catch(() => [])
-  if (open.some(pane => pane.id === PROMPT_PANE)) await $.ui.close({ id: PROMPT_PANE }).catch(() => undefined)
+  if (open.some(pane => pane.id === PANE && pane.isShown)) {
+    isDashboardSwappedOut = true
+    await $.ui.close({ id: PANE }).catch(() => undefined)
+  }
+  return openPromptTab($, count)
 }
 
-/** The Prompt tab's Upgrade with a model: the same rewrite as /bc-dashboard prompt upgrade, its first line kept as the note. */
-const rewriteFromTab = async ($: Engine, settings: Settings) => {
+/** Closes the Prompt tab if it's open (a prompt with nothing to add, Dismiss, ◀ Dashboard), and brings back the dashboard it took the place of. */
+const closePromptTab = async ($: Engine, settings: Settings) => {
+  const open = await $.ui.panes().catch(() => [])
+  if (open.some(pane => pane.id === PROMPT_PANE)) await $.ui.close({ id: PROMPT_PANE }).catch(() => undefined)
+  if (isDashboardSwappedOut) {
+    isDashboardSwappedOut = false
+    await openPane($, settings).catch(() => undefined)
+  }
+}
+
+/** Sends a held prompt (or its upgrade) as the person's own words; the dashboard never checks its own sends. */
+const sendHeld = async ($: Engine, settings: Settings, which: 'upgrade' | 'typed') => {
+  const held = await read($, promptHeld)
+  const tips = await read($, promptTips)
+  if (held === null || !tips) return
+  const text = which === 'upgrade' ? tips.upgrade : held
+  await update($, promptHeld, () => null)
+  await update($, promptNote, () => (which === 'upgrade' ? 'Sent the upgrade to Claude.' : 'Sent your prompt to Claude as typed.'))
+  await refreshStatus($, settings).catch(() => undefined)
+  await closePromptTab($, settings)
+  await $.prompt.submit({ text, asUser: true }).catch(() => undefined)
+}
+
+/** Puts a held prompt back in the prompt box to edit; it stays unsent. */
+const editHeld = async ($: Engine, settings: Settings) => {
+  const held = await read($, promptHeld)
+  if (held === null) return
+  if (!(await refill($, held))) {
+    await update($, promptNote, () => "The prompt box couldn't take it here: send it from here instead.")
+    return
+  }
+  await update($, promptHeld, () => null)
+  await update($, promptNote, () => 'Your prompt is back in the prompt box to edit. Nothing was sent.')
+  await refreshStatus($, settings).catch(() => undefined)
+}
+
+/** Drops a held prompt: nothing is sent. */
+const discardHeld = async ($: Engine, settings: Settings) => {
+  await update($, promptHeld, () => null)
+  await update($, promptNote, () => 'Discarded: nothing was sent.')
+  await refreshStatus($, settings).catch(() => undefined)
+}
+
+/** The folder's components and Companion's reference docs, read once a minute at most. */
+let retrieved: { at: number; components: FolderComponent[]; sections: Section[] } | undefined
+
+/** Every component XML under the components folder (up to 200 files, three folders deep), and Companion's reference docs. */
+const gatherContext = async ($: Engine, settings: Settings) => {
+  const now = await $.clock.now()
+  if (retrieved && now - retrieved.at < 60_000) return retrieved
+  const cwd = await $.session.cwd()
+  const root = settings.componentsDir.startsWith('/') ? settings.componentsDir : `${cwd}/${settings.componentsDir}`
+  const files: string[] = []
+  const walk = async (dir: string, depth: number) => {
+    if (depth > 3 || files.length >= 200) return
+    for (const entry of await $.fs.list(dir).catch(() => [])) {
+      if (entry.kind === 'dir') await walk(`${dir}/${entry.name}`, depth + 1)
+      else if (entry.kind === 'file' && entry.name.endsWith('.xml') && files.length < 200) files.push(`${dir}/${entry.name}`)
+    }
+  }
+  await walk(root, 0)
+  const components: FolderComponent[] = []
+  for (const file of files) {
+    const found = folderComponentOf(String(await $.fs.read(file).catch(() => '')).slice(0, 4000))
+    if (found && !components.some(c => c.name === found.name && c.type === found.type)) components.push(found)
+  }
+  const sections: Section[] = []
+  const scripts = await findScripts($).catch(() => undefined)
+  if (scripts) {
+    const refs = scripts.replace(/\/scripts\/?$/, '/references')
+    for (const entry of (await $.fs.list(refs).catch(() => [])).filter(e => e.kind === 'file' && e.name.endsWith('.md')).slice(0, 30)) {
+      sections.push(...sectionsOf(entry.name, String(await $.fs.read(`${refs}/${entry.name}`).catch(() => ''))))
+    }
+  }
+  retrieved = { at: now, components, sections }
+  return retrieved
+}
+
+/** The Prompt tab's Upgrade with a model and Regenerate: the same rewrite as /bc-dashboard prompt upgrade, its first line kept as the note. */
+const rewriteFromTab = async ($: Engine, settings: Settings, note?: string) => {
   if (await read($, promptBusy)) return
   await update($, promptBusy, () => true)
   try {
-    const said = await rewritePrompt($, settings)
+    const isHeld = (await read($, promptHeld)) !== null
+    const said = await rewritePrompt($, settings, note, !isHeld)
     await update($, promptNote, () => said.split('\n')[0] ?? '')
   } catch (error) {
     await update($, promptNote, () => `The rewrite didn't work: ${messageOf(error)}. Your prompt is safe.`)
@@ -1989,15 +2106,35 @@ const rewriteFromTab = async ($: Engine, settings: Settings) => {
   }
 }
 
-/** A model's rewrite of the last prompt's upgrade, on demand: it reads the masked prompt and the session's facts only. */
-const rewritePrompt = async ($: Engine, settings: Settings): Promise<string> => {
+/** Shows another try in the Prompt tab: the one before or after. */
+const showTry = async ($: Engine, step: number) =>
+  update($, promptTips, t => {
+    const tries = t?.tries ?? []
+    if (!t || tries.length < 2) return t
+    const shown = Math.min(tries.length - 1, Math.max(0, (t.shown ?? tries.length - 1) + step))
+    const pick = tries[shown]!
+    return { ...t, shown, upgrade: pick.text, rewrittenBy: pick.by === 'the checks' ? undefined : pick.by, tokens: pick.tokens }
+  })
+
+/**
+ * A model's rewrite of the last prompt's upgrade, on demand. It reads the
+ * masked prompt, the session's facts, the folder's components and the
+ * sections of Companion's reference docs that match the prompt, the person's
+ * note, and the try before; never Companion's .env. Each try is kept.
+ */
+const rewritePrompt = async ($: Engine, settings: Settings, note?: string, isFilling = true): Promise<string> => {
   const tips = await read($, promptTips)
   if (!tips) return 'Nothing to upgrade yet: no Boomi prompt this session has had tips.'
   const facts = await promptFacts($, settings)
+  const found = await gatherContext($, settings).catch(() => ({ components: [] as FolderComponent[], sections: [] as Section[] }))
+  const components = relevantComponents(found.components, tips.masked)
+  const sections = relevantSections(found.sections, tips.masked)
+  const tries = tips.tries ?? [{ text: tips.upgrade, by: 'the checks' }]
+  const previous = tries.length > 1 ? tips.upgrade : undefined
   const reply = await $.model.complete({
     model: settings.promptModel,
     system: REWRITE_SYSTEM,
-    prompt: rewriteRequest(tips.masked, facts, tips.tips, tips.upgrade),
+    prompt: rewriteRequest(tips.masked, facts, tips.tips, tries[0]!.text, { context: contextLines(components, sections), note: note?.trim() || undefined, previous }),
     maxTokens: 800,
     effort: 'low',
   })
@@ -2007,9 +2144,13 @@ const rewritePrompt = async ($: Engine, settings: Settings): Promise<string> => 
   const text = rewriteFrom(reply.text)
   if (!text) return `${settings.promptModel} gave back nothing. The upgrade from the checks is still there: /bc-dashboard prompt use.`
   const tokens = reply.usage.input_tokens + reply.usage.output_tokens
-  await update($, promptTips, t => (t ? { ...t, upgrade: text, rewrittenBy: settings.promptModel, tokens } : t))
-  const where = (await refill($, text)) ? " It's in the prompt box: fill in any [placeholder], then press Enter." : ''
-  return `Rewritten by ${settings.promptModel} (${tokens} tokens).${where}\n\n${text}`
+  const added: PromptTry = { text, by: settings.promptModel, tokens, ...(note?.trim() ? { note: note.trim() } : {}) }
+  await update($, promptTips, t => (t ? { ...t, upgrade: text, rewrittenBy: settings.promptModel, tokens, tries: [...(t.tries ?? tries), added], shown: (t.tries ?? tries).length } : t))
+  const read_ = [components.length > 0 ? `${components.length} of this folder's components` : '', sections.length > 0 ? `${sections.length} part${sections.length === 1 ? '' : 's'} of Companion's guidance` : '']
+    .filter(Boolean)
+    .join(' and ')
+  const where = isFilling && (await refill($, text)) ? " It's in the prompt box: fill in any [placeholder], then press Enter." : ''
+  return `Rewritten by ${settings.promptModel} (${tokens} tokens${read_ ? `, reading ${read_}` : ''}).${where}\n\n${text}`
 }
 
 /** /bc-dashboard prompt: the last prompt's tips; `use` puts the upgrade in the prompt box; `upgrade` has a model rewrite it. */
@@ -2019,8 +2160,8 @@ const promptCommand = async ($: Engine, settings: Settings, target: string): Pro
     if (!verb) {
       const tips = await read($, promptTips)
       const text = tipsText(tips, await read($, promptCounts), settings.promptCheck)
-      // The tab opens beside the answer, which comes first.
-      if (tips && settings.promptView !== 'off') void openPromptTab($, tips.tips.length)
+      // The tab opens beside the answer; it's quick, so the answer doesn't wait long.
+      if (tips && settings.promptView !== 'off') await showPromptTab($, tips.tips.length).catch(() => undefined)
       return text
     }
     if (verb === 'use') {
@@ -2030,8 +2171,8 @@ const promptCommand = async ($: Engine, settings: Settings, target: string): Pro
         ? 'The upgraded prompt is in the prompt box: fill in any [placeholder], then press Enter.'
         : `The prompt box couldn't take it here. The upgraded prompt:\n\n${tips.upgrade}`
     }
-    if (verb === 'upgrade') return await rewritePrompt($, settings)
-    return 'Usage: /bc-dashboard prompt shows your last Boomi prompt\'s tips; prompt use puts the upgrade in the prompt box; prompt upgrade has a model rewrite it.'
+    if (verb === 'upgrade') return await rewritePrompt($, settings, target.trim().slice('upgrade'.length).trim() || undefined)
+    return 'Usage: /bc-dashboard prompt shows your last Boomi prompt\'s tips; prompt use puts the upgrade in the prompt box; prompt upgrade [a note] has a model rewrite it, following the note.'
   } catch (error) {
     return `The dashboard couldn't do that: ${messageOf(error)}. Your prompt is safe.`
   }
@@ -2760,7 +2901,11 @@ export const register: Register = (on, options) => {
     const needs = attention(current, now, settings.windowMs)
     const paused = await read($, budgetPaused)
     const welcome = isNew && (await read($, isCompanionFolder)) ? welcomeLine(await read($, tip), (await read($, recap)) ?? undefined, now, tipsFor(await read($, companionPlugins))) : undefined
-    if (!latest && !welcome && needs.length === 0 && !paused) return next(e)
+    // A gentle nudge just above the prompt box: the dashboard suggests a clearer prompt, or holds one.
+    const tipsNow = settings.promptCheck === 'off' ? null : await read($, promptTips)
+    const held = await read($, promptHeld)
+    const nudge = tipsNow && (held !== null || tipsNow.at !== (await read($, promptNudgeHidden))) ? tipsNow : null
+    if (!latest && !welcome && needs.length === 0 && !paused && !nudge) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const count = components(current.activity).length
     const usage = await usageOf($)
@@ -2773,8 +2918,41 @@ export const register: Register = (on, options) => {
       .join(' │ ')
     const icon = (level: Level) => <Text color={STATUS[level].color}>{STATUS[level].icon}</Text>
     const first = latest ?? welcome
+    const nudgeRow = nudge ? (
+      <Box>
+        <Box flexShrink={1}>
+          <Text wrap="truncate-end">
+            <Text bold color="claude">
+              ◆ BC Dashboard{' '}
+            </Text>
+            {held !== null ? <Text color={STATUS.warning.color}>⏸ Held: </Text> : <Text>{icon(nudge.tips.some(t => t.level === 'serious') ? 'serious' : 'warning')} </Text>}
+            <Text>Boomi Dashboard suggests a clearer prompt</Text>
+            <Text dimColor>
+              {' '}
+              · {nudge.tips.length} tip{nudge.tips.length === 1 ? '' : 's'}
+              {held !== null ? " · Claude hasn't seen it yet" : ''}
+            </Text>
+          </Text>
+        </Box>
+        <Box flexShrink={0} columnGap={1} marginLeft={1}>
+          {held !== null ? <Button key="nudge-send-upgrade" label="Send the upgrade" onPress={() => sendHeld($, settings, 'upgrade')} /> : undefined}
+          {held !== null ? <Button key="nudge-send-typed" label="Send as typed" onPress={() => sendHeld($, settings, 'typed')} /> : undefined}
+          {held === null ? (
+            <Button key="nudge-use" label="Use it" onPress={async () => {
+              await refill($, nudge.upgrade)
+              await update($, promptNudgeHidden, () => nudge.at)
+            }} />
+          ) : undefined}
+          <Button key="nudge-see" label="See it" onPress={() => showPromptTab($, nudge.tips.length)} />
+          {held === null ? <Button key="nudge-hide" label="✕" onPress={() => update($, promptNudgeHidden, () => nudge.at)} /> : undefined}
+        </Box>
+      </Box>
+    ) : undefined
+    if (!latest && !welcome && needs.length === 0 && !paused) return nudgeRow!
 
     return (
+      <Box flexDirection="column">
+      {nudgeRow}
       <Box>
         <Box flexShrink={1}>
           <Text wrap="truncate-end">
@@ -2817,17 +2995,19 @@ export const register: Register = (on, options) => {
           <Button key="hide" label="Hide" onPress={() => update($, isBandHidden, () => true)} />
         </Box>
       </Box>
+      </Box>
     )
   })
 
-  // The Prompt tab: the last prompt's tips, its buttons, then the prompt and its upgrade side by side.
+  // The Prompt tab: whether the prompt is held, the tips, the prompt beside its upgrade, then the buttons right under them.
   on('ui.render', { component: 'Pane', requestId: PROMPT_PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const { Box, Button, Input, Text } = $.ui.resolve(e)
     const p = PALETTES[await themeOf($, settings)]
     const tips = await read($, promptTips)
     const counts = await read($, promptCounts)
     const busy = await read($, promptBusy)
     const said = await read($, promptNote)
+    const held = await read($, promptHeld)
     const width = Math.max(30, (e.viewport?.columns ?? 64) - 6)
     const isWide = width >= 90
     const t = (text: string, style: { color?: string; bold?: boolean; bg?: string } = {}) => (
@@ -2847,11 +3027,20 @@ export const register: Register = (on, options) => {
         {t(text)}
       </Box>
     )
+    const tries = tips?.tries ?? []
+    const shown = tips?.shown ?? Math.max(0, tries.length - 1)
     return (
       <Box flexDirection="column" backgroundColor={p.bg} paddingX={1} minHeight={e.viewport?.rows} width="100%">
         <Box justifyContent="space-between" backgroundColor={p.band ?? p.bg} paddingX={1}>
           {t('◆ BOOMI DASHBOARD PROMPT TIPS ◆', { color: p.bandText, bold: true, bg: p.band })}
           {t(`promptCheck: ${settings.promptCheck}`, { color: p.bandText, bg: p.band })}
+        </Box>
+        <Box justifyContent="flex-end">
+          <Button key="prompt-back" label="◀ Dashboard" onPress={async () => {
+            const wasSwapped = isDashboardSwappedOut
+            await closePromptTab($, settings)
+            if (!wasSwapped) await openPane($, settings)
+          }} />
         </Box>
         <Text color={p.rule} backgroundColor={p.bg} wrap="truncate-end">
           {decoRule(width)}
@@ -2860,24 +3049,14 @@ export const register: Register = (on, options) => {
           <Box flexDirection="column">
             {t(counts.checked > 0 ? 'Your last Boomi prompt had nothing to add.' : 'No Boomi prompt checked yet this session.', { color: p.muted })}
             <Box marginTop={1}>
-              <Button key="prompt-dismiss" label="Close" onPress={() => closePromptTab($)} />
+              <Button key="prompt-dismiss" label="Close" onPress={() => closePromptTab($, settings)} />
             </Box>
           </Box>
         ) : (
           <Box flexDirection="column">
-            <Box flexWrap="wrap" columnGap={1}>
-              <Button key="prompt-use" label="Use the upgrade" onPress={async () => {
-                const isFilled = await refill($, tips.upgrade)
-                await update($, promptNote, () => (isFilled ? 'In the prompt box: fill in any [placeholder], then press Enter.' : "The prompt box couldn't take it here: use Copy."))
-              }} />
-              <Button key="prompt-rewrite" label={busy ? '◐ Rewriting…' : 'Upgrade with a model'} onPress={() => void rewriteFromTab($, settings)} />
-              <Button key="prompt-copy" label="Copy" onPress={async () => {
-                const done = await $.ui.copy({ text: tips.upgrade, surface: e.surface }).catch(() => ({ isCopied: false as const }))
-                await update($, promptNote, () => (done.isCopied ? 'Copied the upgrade.' : "Couldn't copy here."))
-              }} />
-              <Button key="prompt-dismiss" label="Dismiss" onPress={() => closePromptTab($)} />
-            </Box>
-            {said ? t(said, { color: p.muted }) : undefined}
+            {held !== null
+              ? t("⏸ Held: Claude hasn't seen this prompt yet. Send it, or the upgrade, below.", { color: STATUS.warning.color, bold: true })
+              : t('The Boomi Dashboard suggests a clearer prompt. Your prompt went to Claude as typed; use the upgrade next time, or now.', { color: p.muted })}
             {heading('What it leaves out')}
             {tips.tips.map(tip => (
               <Text backgroundColor={p.bg}>
@@ -2891,6 +3070,40 @@ export const register: Register = (on, options) => {
               {card('YOUR PROMPT', tips.masked, false)}
               {card(tips.rewrittenBy ? `UPGRADED BY ${tips.rewrittenBy.toUpperCase()}` : 'UPGRADED', tips.upgrade, true)}
             </Box>
+            <Box flexWrap="wrap" columnGap={1}>
+              {held !== null ? (
+                <Box flexWrap="wrap" columnGap={1}>
+                  <Button key="prompt-send-upgrade" label="Send the upgrade" onPress={() => sendHeld($, settings, 'upgrade')} />
+                  <Button key="prompt-send-typed" label="Send as typed" onPress={() => sendHeld($, settings, 'typed')} />
+                  <Button key="prompt-edit" label="Edit in the prompt box" onPress={() => editHeld($, settings)} />
+                  <Button key="prompt-discard" label="Discard" onPress={() => discardHeld($, settings)} />
+                </Box>
+              ) : (
+                <Box flexWrap="wrap" columnGap={1}>
+                  <Button key="prompt-use" label="Use the upgrade" onPress={async () => {
+                    const isFilled = await refill($, tips.upgrade)
+                    await update($, promptNote, () => (isFilled ? 'In the prompt box: fill in any [placeholder], then press Enter.' : "The prompt box couldn't take it here: use Copy."))
+                  }} />
+                  <Button key="prompt-copy" label="Copy" onPress={async () => {
+                    const done = await $.ui.copy({ text: tips.upgrade, surface: e.surface }).catch(() => ({ isCopied: false as const }))
+                    await update($, promptNote, () => (done.isCopied ? 'Copied the upgrade.' : "Couldn't copy here."))
+                  }} />
+                  <Button key="prompt-dismiss" label="Dismiss" onPress={() => closePromptTab($, settings)} />
+                </Box>
+              )}
+            </Box>
+            {said ? t(said, { color: p.muted }) : undefined}
+            <Box flexWrap="wrap" columnGap={1} marginTop={1}>
+              <Button key="prompt-rewrite" label={busy ? '◐ Rewriting…' : tries.length > 1 ? 'Regenerate' : 'Upgrade with a model'} onPress={() => void rewriteFromTab($, settings)} />
+              {tries.length > 1 ? (
+                <Box columnGap={1}>
+                  <Button key="prompt-try-back" label="◀" onPress={() => showTry($, -1)} />
+                  {t(`try ${shown + 1} of ${tries.length}`, { color: p.muted })}
+                  <Button key="prompt-try-next" label="▶" onPress={() => showTry($, 1)} />
+                </Box>
+              ) : undefined}
+            </Box>
+            <Input key="prompt-note" label="Note for the rewrite: " placeholder="shorter, ask for a listener, split into steps…" submitLabel="Regenerate" onSubmit={value => void rewriteFromTab($, settings, value)} />
             {t(`This session: ${countsLine(counts)}`, { color: p.muted })}
           </Box>
         )}
@@ -3032,7 +3245,7 @@ export const register: Register = (on, options) => {
               {icon(lastTips.tips.some(tip => tip.level === 'serious') ? 'serious' : 'warning')}
               {t(` ${lastTips.tips.length} prompt tip${lastTips.tips.length === 1 ? '' : 's'} for your last prompt  `)}
             </Text>
-            <Button key="prompt-open" label="Prompt tab" onPress={() => openPromptTab($, lastTips.tips.length)} />
+            <Button key="prompt-open" label="Prompt tips" onPress={() => showPromptTab($, lastTips.tips.length)} />
           </Box>
         ) : undefined}
 

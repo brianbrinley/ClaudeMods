@@ -136,46 +136,48 @@ const listed = (parts: readonly string[]) => (parts.length <= 1 ? parts.join('')
 const sentence = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
 
 /**
- * The prompt with what its tips found filled in: the session's facts where it
- * knows them, a [placeholder] where it doesn't. Never an invented name or ID.
- * The prompt itself is masked.
+ * The prompt with what its tips found filled in: the session's facts as
+ * sentences where it knows them, and a Details list of [placeholders] for the
+ * rest. Never an invented name or ID. The prompt itself is masked.
  */
 export const upgradePrompt = (text: string, facts: PromptFacts, tips: readonly PromptTip[]): string => {
   const c = facts.component
   const f = facts.failed
   const parts = [sentence(maskPrompt(text).trim().replace(/\s+/g, ' '))]
+  const details: string[] = []
   for (const tip of tips) {
     switch (tip.code) {
       case 'subject':
-        parts.push(c ? `By "it" I mean the ${typeName(c.type)} ${c.name}${c.id ? ` (${c.id})` : ''}.` : 'By "it" I mean [the process or component].')
+        if (c) parts.push(`By "it" I mean the ${typeName(c.type)} ${c.name}${c.id ? ` (${c.id})` : ''}.`)
+        else details.push('The process or component: [which one]')
         break
       case 'environment':
-        parts.push(facts.environmentId ? `Deploy to environment ${facts.environmentId}.` : 'Deploy to the [environment] environment.')
+        if (facts.environmentId) parts.push(`Deploy to environment ${facts.environmentId}.`)
+        else details.push('Environment: [which environment]')
         break
       case 'error':
-        parts.push(
-          f
-            ? `The last failure was ${f.name}${f.executionId ? ` (execution ${f.executionId})` : ''}: ${maskPrompt(f.detail).slice(0, 160)}. Read its process log and tell me the cause before you change anything.`
-            : 'The error is [the error message or execution ID]. Read the process log and tell me the cause before you change anything.',
-        )
+        if (f) {
+          parts.push(
+            `The last failure was ${f.name}${f.executionId ? ` (execution ${f.executionId})` : ''}: ${maskPrompt(f.detail).slice(0, 160)}. Read its process log and tell me the cause before you change anything.`,
+          )
+        } else {
+          parts.push('Read the process log and tell me the cause before you change anything.')
+          details.push('The error: [the error message or execution ID]')
+        }
         break
       case 'test':
-        parts.push('Test it with [test data], and a pass means [the expected result].')
+        details.push('Test data: [what to test with]; a pass means [the expected result]')
         break
       case 'production':
         parts.push('Ask me before you change or run anything in production.')
         break
-      case 'build': {
-        const asks = [
-          ENDPOINTS.test(text) ? '' : 'It reads from [source system] and writes to [target system].',
-          TRIGGER.test(text) ? '' : 'It starts on [a schedule or a listener].',
-          FORMAT.test(text) ? '' : 'The data is [JSON, XML, CSV, flat file or EDI].',
-        ]
-        parts.push(...asks.filter(Boolean))
+      case 'build':
+        if (!ENDPOINTS.test(text)) details.push('Source and target: [source system] to [target system]')
+        if (!TRIGGER.test(text)) details.push('What starts it: [a schedule or a listener]')
+        if (!FORMAT.test(text)) details.push('Data format: [JSON, XML, CSV, flat file or EDI]')
         break
-      }
       case 'map':
-        parts.push('Map [the source profile] to [the target profile].')
+        details.push('Map: [the source profile] to [the target profile]')
         break
       case 'steps':
         parts.push('Do one step at a time, and stop after each to show me the result.')
@@ -185,21 +187,26 @@ export const upgradePrompt = (text: string, facts: PromptFacts, tips: readonly P
         break
     }
   }
-  return parts.join(' ')
+  const said = parts.join(' ')
+  return details.length > 0 ? `${said}\n\nDetails:\n${details.map(d => `- ${d}`).join('\n')}` : said
 }
 
 // --- A model's rewrite, on demand -------------------------------------------------
 
 export const REWRITE_SYSTEM = [
   "You rewrite a person's prompt to Claude Code for Boomi integration work done with Boomi Companion.",
-  'Keep exactly what they meant and asked for. Add only what the notes and facts below give.',
-  'Never invent component names, IDs, environments, systems, fields, data or numbers. Where something is unknown, leave a [placeholder] in square brackets.',
+  'Keep exactly what they meant and asked for. Add only what the notes, facts, components and guidance below give.',
+  'Never invent component names, IDs, environments, systems, fields, data or numbers. Use a listed component only where the prompt clearly means it. Where something is unknown, leave a [placeholder] in square brackets.',
+  "When the person adds a note for this try, follow it. When an earlier try is given, write a different one that follows the note.",
   'Write one request in plain language and the first person, as the person would type it. Ask Claude to stop and show results between big steps.',
   'Reply with the rewritten prompt only: no preamble, no quotes, no list of changes.',
 ].join('\n')
 
-/** What the model reads: the masked prompt, what it leaves out, the session's facts and the cheap upgrade. */
-export const rewriteRequest = (masked: string, facts: PromptFacts, tips: readonly PromptTip[], draft: string): string => {
+/** What else a rewrite reads: the folder's components and Companion's guidance (retrieve.ts), the person's note, the try before. */
+export type RewriteExtras = { context?: readonly string[]; note?: string; previous?: string }
+
+/** What the model reads: the masked prompt, what it leaves out, the session's facts, the cheap upgrade, and any extras. */
+export const rewriteRequest = (masked: string, facts: PromptFacts, tips: readonly PromptTip[], draft: string, extras: RewriteExtras = {}): string => {
   const known = [
     facts.component ? `- Component worked on last: the ${typeName(facts.component.type)} ${facts.component.name}${facts.component.id ? ` (${facts.component.id})` : ''}` : '',
     facts.environmentId ? `- Environment the session points at: ${facts.environmentId}` : '',
@@ -217,8 +224,12 @@ export const rewriteRequest = (masked: string, facts: PromptFacts, tips: readonl
     'Facts from this session:',
     ...(known.length > 0 ? known : ['- none']),
     '',
+    ...(extras.context ?? []),
+    '',
     'A first draft from simple checks:',
     draft,
+    ...(extras.previous ? ['', 'The try before (write a different one):', maskPrompt(extras.previous)] : []),
+    ...(extras.note ? ['', "The person's note for this try:", maskPrompt(extras.note)] : []),
   ].join('\n')
 }
 
@@ -283,9 +294,10 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 export const countsLine = (counts: PromptCounts): string =>
   [plural(counts.checked, 'prompt') + ' checked', `${counts.tipped} with tips`, plural(counts.followed, 'tip') + ' followed'].join(' · ')
 
-/** The status line's part: "◐ 3 prompt tips". Serious when one is (a secret, production). */
-export const statusPart = (tips: PromptTips | null): string | undefined => {
+/** The status line's part: "◐ 3 prompt tips", or that a prompt is held. Serious when one is (a secret, production). */
+export const statusPart = (tips: PromptTips | null, isHeld = false): string | undefined => {
   if (!tips || tips.tips.length === 0) return undefined
+  if (isHeld) return '⏸ prompt held: Boomi Dashboard Prompt tips'
   const level = tips.tips.some(t => t.level === 'serious') ? 'serious' : 'warning'
   return `${STATUS[level].icon} ${plural(tips.tips.length, 'prompt tip')}: /bc-dashboard prompt`
 }

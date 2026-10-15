@@ -2,6 +2,14 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.43.0
+
+- **Confirm holds the prompt.** With `promptCheck` at `confirm`, a flagged prompt is held: Claude doesn't see it until you choose **Send the upgrade**, **Send as typed**, **Edit in the prompt box** or **Discard**, in the Prompt tab or the banner. The status line says `⏸ prompt held`. A sent prompt is never checked again. Where the tab can't show, the question asks as before.
+- **A gentle nudge above the prompt box.** The banner says `◐ Boomi Dashboard suggests a clearer prompt · 4 tips`, with **Use it**, **See it** and **✕**, until your next prompt.
+- **The Prompt tab comes to the front.** Claude Code can't bring a tab forward, so after **Dismiss** the **Prompt tips** button opened the tab behind the dashboard. The dashboard pane now steps aside for the tab and comes back with **◀ Dashboard**, **Dismiss**, or a prompt with nothing to add.
+- **The buttons sit under the upgrade,** where your eye ends up, and what the upgrade doesn't know is a **Details** list of `[placeholders]` instead of sentences tacked on the end.
+- **Regenerate, with a note.** A rewrite now reads this folder's components whose names match the prompt and the sections of Companion's reference docs that match it, besides the prompt and the session's facts. Type a note (`shorter`, `ask for a listener`) to steer the next try; every try is kept, and **◀** **▶** step through them. `/bc-dashboard prompt upgrade <note>` does the same.
+
 ## 0.42.1
 
 - **After `/clear`, the dashboard sets the new session up.** A `/clear` goes on under a new session ID without the start the dashboard set itself up in, so the new session didn't bring back the folder's earlier steps or know it was a Companion folder. Three things went wrong: prompt tips skipped every prompt, `report html` stopped offering every session, and the first save wrote over the folder's saved steps. The dashboard now sets up again the first time it sees a new session ID, before anything is saved. Steps written over before this fix aren't recoverable; past sessions in Claude Code's transcripts still are.
