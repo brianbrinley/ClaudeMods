@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.53.1
+
+- **No pixel-art logo where a terminal can't draw pictures.** The navy-and-coral block that stood in for Boomi's logo in Apple Terminal, iTerm2 and the VS Code terminal is gone: there the banner is just the coral `BC Dashboard` label. In kitty and Ghostty it's still the Boomi logo itself. Takes effect in the next session.
+
 ## 0.53.0
 
 - **Boomi's logo in the banner.** The default banner icon is now two rows tall at the left of the banner. In kitty and Ghostty it's the Boomi logo itself, a picture. Elsewhere (Apple Terminal, iTerm2, the VS Code terminal), where a terminal can't draw one, it's a small badge in Boomi's colors: a navy disc with a coral ring, in half-block characters. It replaces 0.52.0's `b•`, and doesn't animate. The flamingo stays in the pane, and `/bc-dashboard config bandIcon flamingo` brings it back to the banner. Takes effect in the next session.

@@ -124,7 +124,7 @@ import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, groupWithV
 import type { Group, PastSpend, Value } from './config'
 import { blockedDetail, companionChanges, denyMessage, enforcementNote, platformWrites, spentBudgets, spentText, wrapperScripts } from './budget-gate'
 import type { Enforce } from './budget-gate'
-import { BOOMI_MARK_PNG, drawsPictures, markCells } from './boomi-mark'
+import { BOOMI_MARK_PNG, drawsPictures } from './boomi-mark'
 import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
 import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
@@ -3067,20 +3067,10 @@ export const register: Register = (on, options) => {
     const Picture = (isBoomi ? ($.ui.resolve(e) as { Image?: typeof Text }).Image : undefined) as ((props: { source: { png: string }; columns: number; rows: number; alt: string }) => unknown) | undefined
     const hasPictures = Picture !== undefined && drawsPictures({ TERM: await $.env.get('TERM').catch(() => undefined), TERM_PROGRAM: await $.env.get('TERM_PROGRAM').catch(() => undefined) })
     const withMark = (body: ReturnType<typeof h>) =>
-      isBoomi ? (
+      isBoomi && hasPictures ? (
         <Box>
           <Box flexShrink={0} flexDirection="column" marginRight={1}>
-            {hasPictures
-              ? Picture!({ source: { png: BOOMI_MARK_PNG }, columns: 4, rows: 2, alt: ' ' })
-              : markCells().map((row, y) => (
-                  <Box key={`mark-${y}`}>
-                    {row.map((cell, x) => (
-                      <Text key={`mark-${y}-${x}`} color={cell.color} backgroundColor={cell.backgroundColor}>
-                        {cell.char}
-                      </Text>
-                    ))}
-                  </Box>
-                ))}
+            {Picture!({ source: { png: BOOMI_MARK_PNG }, columns: 4, rows: 2, alt: ' ' })}
           </Box>
           <Box flexDirection="column" flexGrow={1} flexShrink={1} justifyContent="center">
             {body}
