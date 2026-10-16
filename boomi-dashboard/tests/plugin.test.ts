@@ -244,7 +244,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
     const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface, component: 'AbovePrompt', props: BAND })
-    expect(await band.find({ text: ' BC Dashboard ' })).toBeDefined()
+    expect(await band.find({ text: 'BC Dashboard ' })).toBeDefined()
     expect(await band.find({ text: /ended ERROR/ })).toBeDefined()
     expect(await band.find({ text: /1 needs attention/ })).toBeDefined()
     await band.press({ key: 'hide' })
@@ -2773,12 +2773,11 @@ test('confirm: a held prompt can go back to the prompt box, or be discarded; the
   expect(sent).toEqual([VAGUE])
 })
 
-test('the banner mark is Boomi\'s b and coral dot by default, and the flamingo or diamond when chosen', async ($, on) => {
+test('the banner mark is the Boomi logo by default, as pixel art where the terminal draws no pictures', async ($, on) => {
   await promptWorld($, on)
   await $.tool.call({ tool: 'Bash', command: PUSH })
   const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...BAND_TARGET })
-  expect(await band.find({ text: 'b' })).toBeDefined()
-  expect(await band.find({ text: '•' })).toBeDefined()
+  expect(await band.find({ text: '▀' })).toBeDefined()
   expect(await band.find({ text: '🦩' })).toBeUndefined()
 })
 
@@ -2787,7 +2786,7 @@ test('bandIcon flamingo keeps the flamingo in the banner', { options: { bandIcon
   await $.tool.call({ tool: 'Bash', command: PUSH })
   const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...BAND_TARGET })
   expect(await band.find({ text: '🦩' })).toBeDefined()
-  expect(await band.find({ text: '•' })).toBeUndefined()
+  expect(await band.find({ text: '▀' })).toBeUndefined()
 })
 
 test('suggest: the banner nudges with the suggestion, Use it fills the prompt box, and ✕ puts the nudge away', { options: { promptCheck: 'suggest' } }, async ($, on) => {

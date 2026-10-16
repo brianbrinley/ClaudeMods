@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.52.0",
+  "version": "0.53.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -36,7 +36,7 @@
     "bandIcon": {
       "type": "string",
       "title": "Banner icon",
-      "description": "The mark before the name in the banner above the prompt: boomi (Boomi's b with its coral dot), flamingo or diamond",
+      "description": "The mark before the name in the banner above the prompt: boomi (the Boomi logo, three rows tall), flamingo or diamond",
       "options": [
         "boomi",
         "flamingo",
@@ -46,8 +46,8 @@
     },
     "bandAnimation": {
       "type": "boolean",
-      "title": "Animate the banner icon",
-      "description": "A sparkle for a second in every five: in the flamingo's place, or the dot of Boomi's mark twinkling; not on the diamond",
+      "title": "Animate the banner flamingo",
+      "description": "Swap the banner's flamingo for a sparkle for a second in every five; only when the banner icon is the flamingo",
       "default": true
     },
     "handoffNudge": {
