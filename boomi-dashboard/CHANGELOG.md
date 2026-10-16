@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.51.1
+
+- **Sending a held prompt clears the prompt box.** When the dashboard held a flagged prompt, **Send as typed** and **Send the upgrade** left the original text sitting in the prompt box, in the way of your next prompt. Sending now clears it, unless you've already started typing something else.
+
 ## 0.51.0
 
 - **A nudge toward /handoff on the way out.** The first `/exit`, `/quit` or `/clear` of a session that did work says what `/handoff` saves (a summary for the next session, in `~/handoffs/`) and waits; typing the command again goes through. Running `/handoff` first skips the nudge. The `handoffNudge` setting (also in `/bc-dashboard config`) turns it off. Ctrl+C and Ctrl+D leave without it.

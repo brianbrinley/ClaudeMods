@@ -2736,6 +2736,25 @@ test('confirm: with the Prompt tab shown, a flagged prompt is held until it is s
   expect((await $.command.run(dashboard('prompt'))).text).toContain('Your last prompt: deploy it and test it, still failing')
 })
 
+test('confirm: sending a held prompt from the Prompt tab clears its copy from the prompt box, but not newer typing', { options: { promptCheck: 'confirm' } }, async ($, on) => {
+  let box = VAGUE
+  on('prompt.read', async () => ({ value: { text: box, cursor: box.length } }))
+  const { filled, sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
+  await typed(VAGUE)
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  await tab.press({ key: 'prompt-send-typed' })
+  expect(sent).toEqual([VAGUE])
+  expect(filled).toEqual([''])
+  // The person has started the next prompt: it stays.
+  await typed(VAGUE)
+  box = 'now a new thought'
+  await tab.unmount()
+  const again = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  await again.press({ key: 'prompt-send-typed' })
+  expect(sent).toEqual([VAGUE, VAGUE])
+  expect(filled).toEqual([''])
+})
+
 test('confirm: a held prompt can go back to the prompt box, or be discarded; the banner can send it as typed', { options: { promptCheck: 'confirm' } }, async ($, on) => {
   const { filled, sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
   await typed(VAGUE)

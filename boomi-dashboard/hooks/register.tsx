@@ -2153,6 +2153,9 @@ const sendHeld = async ($: Engine, settings: Settings, which: 'upgrade' | 'typed
   await update($, promptNote, () => (which === 'upgrade' ? 'Sent the upgrade to Claude.' : 'Sent your prompt to Claude as typed.'))
   await refreshStatus($, settings).catch(() => undefined)
   await closePromptTab($, settings)
+  // A held prompt went back to the box when it was dropped; sending it from here leaves that copy behind, so clear it, unless the person has typed something else since.
+  const box = await $.prompt.read().catch(() => undefined)
+  if (box && box.text.trim() === held.trim()) await $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined)
   await $.prompt.submit({ text, asUser: true }).catch(() => undefined)
 }
 
