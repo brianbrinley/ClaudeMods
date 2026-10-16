@@ -2773,11 +2773,12 @@ test('confirm: a held prompt can go back to the prompt box, or be discarded; the
   expect(sent).toEqual([VAGUE])
 })
 
-test('the banner mark is the Boomi logo by default, as pixel art where the terminal draws no pictures', async ($, on) => {
+test('the banner mark is the Boomi logo by default, and where the terminal draws no pictures the banner is just its label', async ($, on) => {
   await promptWorld($, on)
   await $.tool.call({ tool: 'Bash', command: PUSH })
   const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...BAND_TARGET })
-  expect(await band.find({ text: '▀' })).toBeDefined()
+  expect(await band.find({ text: /BC Dashboard/ })).toBeDefined()
+  expect(await band.find({ text: '▀' })).toBeUndefined()
   expect(await band.find({ text: '🦩' })).toBeUndefined()
 })
 
