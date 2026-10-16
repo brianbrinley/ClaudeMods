@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.52.0
+
+- **Boomi's b in the banner.** The mark before "BC Dashboard" is now Boomi's b, white on Boomi navy, with its coral dot, which twinkles for a second in every five as the flamingo's sparkle did. It's the new default; the flamingo stays in the pane, and `/bc-dashboard config bandIcon flamingo` brings it back to the banner. The `bandAnimation` setting now covers both icons. Takes effect in the next session.
+
 ## 0.51.1
 
 - **Sending a held prompt clears the prompt box.** When the dashboard held a flagged prompt, **Send as typed** and **Send the upgrade** left the original text sitting in the prompt box, in the way of your next prompt. Sending now clears it, unless you've already started typing something else.
