@@ -337,12 +337,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await pane.find({ text: /VALENCE/ })).toBeUndefined()
   })
 
-  test(`on ${surface}, the footer names the session and links the repository's GitHub page`, async ($, on) => {
+  test(`on ${surface}, the footer names the session and shows no GitHub link`, async ($, on) => {
     world(on)
     const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
     expect(await pane.find({ text: /session 3adaec6a-0227-5e7b-a04b-eeeba5da8710/ })).toBeDefined()
-    const link = await pane.find({ type: 'Link' })
-    expect(link?.props).toMatchObject({ href: 'https://github.com/brianbrinley/ClaudeMods', label: 'github.com/brianbrinley/ClaudeMods' })
+    expect(await pane.find({ type: 'Link' })).toBeUndefined()
+    expect(await pane.find({ text: /github\.com/ })).toBeUndefined()
   })
 
   test(`on ${surface}, a quiet Report button beside the session saves the HTML report and toasts where`, async ($, on) => {
