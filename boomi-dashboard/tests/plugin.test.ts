@@ -244,7 +244,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
     const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface, component: 'AbovePrompt', props: BAND })
-    expect(await band.find({ text: '◆ BC Dashboard ' })).toBeDefined()
+    expect(await band.find({ text: ' BC Dashboard ' })).toBeDefined()
     expect(await band.find({ text: /ended ERROR/ })).toBeDefined()
     expect(await band.find({ text: /1 needs attention/ })).toBeDefined()
     await band.press({ key: 'hide' })

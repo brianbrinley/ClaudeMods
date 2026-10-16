@@ -46,6 +46,7 @@ import {
   friendlyType,
   githubUrl,
   headline,
+  bandFlamingoAt,
   sceneAt,
   sceneRows,
   levelOf,
@@ -174,8 +175,14 @@ const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const,
 /** The tick the flamingo's scene last changed at: the pane draws sceneAt(it). */
 const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
 
+/** The tick the banner's flamingo last changed at: the banner draws bandFlamingoAt(it). */
+const bandFrame = atom({ plugin: 'boomi-dashboard', key: 'bandFrame' } as const, 0)
+
 /** Half-second ticks since the mod loaded, for the flamingo's scene. */
 let sceneTick = 0
+
+/** Seconds since the mod loaded, for the banner's flamingo. */
+let bandTick = 0
 
 /**
  * Companion's share of the weekly limit: how far Companion sessions on this
@@ -328,6 +335,8 @@ type Settings = {
   isToasting: boolean
   isBanded: boolean
   hasFlamingo: boolean
+  isBandAnimated: boolean
+  bandIcon: 'flamingo' | 'boomi' | 'diamond'
   budgetUsd: number
   isSuggesting: boolean
   historyDays: number
@@ -362,6 +371,8 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   isToasting: options.toasts !== false,
   isBanded: options.banner !== false,
   hasFlamingo: options.flamingo !== false,
+  isBandAnimated: options.bandAnimation !== false,
+  bandIcon: options.bandIcon === 'boomi' || options.bandIcon === 'diamond' ? options.bandIcon : 'flamingo',
   budgetUsd: Math.max(0, Number(options.budgetUsd ?? 0) || 0),
   isSuggesting: options.suggestions !== false,
   historyDays: Math.max(1, Number(options.historyDays ?? 90) || 90),
@@ -402,6 +413,12 @@ const UPDATE_SEEN_KEY = 'updateSeen'
 
 /** How often the flamingo's frame moves on while Claude works. */
 const FLAMINGO_TICK_MS = 500
+
+/** Boomi's coral, the banner's round mark when the icon is set to boomi. */
+const BOOMI_CORAL = '#FF7C69'
+
+/** How often the banner's flamingo moves on. */
+const BAND_FLAMINGO_TICK_MS = 1_000
 
 /** How long the banner shows each line of a new session's recap and tips. */
 const TIP_MS = 20_000
@@ -2846,6 +2863,13 @@ export const register: Register = (on, options) => {
         if (JSON.stringify(sceneAt(sceneTick)) !== JSON.stringify(sceneAt(await read($, frame)))) await update($, frame, () => sceneTick)
       })
     }
+    // The banner's flamingo: a sparkle in its place for a second in five; the banner redraws only when that changes.
+    if (settings.isBanded && settings.isBandAnimated && settings.bandIcon === 'flamingo') {
+      $.clock.every(BAND_FLAMINGO_TICK_MS, async () => {
+        bandTick++
+        if (bandFlamingoAt(bandTick) !== bandFlamingoAt(await read($, bandFrame))) await update($, bandFrame, () => bandTick)
+      })
+    }
     if (settings.pollSeconds > 0) {
       $.clock.after(2_000, () => poll($, settings))
       $.clock.every(settings.pollSeconds * 1000, () => poll($, settings))
@@ -3014,6 +3038,10 @@ export const register: Register = (on, options) => {
     const nudge = tipsNow && (held !== null || tipsNow.at !== (await read($, promptNudgeHidden))) ? tipsNow : null
     if (!latest && !welcome && needs.length === 0 && !paused && !nudge) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
+    // The mark before the name: the flamingo (animated unless turned off), Boomi's coral dot, or the old diamond.
+    const mark =
+      settings.bandIcon === 'boomi' ? '●' : settings.bandIcon === 'diamond' ? '◆' : settings.isBandAnimated ? bandFlamingoAt(await read($, bandFrame)) : '🦩'
+    const markColor = settings.bandIcon === 'boomi' ? BOOMI_CORAL : undefined
     const count = components(current.activity).length
     const usage = await usageOf($)
     const cost = formatCost(usage.usd)
@@ -3030,7 +3058,7 @@ export const register: Register = (on, options) => {
         <Box flexShrink={1}>
           <Text wrap="truncate-end">
             <Text bold color="claude">
-              ◆ BC Dashboard{' '}
+              <Text color={markColor}>{mark}</Text> BC Dashboard{' '}
             </Text>
             {held !== null ? <Text color={STATUS.warning.color}>⏸ Held: </Text> : <Text>{icon(nudge.tips.some(t => t.level === 'serious') ? 'serious' : 'warning')} </Text>}
             <Text>Boomi Dashboard suggests a clearer prompt</Text>
@@ -3064,7 +3092,7 @@ export const register: Register = (on, options) => {
         <Box flexShrink={1}>
           <Text wrap="truncate-end">
             <Text bold color="claude">
-              ◆ BC Dashboard{' '}
+              <Text color={markColor}>{mark}</Text> BC Dashboard{' '}
             </Text>
             {paused && (
               <Text color={STATUS.critical.color}>

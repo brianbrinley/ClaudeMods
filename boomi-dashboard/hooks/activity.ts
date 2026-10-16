@@ -1698,6 +1698,11 @@ const LOOKING_BACK = reflect(HEAD, 11)
 /** Standing on one leg, as the flamingo mostly does. */
 export const FLAMINGO_IDLE: readonly string[] = [...HEAD, ...WING_DOWN, ...ONE_LEG]
 
+/** The banner's flamingo, a tick at a time: the bird, with a sparkle in its place now and then. Both are two cells wide, so the text beside it holds still. */
+export const BAND_FLAMINGO: readonly string[] = ['🦩', '🦩', '🦩', '🦩', '✨']
+
+export const bandFlamingoAt = (tick: number): string => BAND_FLAMINGO[Math.max(0, Math.floor(tick)) % BAND_FLAMINGO.length]!
+
 /** The flamingo's width in pixels, and the strip it stands in: room either side for it to turn, and for a visitor. */
 export const FLAMINGO_WIDTH = 12
 export const STRIP_WIDTH = 18

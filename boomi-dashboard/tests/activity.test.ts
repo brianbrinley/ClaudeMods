@@ -70,6 +70,7 @@ import {
   choiceFrom,
   choiceList,
   pondRows,
+  bandFlamingoAt,
   sceneAt,
   sceneRows,
   limitViews,
@@ -1193,4 +1194,11 @@ test('the pace in words: where the month leads, when it runs out, today, and onl
   expect(lines.map(l => l.label)).toEqual(['Claude budget', 'Claude pace', 'Claude spend'])
   expect(lines[1]).toMatchObject({ percent: 0, isUnmeasured: true, detail: 'on pace for $796 (72%) by the reset in 16d 4h' })
   expect(usageReadLines(usage as never)).toContain('Claude pace: on pace for $796 (72%) by the reset in 16d 4h')
+})
+
+test('the banner flamingo shows a sparkle for one tick in five, and never moves the text beside it', () => {
+  const frames = [0, 1, 2, 3, 4, 5, 9].map(bandFlamingoAt)
+  expect(frames).toEqual(['🦩', '🦩', '🦩', '🦩', '✨', '🦩', '✨'])
+  expect(bandFlamingoAt(-3)).toBe('🦩')
+  expect(bandFlamingoAt(2.9)).toBe('🦩')
 })

@@ -2,6 +2,11 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.50.0
+
+- **A flamingo in the banner.** The mark before "BC Dashboard" is now the flamingo, and it flashes a sparkle for a second in every five. The `bandAnimation` setting turns the animation off.
+- **Choose the banner icon.** The `bandIcon` setting (also in `/bc-dashboard config`) picks `flamingo`, `boomi` (a round dot in Boomi's coral) or `diamond`, the old mark. Both settings take effect in the next session.
+
 ## 0.49.2
 
 - **No GitHub link in the pane.** The footer shows the session ID and the Report button only. The HTML report no longer names the repository either, so its title is the Boomi account, else the folder. The Markdown report still has its `Repository:` line.
