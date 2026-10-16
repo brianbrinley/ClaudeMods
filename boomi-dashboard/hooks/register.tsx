@@ -1634,6 +1634,13 @@ const ownVersion = async ($: Engine): Promise<string | undefined> => {
   return typeof json === 'string' ? json.match(/"version"\s*:\s*"([^"]+)"/)?.[1] : undefined
 }
 
+/** The pane's quiet Report button: the same page as /bc-dashboard report html, its outcome as a toast. */
+const reportFromPane = async ($: Engine, settings: Settings) => {
+  $.ui.toast('Making the report…')
+  const said = await reportHtmlCommand($, settings, []).catch(() => 'The report could not be made.')
+  $.ui.toast(said.split('\n')[0]!)
+}
+
 /**
  * /bc-dashboard report html: the report as one HTML file in the workspace, to
  * open in a browser or send to someone: Valence Day and Night, sortable
@@ -3671,12 +3678,13 @@ export const register: Register = (on, options) => {
             {t(`↑ bc-dashboard ${newer} is available: /bc-dashboard upgrade`, { color: p.muted })}
           </Box>
         )}
-        <Box marginTop={newer ? 0 : 1}>
+        <Box marginTop={newer ? 0 : 1} justifyContent="space-between">
           <Text color={p.muted} backgroundColor={p.bg} dimColor>
             {`session ${footer.session}`}
             {footer.repo ? ' · ' : ''}
             {footer.repo ? <Link href={footer.repo} label={footer.repo.replace(/^https:\/\//, '')} /> : undefined}
           </Text>
+          <Button key="report-html" label="Report ↗" onPress={() => void reportFromPane($, settings)} />
         </Box>
       </Box>
     )
