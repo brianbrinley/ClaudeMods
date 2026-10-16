@@ -1677,7 +1677,6 @@ const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly 
       session: footer.session,
       sessionId,
       date: new Date(now).toISOString().slice(0, 10),
-      repo: footer.repo,
       usage,
       version: await ownVersion($),
       scope,
@@ -3268,7 +3267,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Link, Text } = $.ui.resolve(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
     const themeNow = await themeOf($, settings)
     const guards = await guardLines($)
     const past = await read($, history)
@@ -3681,8 +3680,6 @@ export const register: Register = (on, options) => {
         <Box marginTop={newer ? 0 : 1} justifyContent="space-between">
           <Text color={p.muted} backgroundColor={p.bg} dimColor>
             {`session ${footer.session}`}
-            {footer.repo ? ' · ' : ''}
-            {footer.repo ? <Link href={footer.repo} label={footer.repo.replace(/^https:\/\//, '')} /> : undefined}
           </Text>
           <Button key="report-html" label="Report ↗" onPress={() => void reportFromPane($, settings)} />
         </Box>

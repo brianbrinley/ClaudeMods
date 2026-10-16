@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.49.2
+
+- **No GitHub link in the pane.** The footer shows the session ID and the Report button only. The HTML report no longer names the repository either, so its title is the Boomi account, else the folder. The Markdown report still has its `Repository:` line.
+
 ## 0.49.1
 
 - **A Report button in the pane.** A quiet **Report ↗** button sits at the right of the footer, beside the session ID. It makes the same web page as `/bc-dashboard report html` (asking which steps to cover when earlier sessions are kept) and says where it saved it.

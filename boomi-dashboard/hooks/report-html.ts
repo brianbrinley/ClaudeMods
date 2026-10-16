@@ -650,8 +650,8 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
   const sessionOf = (a: Activity) => sessionIds.get(a.id) ?? 'this'
   const when = (t: number) => new Date(t).toISOString().replace('T', ' ').slice(0, 16)
 
-  // The opening: what this is about (the repository, else the Boomi account, else the folder), then what happened, in sentences.
-  const title = facts.repo ? facts.repo.replace(/^https?:\/\/(www\.)?github\.com\//, '') : (boomi?.accountName ?? facts.folder ?? 'Companion session')
+  // The opening: what this is about (the Boomi account, else the folder), then what happened, in sentences.
+  const title = boomi?.accountName ?? facts.folder ?? 'Companion session'
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
   const day = (t: number) => shortWhen(t, 'UTC').replace(/, \d\d:\d\d$/, '')
   const strong = (text: string) => `<strong>${esc(text)}</strong>`
