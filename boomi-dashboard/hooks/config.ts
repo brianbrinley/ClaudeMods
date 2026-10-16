@@ -50,12 +50,12 @@ export const GROUPS: readonly Group[] = [
     name: 'Pane and banner',
     header: 'Pane',
     fields: [
-      { key: 'paneTheme', label: 'Pane colors', about: 'Day is light, Night is dark, Terminal takes your terminal’s theme.', kind: 'choice', options: ['day', 'night', 'terminal'], default: 'day' },
+      { key: 'paneTheme', label: 'Theme', about: 'Auto is Exosphere, Boomi’s design system, in your system’s light or dark. Exosphere and Whimsical (the Art Deco look with the flamingo) each have a light and a dark; Terminal takes your terminal’s theme.', kind: 'choice', options: ['auto', 'exosphere-light', 'exosphere-dark', 'whimsical-light', 'whimsical-dark', 'terminal'], default: 'auto' },
       { key: 'paneRows', label: 'Pane height', about: 'How many rows the pane asks for above the prompt. A size you drag it to, or set with /bc-dashboard size, wins.', kind: 'number', unit: 'rows', default: 0, zero: 'Claude Code decides', presets: [12, 20, 30], isWhole: true },
       { key: 'paneColumns', label: 'Pane width', about: 'How many columns the pane asks for when docked beside a fullscreen transcript. A width you drag it to wins.', kind: 'number', unit: 'columns', default: 0, zero: 'Claude Code decides', presets: [60, 80, 100], isWhole: true },
       { key: 'banner', label: 'Banner above the prompt', about: 'The latest Companion step and what needs attention; at the start of a session, the last session’s recap and tips.', kind: 'boolean', default: true },
-      { key: 'bandIcon', label: 'Banner icon', about: 'The mark before the name in the banner: Boomi’s logo (a navy and coral badge where the terminal draws no pictures), the flamingo, or the diamond.', kind: 'choice', options: ['boomi', 'flamingo', 'diamond'], default: 'boomi', isNextSession: true },
-      { key: 'bandAnimation', label: 'Animate the banner flamingo', about: 'A sparkle in the flamingo’s place for a second in every five. Only with the flamingo icon.', kind: 'boolean', default: true, isNextSession: true },
+      { key: 'logo', label: 'Logo', about: 'The mark in the pane and banner: the Boomi logo in Exosphere (where the terminal draws pictures), the flamingo in Whimsical.', kind: 'boolean', default: true },
+      { key: 'bandAnimation', label: 'Animate the banner flamingo', about: 'A sparkle in the flamingo’s place for a second in every five. Only in the Whimsical themes.', kind: 'boolean', default: true, isNextSession: true },
       { key: 'handoffNudge', label: 'Suggest /handoff on the way out', about: 'The first /exit, /quit or /clear of a session that did work suggests /handoff first, which saves a summary for the next session; typing the command again goes through.', kind: 'boolean', default: true },
       { key: 'toasts', label: 'Toasts', about: 'A pop-up when a step fails, a deploy or test finishes, or a watched component changes.', kind: 'boolean', default: true },
       { key: 'suggestions', label: 'Suggest the next step', about: 'With a component saved but not deployed, or deployed but not tested, offer that step in the prompt box (Tab takes it).', kind: 'boolean', default: true },
@@ -63,7 +63,6 @@ export const GROUPS: readonly Group[] = [
       { key: 'promptView', label: 'Prompt tab', about: 'Auto opens the Prompt tab beside the pane when a prompt gets tips; manual only from /bc-dashboard prompt or the pane’s Prompt tab button; off never.', kind: 'choice', options: ['auto', 'manual', 'off'], default: 'auto' },
       { key: 'promptModel', label: 'Prompt rewrite model', about: 'The model /bc-dashboard prompt upgrade asks, only when you run it.', kind: 'text', default: 'haiku' },
       { key: 'promptSkip', label: 'Prompt checks to skip', about: 'Checks to leave out, separated by commas: subject, environment, test, production, steps, error, build, map, secret, aim.', kind: 'text', default: '' },
-      { key: 'flamingo', label: 'Flamingo', about: 'The 8-bit flamingo in the pane, standing while Claude is idle and walking while it works.', kind: 'boolean', default: true, isNextSession: true },
     ],
   },
   {

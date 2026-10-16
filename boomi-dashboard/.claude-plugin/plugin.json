@@ -1,19 +1,24 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.53.1",
+  "version": "0.54.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
     "paneTheme": {
       "type": "string",
-      "title": "Pane colors",
-      "description": "The pane's colors, which the pane's theme buttons and /bc-dashboard theme also set: day (Valence Day, light, with its own background), night (Valence Night, dark) or terminal (your terminal's theme)",
+      "title": "Theme",
+      "description": "The theme, which the pane's theme buttons and /bc-dashboard theme also set: auto (Exosphere, Boomi's design system, in your system's light or dark), exosphere-light, exosphere-dark, whimsical-light, whimsical-dark (the Valence Miami Deco look with the flamingo) or terminal (your terminal's theme). day and night are the names earlier versions saved: they stay listed so a saved choice carries over, and mean whimsical-light and whimsical-dark",
       "options": [
+        "auto",
+        "exosphere-light",
+        "exosphere-dark",
+        "whimsical-light",
+        "whimsical-dark",
+        "terminal",
         "day",
-        "night",
-        "terminal"
+        "night"
       ],
-      "default": "day"
+      "default": "auto"
     },
     "paneRows": {
       "type": "number",
@@ -27,16 +32,22 @@
       "description": "How many columns the dashboard pane asks for when it's docked beside a fullscreen transcript; a width you drag it to wins. 0 leaves it to Claude Code",
       "default": 0
     },
+    "logo": {
+      "type": "boolean",
+      "title": "Logo",
+      "description": "The mark in the pane and the banner above the prompt: the Boomi logo in the Exosphere themes (where the terminal draws pictures), the flamingo in Whimsical. Off hides it",
+      "default": true
+    },
     "flamingo": {
       "type": "boolean",
-      "title": "Flamingo",
-      "description": "Show the 8-bit flamingo in the pane: standing on one leg while Claude is idle, walking while it works",
+      "title": "Flamingo (replaced by logo and theme)",
+      "description": "No longer used: the pane flamingo follows the theme and the logo setting. Read once so an earlier choice carries over. Show the 8-bit flamingo in the pane: standing on one leg while Claude is idle, walking while it works",
       "default": true
     },
     "bandIcon": {
       "type": "string",
-      "title": "Banner icon",
-      "description": "The mark before the name in the banner above the prompt: boomi (the Boomi logo where the terminal draws pictures, else a navy disc with a coral ring; two rows tall), flamingo or diamond",
+      "title": "Banner icon (replaced by logo and theme)",
+      "description": "No longer used: the banner icon follows the theme and the logo setting. Read once so an earlier choice carries over. The mark before the name in the banner above the prompt: boomi (the Boomi logo where the terminal draws pictures, else a navy disc with a coral ring; two rows tall), flamingo or diamond",
       "options": [
         "boomi",
         "flamingo",
@@ -47,7 +58,7 @@
     "bandAnimation": {
       "type": "boolean",
       "title": "Animate the banner flamingo",
-      "description": "Swap the banner's flamingo for a sparkle for a second in every five; only when the banner icon is the flamingo",
+      "description": "Swap the banner's flamingo for a sparkle for a second in every five; only in the Whimsical themes, where the flamingo is the mark",
       "default": true
     },
     "handoffNudge": {
