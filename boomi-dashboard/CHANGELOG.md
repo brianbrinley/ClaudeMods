@@ -4,7 +4,7 @@
 
 ## 0.49.2
 
-- **No GitHub link in the pane.** The footer shows the session ID and the Report button only. Reports still name the repository.
+- **No GitHub link in the pane.** The footer shows the session ID and the Report button only. The HTML report no longer names the repository either, so its title is the Boomi account, else the folder. The Markdown report still has its `Repository:` line.
 
 ## 0.49.1
 

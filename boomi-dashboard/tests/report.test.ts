@@ -428,3 +428,9 @@ test('the report’s budget block carries the pace and today’s spend, as estim
   expect(page).toContain('$30 today · $26/day this month')
   expect(page).not.toContain('<span>Pace this month</span><span class="na">not measured</span>')
 })
+
+test('the HTML report names no GitHub repository, though the Markdown one keeps it', () => {
+  const page = reportHtml(scoped(DASHBOARD, 'session'), { session: 's-1', sessionId: 's-1', date: '2026-10-14', repo: 'https://github.com/acme/widgets', usage: { startedAt: NOW, usd: 1, tokens: 100 }, scope: 'session', folder: 'widgets' }, NOW, 24 * HOUR)
+  expect(page).not.toContain('github.com')
+  expect(page).not.toContain('acme/widgets')
+})

@@ -1677,7 +1677,6 @@ const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly 
       session: footer.session,
       sessionId,
       date: new Date(now).toISOString().slice(0, 10),
-      repo: footer.repo,
       usage,
       version: await ownVersion($),
       scope,
