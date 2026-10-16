@@ -38,8 +38,8 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **B12. A held prompt leaves the prompt box.** With `promptCheck` on `confirm`, type a vague Boomi prompt such as *"deploy it"*, let the dashboard hold it, then press **Send as typed** (or **Send the upgrade**) in the Prompt tab or the banner.
   **Pass:** Claude takes the prompt and the prompt box is empty, ready for the next one. **Fail:** the old text is still in the box.
 
-- [ ] **B13. The Boomi logo in the banner.** Start a new session and get the banner to show (a push, or a held prompt such as *"deploy it"*).
-  **Pass:** a mark three rows tall at the left of the banner, before "BC Dashboard": a navy disc, a white b and a coral dot at its upper right (the logo itself in kitty or Ghostty, pixel art elsewhere); the text sits beside it and nothing overlaps. `/bc-dashboard config bandIcon flamingo` (next session) brings the 🦩 back. **Fail:** a mark that doesn't read as the logo, a gap or overlap, or unreadable colors on your terminal theme.
+- [ ] **B13. Boomi's mark in the banner.** Start a new session and get the banner to show (a push, or a held prompt such as *"deploy it"*).
+  **Pass:** a mark two rows tall at the left of the banner, before "BC Dashboard": in kitty or Ghostty the Boomi logo, elsewhere a navy disc with a coral ring; the text sits beside it, nothing overlaps and it doesn't animate. `/bc-dashboard config bandIcon flamingo` (next session) brings the 🦩 back. **Fail:** a mark that isn't round or isn't navy and coral, a gap or overlap, or unreadable colors on your terminal theme.
 
 ## C. Windows (WSL)
 

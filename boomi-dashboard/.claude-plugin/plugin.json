@@ -36,7 +36,7 @@
     "bandIcon": {
       "type": "string",
       "title": "Banner icon",
-      "description": "The mark before the name in the banner above the prompt: boomi (the Boomi logo, three rows tall), flamingo or diamond",
+      "description": "The mark before the name in the banner above the prompt: boomi (the Boomi logo where the terminal draws pictures, else a navy disc with a coral ring; two rows tall), flamingo or diamond",
       "options": [
         "boomi",
         "flamingo",

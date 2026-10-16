@@ -3061,7 +3061,7 @@ export const register: Register = (on, options) => {
     const nudge = tipsNow && (held !== null || tipsNow.at !== (await read($, promptNudgeHidden))) ? tipsNow : null
     if (!latest && !welcome && needs.length === 0 && !paused && !nudge) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    // The mark before the name. Boomi's is its logo, in a column of its own beside the rows: the picture where the terminal draws pictures, pixel art elsewhere. The flamingo (animated unless turned off) and the diamond are one cell of text.
+    // The mark before the name. Boomi's is its logo, in a column of its own beside the rows: the picture where the terminal draws pictures, a small badge elsewhere. The flamingo (animated unless turned off) and the diamond are one cell of text.
     const isBoomi = settings.bandIcon === 'boomi'
     const inlineMark = isBoomi ? '' : `${settings.bandIcon === 'diamond' ? '◆' : settings.isBandAnimated ? bandFlamingoAt(await read($, bandFrame)) : '🦩'} `
     const Picture = (isBoomi ? ($.ui.resolve(e) as { Image?: typeof Text }).Image : undefined) as ((props: { source: { png: string }; columns: number; rows: number; alt: string }) => unknown) | undefined
@@ -3071,7 +3071,7 @@ export const register: Register = (on, options) => {
         <Box>
           <Box flexShrink={0} flexDirection="column" marginRight={1}>
             {hasPictures
-              ? Picture!({ source: { png: BOOMI_MARK_PNG }, columns: 6, rows: 3, alt: ' ' })
+              ? Picture!({ source: { png: BOOMI_MARK_PNG }, columns: 4, rows: 2, alt: ' ' })
               : markCells().map((row, y) => (
                   <Box key={`mark-${y}`}>
                     {row.map((cell, x) => (
