@@ -125,6 +125,8 @@ import type { Group, PastSpend, Value } from './config'
 import { blockedDetail, companionChanges, denyMessage, enforcementNote, platformWrites, spentBudgets, spentText, wrapperScripts } from './budget-gate'
 import type { Enforce } from './budget-gate'
 import { BOOMI_MARK_PNG, drawsPictures } from './boomi-mark'
+import { PALETTES, THEMES, THEME_NAMES, isDarkAppearance, markOf, resolveTheme, themeFromOptions, themeNamed } from './themes'
+import type { DrawnTheme, Family } from './themes'
 import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
 import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
@@ -337,9 +339,11 @@ type Settings = {
   paneTheme: PaneTheme
   isToasting: boolean
   isBanded: boolean
-  hasFlamingo: boolean
+  /** The look `auto` settles into: Exosphere, or Whimsical for a person who had chosen the flamingo. */
+  themeFamily: Family
+  /** The mark: the Boomi logo in Exosphere, the flamingo in Whimsical. */
+  hasLogo: boolean
   isBandAnimated: boolean
-  bandIcon: 'flamingo' | 'boomi' | 'diamond'
   isNudgingHandoff: boolean
   budgetUsd: number
   isSuggesting: boolean
@@ -371,12 +375,13 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   componentsDir: String(options.componentsDir || 'active-development'),
   pollSeconds: Math.max(0, Number(options.pollSeconds ?? 60) || 0),
   windowMs: Math.max(1, Number(options.recentHours ?? 24) || 24) * 3_600_000,
-  paneTheme: options.paneTheme === 'night' || options.paneTheme === 'terminal' ? options.paneTheme : 'day',
+  paneTheme: themeFromOptions(options).theme,
+  themeFamily: themeFromOptions(options).family,
   isToasting: options.toasts !== false,
   isBanded: options.banner !== false,
-  hasFlamingo: options.flamingo !== false,
+  // `flamingo` is the setting `logo` replaced: a person who had turned the flamingo off keeps the mark off.
+  hasLogo: options.logo === undefined ? options.flamingo !== false : options.logo !== false,
   isBandAnimated: options.bandAnimation !== false,
-  bandIcon: options.bandIcon === 'flamingo' || options.bandIcon === 'diamond' ? options.bandIcon : 'boomi',
   isNudgingHandoff: options.handoffNudge !== false,
   budgetUsd: Math.max(0, Number(options.budgetUsd ?? 0) || 0),
   isSuggesting: options.suggestions !== false,
@@ -433,10 +438,6 @@ const LOG_CHECK_MS = 10_000
 /** Companion's activity log, relative to the workspace, where its scripts write it. */
 const ACTIVITY_LOG = '.activity-log/activity.jsonl'
 
-const THEMES: readonly PaneTheme[] = ['day', 'night', 'terminal']
-const THEME_NAMES: Record<PaneTheme, string> = { day: 'Day', night: 'Night', terminal: 'Terminal' }
-
-const isTheme = (value: unknown): value is PaneTheme => THEMES.includes(value as PaneTheme)
 const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit'])
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
@@ -1868,16 +1869,40 @@ const pickTheme = async ($: Engine, settings: Settings, theme: PaneTheme) => {
 
 const themeOf = async ($: Engine, settings: Settings): Promise<PaneTheme> => (await read($, pickedTheme)) ?? settings.paneTheme
 
-/** /bc-dashboard theme [day|night|terminal]: picks one, or lists them. */
+/** How long the operating system's light or dark is trusted before it is asked again. */
+const APPEARANCE_MS = 30_000
+
+let appearanceCache: { at: number; isDark: boolean } | undefined
+
+/** Whether the operating system is in dark mode. macOS is asked; anywhere it can't be read the answer is light, and nothing is thrown. */
+const isOsDark = async ($: Engine): Promise<boolean> => {
+  const now = await $.clock.now()
+  if (appearanceCache && now - appearanceCache.at < APPEARANCE_MS) return appearanceCache.isDark
+  const asked = await $.process.run(['defaults', 'read', '-g', 'AppleInterfaceStyle'], { timeoutMs: 2_000 }).catch(() => undefined)
+  appearanceCache = { at: now, isDark: isDarkAppearance(asked?.stdout) }
+  return appearanceCache.isDark
+}
+
+/** The theme the pane and banner draw now: what is picked, with `auto` settled by the operating system's light or dark. */
+const drawnThemeOf = async ($: Engine, settings: Settings): Promise<DrawnTheme> => {
+  const picked = await themeOf($, settings)
+  return resolveTheme(picked, settings.themeFamily, picked === 'auto' ? await isOsDark($) : false)
+}
+
+/** True where the terminal can draw the logo as a picture. */
+const drawsPicturesHere = async ($: Engine): Promise<boolean> =>
+  drawsPictures({ TERM: await $.env.get('TERM').catch(() => undefined), TERM_PROGRAM: await $.env.get('TERM_PROGRAM').catch(() => undefined) })
+
+/** /bc-dashboard theme [name]: picks one, or lists them. Day and night, the names earlier versions used, pick Whimsical's light and dark. */
 const theme = async ($: Engine, settings: Settings, target: string): Promise<string> => {
-  const wanted = target.toLowerCase()
-  if (isTheme(wanted)) {
+  const wanted = themeNamed(target)
+  if (wanted) {
     await pickTheme($, settings, wanted)
     return `Dashboard theme: ${THEME_NAMES[wanted]}.`
   }
   const current = await themeOf($, settings)
   const list = THEMES.map(t => `${t === current ? '◆' : '◇'} ${t}`).join('   ')
-  return `${target ? `No theme called ${target}. ` : ''}Themes: ${list}\nPick one with /bc-dashboard theme <name>, or with the buttons in the pane.`
+  return `${target ? `No theme called ${target}. ` : ''}Themes: ${list}\nPick one with /bc-dashboard theme <name> (auto follows your system's light or dark), or with the buttons in the pane.`
 }
 
 // --- Commands and tools ------------------------------------------------------
@@ -1903,7 +1928,7 @@ const USAGE = [
   '/bc-dashboard prompt [use|upgrade] your last Boomi prompt\'s tips and an upgraded prompt; use puts it in the prompt box, upgrade has a model rewrite it',
   '/bc-dashboard seen            mark watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
-  '/bc-dashboard theme [name]    the pane\'s colors: day, night or terminal',
+  '/bc-dashboard theme [name]    the pane\'s colors: auto, exosphere-light, exosphere-dark, whimsical-light, whimsical-dark or terminal',
   '/bc-dashboard config [group]  walk through the dashboard\'s settings (budget, pane, data); config <setting> <value> sets one; config list shows them',
   '/bc-dashboard upgrade         update the dashboard from its GitHub checkout: --check only looks, --yes skips the question, --rollback goes back',
 ].join('\n')
@@ -2680,53 +2705,6 @@ const restoreUpdate = async ($: Engine) => {
 
 // --- Drawing -------------------------------------------------------------------
 
-/**
- * The pane's colors: Valence Day or Night with a background of their own, or
- * the terminal's theme. `band` is the title bar, `accent` the gauges' values.
- */
-type Palette = {
-  bg?: string
-  text: string
-  muted: string
-  heading: string
-  rule: string
-  band?: string
-  bandText: string
-  accent: string
-  /** The flamingo's pink. */
-  bird: string
-  /** The water under it: Valence's seafoam. */
-  water: string
-}
-
-const PALETTES: Record<PaneTheme, Palette> = {
-  day: {
-    bg: '#FBF6EE',
-    text: '#0B0B0B',
-    muted: '#52514E',
-    heading: '#C2185B',
-    rule: '#9A7B3F',
-    band: '#C2185B',
-    bandText: '#FBF6EE',
-    accent: '#0F766E',
-    bird: '#C2185B',
-    water: '#9FDED6',
-  },
-  night: {
-    bg: '#161A2E',
-    text: '#FFFFFF',
-    muted: '#C9CBE0',
-    heading: '#F48FB1',
-    rule: '#D4B46A',
-    band: '#F48FB1',
-    bandText: '#161A2E',
-    accent: '#5EEAD4',
-    bird: '#F48FB1',
-    water: '#5EEAD4',
-  },
-  terminal: { text: 'text', muted: 'inactive', heading: 'claude', rule: 'subtle', bandText: 'claude', accent: 'suggestion', bird: '#C2185B', water: '#9FDED6' },
-}
-
 // The footer's facts, read once per load: the session's id and the repository's GitHub page.
 let footerCache: { session: string; repo?: string } | undefined
 
@@ -2765,8 +2743,9 @@ const setUpSession = async ($: Engine, settings: Settings) => {
   setUpFor = await $.session.id().catch(() => undefined)
   // The watch list outlives the session; restore it the first time.
   // A theme or size kept in the store (by 0.33.0 and earlier, or where /config refused it) moves to /config once it will take it.
-  const saved = await $.store.get(THEME_KEY)
-  if (isTheme(saved)) {
+  appearanceCache = undefined
+  const saved = themeNamed(await $.store.get(THEME_KEY))
+  if (saved) {
     if (await saveSetting($, settings, 'paneTheme', saved)) await $.store.delete(THEME_KEY).catch(() => undefined)
     else await update($, pickedTheme, () => saved)
   }
@@ -2862,17 +2841,19 @@ export const register: Register = (on, options) => {
       $.clock.after(20_000, () => readBreakdown($).catch(() => undefined))
       $.clock.every(BREAKDOWN_MS, () => readBreakdown($).catch(() => undefined))
     }
-    // The flamingo's scene: what it does next is checked every half second.
-    if (settings.hasFlamingo) {
+    // The flamingo's scene: what it does next is checked every half second, in Whimsical only.
+    if (settings.hasLogo) {
       // It stands in one place, working or not; the pane redraws only when the scene changes.
       $.clock.every(FLAMINGO_TICK_MS, async () => {
+        if (markOf(await drawnThemeOf($, settings)) !== 'flamingo') return
         sceneTick++
         if (JSON.stringify(sceneAt(sceneTick)) !== JSON.stringify(sceneAt(await read($, frame)))) await update($, frame, () => sceneTick)
       })
     }
     // The banner's flamingo: a sparkle in its place for a second in five; the banner redraws only when that changes.
-    if (settings.isBanded && settings.isBandAnimated && settings.bandIcon === 'flamingo') {
+    if (settings.isBanded && settings.isBandAnimated && settings.hasLogo) {
       $.clock.every(BAND_FLAMINGO_TICK_MS, async () => {
+        if (markOf(await drawnThemeOf($, settings)) !== 'flamingo') return
         bandTick++
         if (bandFlamingoAt(bandTick) !== bandFlamingoAt(await read($, bandFrame))) await update($, bandFrame, () => bandTick)
       })
@@ -3061,13 +3042,15 @@ export const register: Register = (on, options) => {
     const nudge = tipsNow && (held !== null || tipsNow.at !== (await read($, promptNudgeHidden))) ? tipsNow : null
     if (!latest && !welcome && needs.length === 0 && !paused && !nudge) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    // The mark before the name. Boomi's is its logo, in a column of its own beside the rows: the picture where the terminal draws pictures, a small badge elsewhere. The flamingo (animated unless turned off) and the diamond are one cell of text.
-    const isBoomi = settings.bandIcon === 'boomi'
-    const inlineMark = isBoomi ? '' : `${settings.bandIcon === 'diamond' ? '◆' : settings.isBandAnimated ? bandFlamingoAt(await read($, bandFrame)) : '🦩'} `
-    const Picture = (isBoomi ? ($.ui.resolve(e) as { Image?: typeof Text }).Image : undefined) as ((props: { source: { png: string }; columns: number; rows: number; alt: string }) => unknown) | undefined
-    const hasPictures = Picture !== undefined && drawsPictures({ TERM: await $.env.get('TERM').catch(() => undefined), TERM_PROGRAM: await $.env.get('TERM_PROGRAM').catch(() => undefined) })
+    // The mark before the name, by theme. Exosphere's is the Boomi logo, in a column of its own beside the rows: the picture where the terminal draws pictures, nothing elsewhere. Whimsical's is the flamingo (animated unless turned off), one cell of text. The logo setting turns either off.
+    const drawn = await drawnThemeOf($, settings)
+    const mark = settings.hasLogo ? markOf(drawn) : undefined
+    const palette = PALETTES[drawn]
+    const inlineMark = mark === 'flamingo' ? `${settings.isBandAnimated ? bandFlamingoAt(await read($, bandFrame)) : '🦩'} ` : ''
+    const Picture = (mark === 'logo' ? ($.ui.resolve(e) as { Image?: typeof Text }).Image : undefined) as ((props: { source: { png: string }; columns: number; rows: number; alt: string }) => unknown) | undefined
+    const hasPictures = Picture !== undefined && (await drawsPicturesHere($))
     const withMark = (body: ReturnType<typeof h>) =>
-      isBoomi && hasPictures ? (
+      mark === 'logo' && hasPictures ? (
         <Box>
           <Box flexShrink={0} flexDirection="column" marginRight={1}>
             {Picture!({ source: { png: BOOMI_MARK_PNG }, columns: 4, rows: 2, alt: ' ' })}
@@ -3088,7 +3071,7 @@ export const register: Register = (on, options) => {
     ]
       .filter(Boolean)
       .join(' │ ')
-    const icon = (level: Level) => <Text color={STATUS[level].color}>{STATUS[level].icon}</Text>
+    const icon = (level: Level) => <Text color={palette.status[level]}>{STATUS[level].icon}</Text>
     const first = latest ?? welcome
     const nudgeRow = nudge ? (
       <Box>
@@ -3174,7 +3157,7 @@ export const register: Register = (on, options) => {
   // The Prompt tab: whether the prompt is held, the tips, the prompt beside its upgrade, then the buttons right under them.
   on('ui.render', { component: 'Pane', requestId: PROMPT_PANE }, async ($, e) => {
     const { Box, Button, Input, Text } = $.ui.resolve(e)
-    const p = PALETTES[await themeOf($, settings)]
+    const p = PALETTES[await drawnThemeOf($, settings)]
     const tips = await read($, promptTips)
     const counts = await read($, promptCounts)
     const busy = await read($, promptBusy)
@@ -3268,7 +3251,7 @@ export const register: Register = (on, options) => {
             {heading('What it leaves out')}
             {tips.tips.map(tip => (
               <Text backgroundColor={p.bg}>
-                <Text color={STATUS[tip.level].color} backgroundColor={p.bg} bold>
+                <Text color={p.status[tip.level]} backgroundColor={p.bg} bold>
                   {STATUS[tip.level].icon}
                 </Text>
                 {t(` ${tip.text}`)}
@@ -3333,7 +3316,10 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
+    const logoPicture = ((await drawsPicturesHere($)) ? ($.ui.resolve(e) as { Image?: typeof Text }).Image : undefined) as ((props: { source: { png: string }; columns: number; rows: number; alt: string }) => unknown) | undefined
     const themeNow = await themeOf($, settings)
+    const drawnNow = await drawnThemeOf($, settings)
+    const markNow = settings.hasLogo ? markOf(drawnNow) : undefined
     const guards = await guardLines($)
     const past = await read($, history)
     const pastHidden = await read($, isPastCollapsed)
@@ -3342,7 +3328,7 @@ export const register: Register = (on, options) => {
     const reviewingNow = await read($, reviewing)
     const sessionId = await $.session.id().catch(() => undefined)
     const footer = await footerOf($)
-    const p = PALETTES[themeNow]
+    const p = PALETTES[drawnNow]
     const current = await read($, dashboard)
     const now = await $.clock.now()
     const usage = await usageOf($)
@@ -3379,7 +3365,7 @@ export const register: Register = (on, options) => {
       </Text>
     )
     const icon = (level: Level) => (
-      <Text color={STATUS[level].color} backgroundColor={p.bg} bold>
+      <Text color={p.status[level]} backgroundColor={p.bg} bold>
         {STATUS[level].icon}
       </Text>
     )
@@ -3510,7 +3496,12 @@ export const register: Register = (on, options) => {
               </Box>
             )}
           </Box>
-          {settings.hasFlamingo && (
+          {markNow === 'logo' && logoPicture && (
+            <Box flexDirection="column" flexShrink={0} marginLeft={1}>
+              {logoPicture({ source: { png: BOOMI_MARK_PNG }, columns: 6, rows: 3, alt: ' ' })}
+            </Box>
+          )}
+          {markNow === 'flamingo' && (
             <Box flexDirection="column" flexShrink={0} marginLeft={1}>
               {(() => {
                 const cells = (row: ReturnType<typeof pixelCells>[number]) =>

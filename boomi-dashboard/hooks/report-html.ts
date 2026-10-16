@@ -903,7 +903,7 @@ ${
 <body${isAll ? ' data-days' : ''}>
 <header class="masthead">
   <div class="bar">
-    <a class="wordmark" href="#top">Boomi Companion</a>
+    <a class="wordmark" href="#top">${facts.style === 'expressive' ? '' : BOOMI_LOGO_SVG('logo')}Boomi Companion</a>
     <nav aria-label="Sections">${nav}</nav>
     <div class="theme">
       <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to the dark theme" title="Dark theme"><svg class="moon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg><svg class="sun" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg></button>
@@ -959,7 +959,7 @@ ${
 </section>
 ${spendFacts ? `<section id="usage"><h2>Usage</h2><ul class="plain">${spendFacts}</ul></section>` : ''}
 </main>
-<footer><svg class="maker" viewBox="0 0 12 16" aria-hidden="true" focusable="false" shape-rendering="crispEdges">${FLAMINGO_IDLE.flatMap((row, y) => [...row].map((c, x) => (c === '.' ? '' : `<rect x="${x}" y="${y}" width="1" height="1"/>`))).join('')}</svg>A snapshot of ${isAll ? `every Boomi Companion session the dashboard kept in ${esc(facts.folder ?? 'this folder')}` : 'a Boomi Companion session'}${facts.sessionId ? ` (Claude Code session ${esc(facts.sessionId)})` : ''}, made by boomi-dashboard${facts.version ? ` ${esc(facts.version)}` : ''} on ${esc(new Date(now).toISOString().replace('T', ' ').slice(0, 16))} UTC, styled to Boomi's Exosphere design system. Nothing in it is live, and it holds no credentials.</footer>
+<footer>${facts.style === 'expressive' ? `<svg class="maker" viewBox="0 0 12 16" aria-hidden="true" focusable="false" shape-rendering="crispEdges">${FLAMINGO_IDLE.flatMap((row, y) => [...row].map((c, x) => (c === '.' ? '' : `<rect x="${x}" y="${y}" width="1" height="1"/>`))).join('')}</svg>` : BOOMI_LOGO_SVG('maker-logo')}A snapshot of ${isAll ? `every Boomi Companion session the dashboard kept in ${esc(facts.folder ?? 'this folder')}` : 'a Boomi Companion session'}${facts.sessionId ? ` (Claude Code session ${esc(facts.sessionId)})` : ''}, made by boomi-dashboard${facts.version ? ` ${esc(facts.version)}` : ''} on ${esc(new Date(now).toISOString().replace('T', ' ').slice(0, 16))} UTC, styled to Boomi's Exosphere design system. Nothing in it is live, and it holds no credentials.</footer>
 <div class="tooltip" role="tooltip" hidden></div>
 <script>${SCRIPT}</script>
 </body>
@@ -1012,6 +1012,10 @@ ${X} .l-when strong{color:var(--valence-primary)}
 
 /** Valence's Day tokens for print, whatever theme the page shows. */
 const VALENCE_PRINT = `@media print{${X},${X} .band{${DAY.split(';').map(d => `${d} !important`).join(';')}}}`
+
+/** The Boomi logo, drawn from its own vector file: a navy disc, a white b and a coral dot. For the Exosphere report's masthead and footer, in place of the flamingo. */
+export const BOOMI_LOGO_SVG = (className: string): string =>
+  `<svg class="${className}" viewBox="0 0 1000 1000" aria-hidden="true" focusable="false"><path fill="#003D58" d="M999.995,499.997c0,276.141-223.859,500-500,500S0,776.138,0,499.997S223.859,0.003,500,0.003 s500,223.859,500,500"/><path fill="#FFFFFF" d="M541.021,386.958c-63.126,0-118.501,22.836-159.005,60.56V150.11c0-7.495-8.113-12.178-14.605-8.434 l-71.704,41.399c-1.594,0.918-2.575,2.62-2.571,4.459v629.698c0,5.377,4.358,9.74,9.735,9.74h69.41c5.372,0,9.735-4.363,9.735-9.74 v-41.826c40.503,37.719,95.879,60.56,159.005,60.56c131.112,0,228.996-98.332,228.996-224.505S672.138,386.958,541.021,386.958 M541.021,752.454c-81.268,0-140.089-61.515-140.089-140.991s58.821-140.996,140.089-140.996s140.089,61.52,140.089,140.996 S622.289,752.454,541.021,752.454"/><path fill="#FF7C66" d="M820.165,334.213c0,30.47-24.703,55.173-55.173,55.173c-30.469,0-55.173-24.703-55.173-55.173 s24.703-55.173,55.173-55.173C795.462,279.04,820.165,303.743,820.165,334.213"/></svg>`
 
 const STYLE = `
 :root,.ex-theme-light{--exo-color-page:#ffffff;--exo-color-body:#f5f5f5;--exo-color-background:#ffffff;--exo-color-background-secondary:#f5f5f5;--exo-color-background-brand:#072b55;--exo-color-font:#1f1f1f;--exo-color-font-secondary:#707070;--exo-color-font-inverse:#ffffff;--exo-color-font-link:#006cd6;--exo-color-border:#cccccc;--exo-color-border-secondary:#e5e5e5;--exo-color-background-selected:#006cd6;
@@ -1127,6 +1131,8 @@ table.lanes td.lane{min-width:11rem}table.lanes tbody th{min-width:16rem}table.l
 code.copy{cursor:copy}td a,th a,.sub a{white-space:nowrap}code.copy.copied{outline:1px solid var(--exo-color-background-success-strong);outline-offset:1px;border-radius:2px}
 .why{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.15rem 0 0 1.4rem}
 svg.maker{display:inline-block}
+.wordmark .logo{width:1.5rem;height:1.5rem;vertical-align:-.4rem;margin-right:.5rem}
+footer .maker-logo{width:1rem;height:1rem;vertical-align:-.2rem;margin-right:.5rem}
 @media (max-width:900px){.budgets{padding-left:0;border-left:0;padding-top:1rem;border-top:1px solid var(--exo-color-border-secondary)}}
 @media print{.band{background:none;color:inherit}}
 main>section.first{margin-top:0;padding-top:0;border-top:0}

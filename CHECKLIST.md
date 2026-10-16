@@ -324,3 +324,23 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **P2. Your Claude budget.** Run `/bc-dashboard config seatBudgetUsd 200` (or your real figure).
   **Pass:** with a spend limit reported, BUDGET says `Claude budget: $X of $200` matching its percentage; without one, `$200 set; this login doesn't report how much of it is used`. **Fail:** a dollar figure with no spend limit, or none with one.
 
+## Q. Themes
+
+*boomi-dashboard 0.54.0. Run `/bc-dashboard upgrade` and restart first. Needs Apple Terminal and Ghostty (or kitty) on a Mac, and a browser.*
+
+- [ ] **Q1. The default is Exosphere in your system's mode.** With `paneTheme` never set, set macOS to Light (System Settings → Appearance), start a session and run `/bc-dashboard`.
+  **Pass:** the pane is white with a navy title band and `Theme ◆ Auto` among the buttons; with the system set to Dark and a new session, it is near-black with a grey-blue band. **Fail:** the pane is cream and pink (Valence), or `Auto` isn't marked.
+- [ ] **Q2. Each theme draws.** Press each theme button in turn: **Exosphere light**, **Exosphere dark**, **Whimsical light**, **Whimsical dark**, **Terminal**.
+  **Pass:** the pane's colors change at once to match its name, the active button shows `◆`, and status icons keep a symbol and a word (`✓ Nothing needs attention`). **Fail:** a theme doesn't change anything, two look the same, or text is hard to read.
+- [ ] **Q3. `/bc-dashboard theme` names and old names.** Run `/bc-dashboard theme`, then `/bc-dashboard theme exosphere-dark`, then `/bc-dashboard theme day`.
+  **Pass:** the first lists six themes with `◆` on the current one; the second says `Dashboard theme: Exosphere dark.` and the pane goes dark; the third says `Dashboard theme: Whimsical light.` **Fail:** `No theme called day`, or the pane doesn't follow.
+- [ ] **Q4. The logo in Ghostty or kitty.** In Ghostty, in an Exosphere theme, send a prompt that makes the banner show (a Companion step, or a vague prompt like `fix it`).
+  **Pass:** the Boomi logo (navy disc, white b, coral dot) sits at the left of the banner, two rows tall, and in the pane beside the numbers. **Fail:** a row of text characters, a broken picture, or nothing.
+- [ ] **Q5. No logo in Apple Terminal.** Same, in Apple Terminal.
+  **Pass:** the banner is only the coral `BC Dashboard` label and the line after it, with no block characters. **Fail:** a block or badge appears, or the text is pushed right by an empty gap.
+- [ ] **Q6. Whimsical keeps the flamingo.** Pick **Whimsical light**, then run `/bc-dashboard config logo off`.
+  **Pass:** with `logo` on, the flamingo stands in the pane and in the banner (and turns to a sparkle now and then); with it off, neither shows and the banner is just the label. **Fail:** the flamingo shows in an Exosphere theme, or stays after `logo off`.
+- [ ] **Q7. An earlier choice carries over.** Before upgrading, set `paneTheme night` (or `bandIcon flamingo`) in `/config`; upgrade and restart.
+  **Pass:** the pane opens in Whimsical dark (or, for `bandIcon flamingo` with no theme picked, in Whimsical in your system's mode), not in Exosphere. **Fail:** it opens in Exosphere, or `/config` shows an error for the saved value.
+- [ ] **Q8. The web report.** Run `/bc-dashboard report html` with the system set to Light, then Dark.
+  **Pass:** the page opens in the matching Exosphere mode, the Boomi logo sits before `Boomi Companion` in the top bar and in the footer, and the sun/moon button switches it. With `--style expressive`, the footer shows the small flamingo, not the logo. **Fail:** the logo is missing, stretched or the wrong colors.

@@ -10,7 +10,7 @@ const field = (key: string) => fieldNamed(key)!
 const ENV = ['', 'env'].join('.')
 
 // plugin.json's userConfig fields, as of 0.47.0: a new one goes into a group too.
-const MANIFEST_KEYS = ['activityLog', 'bandAnimation', 'bandIcon', 'banner', 'budgetEnforce', 'budgetGrace', 'budgetUsd', 'companionMonthlyUsd', 'companionShare', 'companionSharePeriod', 'componentsDir', 'envFile', 'flamingo', 'handoffNudge', 'historyDays', 'paneColumns', 'paneRows', 'paneTheme', 'pollSeconds', 'promptCheck', 'promptModel', 'promptSkip', 'promptView', 'recentHours', 'reportOpen', 'reportStyle', 'seatBudgetUsd', 'suggestions', 'toasts', 'updateCheck', 'updateCheckHours', 'usageBreakdown']
+const MANIFEST_KEYS = ['activityLog', 'bandAnimation', 'banner', 'budgetEnforce', 'budgetGrace', 'budgetUsd', 'companionMonthlyUsd', 'companionShare', 'companionSharePeriod', 'componentsDir', 'envFile', 'handoffNudge', 'historyDays', 'logo', 'paneColumns', 'paneRows', 'paneTheme', 'pollSeconds', 'promptCheck', 'promptModel', 'promptSkip', 'promptView', 'recentHours', 'reportOpen', 'reportStyle', 'seatBudgetUsd', 'suggestions', 'toasts', 'updateCheck', 'updateCheckHours', 'usageBreakdown']
 
 test('every userConfig field is in one group, and every group fits the menu', () => {
   const keys = GROUPS.flatMap(g => g.fields.map(f => f.key))
@@ -66,11 +66,15 @@ test('the monthly amount offers figures from the last 30 days', () => {
 test('toggles, choices and paths', () => {
   const pane = groupNamed('pane')!
   expect(questionFor(field('toasts'), true, { sessions: 0 }, { index: 1, of: 7, group: pane }).options).toEqual(['Keep on', 'Turn off', BACK])
-  const theme = questionFor(field('paneTheme'), 'night', { sessions: 0 }, { index: 1, of: 7, group: pane })
-  expect(theme.options).toEqual(['Keep night', 'Day', 'Terminal', BACK])
-  expect(theme.answer('Day')).toEqual({ kind: 'set', value: 'day' })
-  const flamingo = questionFor(field('flamingo'), true, { sessions: 0 }, { index: 7, of: 7, group: pane })
-  expect(flamingo.question).toContain('A change takes effect in your next session.')
+  const theme = questionFor(field('paneTheme'), 'whimsical-dark', { sessions: 0 }, { index: 1, of: 7, group: pane })
+  expect(theme.options).toEqual(['Keep whimsical-dark', 'Auto', 'Exosphere-light', BACK])
+  expect(theme.answer('Auto')).toEqual({ kind: 'set', value: 'auto' })
+  expect(theme.answer('whimsical-light')).toEqual({ kind: 'set', value: 'whimsical-light' })
+  const logo = questionFor(field('logo'), true, { sessions: 0 }, { index: 7, of: 7, group: pane })
+  expect(logo.options).toEqual(['Keep on', 'Turn off', BACK])
+  expect(logo.answer('Turn off')).toEqual({ kind: 'set', value: false })
+  const animation = questionFor(field('bandAnimation'), true, { sessions: 0 }, { index: 7, of: 7, group: pane })
+  expect(animation.question).toContain('A change takes effect in your next session.')
   const env = questionFor(field('envFile'), `config/${ENV}`, { sessions: 0 }, { index: 8, of: 9, group: groupNamed('data')! })
   expect(env.options).toEqual([`Keep config/${ENV}`, `Back to ${ENV}`, BACK])
   expect(env.answer(`other/${ENV}`)).toEqual({ kind: 'set', value: `other/${ENV}` })
@@ -98,7 +102,9 @@ test('the menu and the listing', () => {
   expect(list).toContain('  toasts                on  (default)')
   expect(list).toContain('/bc-dashboard config budgetUsd 5')
   expect(valueOf(field('budgetUsd'), '3')).toBe(3)
-  expect(valueOf(field('paneTheme'), 'neon')).toBe('day')
+  expect(valueOf(field('paneTheme'), 'neon')).toBe('auto')
+  expect(valueOf(field('paneTheme'), 'exosphere-dark')).toBe('exosphere-dark')
+  expect(valueOf(field('logo'), 'nope')).toBe(true)
   expect(fieldNamed('BUDGETUSD')?.key).toBe('budgetUsd')
   expect(groupNamed('data')?.name).toBe('Data and reports')
   expect(groupNamed('Done')).toBeUndefined()

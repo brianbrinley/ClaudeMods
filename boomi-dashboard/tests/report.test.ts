@@ -381,6 +381,19 @@ test('budget overrides the person granted are listed for the audit trail, and st
   expect(workSentence([step(2, { kind: 'other', subject: 'Budget override', outcome: 'ok', detail: 'x', isBudgetOverride: true })])).toBe('<strong>Budget</strong>: override allowed')
 })
 
+test('the report wears the Boomi logo in Exosphere, and the flamingo in Valence (expressive)', () => {
+  const facts = { session: 'c', sessionId: 'c', date: '2026-10-14', usage: USAGE, scope: 'session' as const }
+  const plain = reportHtml(scoped(DASHBOARD, 'session'), facts, NOW, 24 * HOUR)
+  expect(plain).toContain('<a class="wordmark" href="#top"><svg class="logo" viewBox="0 0 1000 1000" aria-hidden="true"')
+  expect(plain).toContain('<footer><svg class="maker-logo"')
+  expect(plain).toContain('fill="#003D58"')
+  expect(plain).toContain('fill="#FF7C66"')
+  expect(plain).not.toContain('class="maker"')
+  const deco = reportHtml(scoped(DASHBOARD, 'session'), { ...facts, style: 'expressive' }, NOW, 24 * HOUR)
+  expect(deco).toContain('<footer><svg class="maker"')
+  expect(deco).not.toContain('class="logo"')
+})
+
 test('one quiet theme button: a moon to go dark, a sun to come back, labelled for a screen reader', () => {
   const page = reportHtml(scoped(DASHBOARD, 'session'), { session: 'c', sessionId: 'c', date: '2026-10-14', usage: USAGE, scope: 'session' }, NOW, 24 * HOUR)
   expect(page).toContain('<button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to the dark theme" title="Dark theme"><svg class="moon"')

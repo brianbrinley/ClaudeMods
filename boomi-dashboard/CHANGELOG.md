@@ -2,6 +2,14 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.54.0
+
+- **Exosphere is the default theme.** The pane and banner now take Boomi's Exosphere colors, and **Auto** follows your system's light or dark (macOS; where it can't be read, light). The theme list is now `auto`, `exosphere-light`, `exosphere-dark`, `whimsical-light`, `whimsical-dark` and `terminal`: the buttons, `/bc-dashboard theme` and `/config` all take them. The Art Deco look is **Whimsical** now, light and dark, with its colors and the flamingo unchanged.
+- **A `logo` setting instead of the flamingo ones.** In Exosphere the mark is the Boomi logo (a picture in kitty and Ghostty, nothing elsewhere); in Whimsical it is the flamingo. `logo` turns it off in either. It replaces `flamingo`, `bandIcon` and the diamond: a banner icon of `flamingo` keeps you in Whimsical, `flamingo` off keeps the mark off, and anyone who chose the diamond now gets the logo. `bandAnimation` stays, for the Whimsical flamingo.
+- **Your saved theme carries over.** `day` and `night` are `whimsical-light` and `whimsical-dark`, in `/config`, in the dashboard's own store and in `/bc-dashboard theme day`. The old setting names stay listed in `/config` for now so a saved value isn't dropped; they are read once and no longer shown in `/bc-dashboard config`.
+- **The web report wears the logo.** `report html` puts the Boomi logo, drawn from its own vector, in the masthead and footer; `--style expressive` keeps the flamingo. The report was already Exosphere by default and follows the system's light and dark.
+- **Status colors follow the theme.** The pane's status icons use Exosphere's success, warning and danger colors in the Exosphere themes and Valence's fixed ones in Whimsical, always with an icon and a label.
+
 ## 0.53.1
 
 - **No pixel-art logo where a terminal can't draw pictures.** The navy-and-coral block that stood in for Boomi's logo in Apple Terminal, iTerm2 and the VS Code terminal is gone: there the banner is just the coral `BC Dashboard` label. In kitty and Ghostty it's still the Boomi logo itself. Takes effect in the next session.

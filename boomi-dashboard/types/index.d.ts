@@ -247,8 +247,8 @@ export type DiagnosisState = {
   error?: string
 }
 
-/** The pane's colors: Valence Day, Valence Night, or the terminal's own theme. */
-export type PaneTheme = 'day' | 'night' | 'terminal'
+/** The pane's colors: Exosphere or Whimsical (Valence), each light and dark, `auto` (Exosphere in the system's light or dark), or the terminal's own theme. */
+export type PaneTheme = 'auto' | 'exosphere-light' | 'exosphere-dark' | 'whimsical-light' | 'whimsical-dark' | 'terminal'
 
 /** A past Companion session, from the transcripts on this machine. */
 export type PastSession = {

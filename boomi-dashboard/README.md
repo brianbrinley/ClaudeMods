@@ -83,7 +83,7 @@ By hand, the same thing is `git -C ~/ClaudeMods pull --ff-only`, then `claude pl
 - **Guardrails:** with [boomi-runtime](../boomi-runtime/README.md) loaded, the runtime's state and smoke test.
 - **Past Companion sessions:** what earlier sessions on this machine did and cost. **More** pages through them.
 - **Watched components:** components you asked to watch, and who last changed them in Boomi.
-- **Themes:** **Day**, **Night** or **Terminal** (your terminal's colors), from the buttons or `/bc-dashboard theme night`. The choice is saved as the `paneTheme` setting, so `/config` shows it too.
+- **Themes:** **Auto** (the default: Boomi's [Exosphere](https://exosphere.boomi.com/) in your system's light or dark), **Exosphere light**, **Exosphere dark**, **Whimsical light** and **Whimsical dark** (the Valence Miami Deco look with the flamingo), or **Terminal** (your terminal's colors), from the buttons or `/bc-dashboard theme whimsical-dark`. In Exosphere the mark is the Boomi logo, drawn as a picture where the terminal can (kitty and Ghostty) and left out elsewhere; in Whimsical it's the flamingo. The choice is saved as the `paneTheme` setting, so `/config` shows it too. Earlier versions' `day` and `night` are Whimsical light and dark, and a banner icon of `flamingo` keeps Auto in Whimsical. Auto reads macOS's light or dark setting; where it can't be read (Linux, Windows, a locked-down shell) it is light, and the buttons pick one for good.
 
 A banner above the prompt shows the latest step and what needs attention, and the status line and toasts carry the same news. In a new session, before Companion does anything, the status line says so (`New session · last one 14h ago, nothing left to fix · $0.00 this session`) rather than repeating the last session's step:
 
@@ -470,10 +470,11 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 
 | Setting | Default | |
 |---|---|---|
-| `paneTheme` | `day` | The pane's colors. The theme buttons and `/bc-dashboard theme` set it too. |
+| `paneTheme` | `auto` | The theme: `auto`, `exosphere-light`, `exosphere-dark`, `whimsical-light`, `whimsical-dark` or `terminal`. The theme buttons and `/bc-dashboard theme` set it too. `day` and `night` still work as `whimsical-light` and `whimsical-dark`. |
 | `paneRows` | `0` | The pane's height above the prompt, in rows; `0` leaves it to Claude Code. A size you drag it to wins. |
 | `paneColumns` | `0` | The pane's width when docked, in columns; `0` leaves it to Claude Code. |
-| `flamingo` | `true` | The 8-bit flamingo, standing on one leg in a thin line of seafoam water. Every 15 seconds or so it glances back over its shoulder or blinks; now and then it shifts to the other leg or turns around; and once in a while a neighbour peeks in to say hello. |
+| `logo` | `true` | The mark in the pane and the banner. In the Exosphere themes it is the Boomi logo, a picture where the terminal draws pictures (kitty, Ghostty); in the Whimsical themes it is the 8-bit flamingo, standing on one leg in a thin line of seafoam water. Every 15 seconds or so it glances back over its shoulder or blinks; now and then it shifts to the other leg or turns around; and once in a while a neighbour peeks in to say hello. Off hides the mark in either. It replaces `flamingo`, `bandIcon` and the banner's diamond. |
+| `bandAnimation` | `true` | The banner's flamingo swaps for a sparkle for a second in every five. Only in the Whimsical themes. |
 | `recentHours` | `24` | How far back earlier sessions' steps and Companion's activity log count. |
 | `envFile` | `.env` | Companion's `.env`, relative to the working directory. |
 | `componentsDir` | `active-development` | Where Companion keeps component XML. |
