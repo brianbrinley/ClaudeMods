@@ -35,6 +35,9 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [x] **B11. A process ID from the shell.** *(Passed: Claude Code 2.1.299, macOS, 0.39.6.)* *(0.39.3, 0.39.4)* Ask Claude to test a process by its ID read from its file in the same command, for example: *"Run `PID=$(grep -o 'componentId=\"[^\"]*' <file> | cut -d'\"' -f2) && bash boomi-test-execute.sh --process-id \"$PID\"` for <process>."* Make it one that fails (an atom that refuses it, "cannot be executed on atom", counts too), then press **Run again**.
   **Pass:** the step and **Components this session** show the process's name, never `$`, and **Run again** runs the test with the real ID. **Fail:** a component named `$` or `$PID`, or **Run again** fails with the ID as written.
 
+- [ ] **B12. A held prompt leaves the prompt box.** With `promptCheck` on `confirm`, type a vague Boomi prompt such as *"deploy it"*, let the dashboard hold it, then press **Send as typed** (or **Send the upgrade**) in the Prompt tab or the banner.
+  **Pass:** Claude takes the prompt and the prompt box is empty, ready for the next one. **Fail:** the old text is still in the box.
+
 ## C. Windows (WSL)
 
 - [ ] **C1.** In Claude Code inside WSL, install the dashboard with the prompt under [Install](boomi-dashboard/README.md#install), then press **Scan**.

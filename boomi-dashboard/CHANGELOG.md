@@ -2,6 +2,19 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.51.1
+
+- **Sending a held prompt clears the prompt box.** When the dashboard held a flagged prompt, **Send as typed** and **Send the upgrade** left the original text sitting in the prompt box, in the way of your next prompt. Sending now clears it, unless you've already started typing something else.
+
+## 0.51.0
+
+- **A nudge toward /handoff on the way out.** The first `/exit`, `/quit` or `/clear` of a session that did work says what `/handoff` saves (a summary for the next session, in `~/handoffs/`) and waits; typing the command again goes through. Running `/handoff` first skips the nudge. The `handoffNudge` setting (also in `/bc-dashboard config`) turns it off. Ctrl+C and Ctrl+D leave without it.
+
+## 0.50.0
+
+- **A flamingo in the banner.** The mark before "BC Dashboard" is now the flamingo, and it flashes a sparkle for a second in every five. The `bandAnimation` setting turns the animation off.
+- **Choose the banner icon.** The `bandIcon` setting (also in `/bc-dashboard config`) picks `flamingo`, `boomi` (a round dot in Boomi's coral) or `diamond`, the old mark. Both settings take effect in the next session.
+
 ## 0.49.2
 
 - **No GitHub link in the pane.** The footer shows the session ID and the Report button only. The HTML report no longer names the repository either, so its title is the Boomi account, else the folder. The Markdown report still has its `Repository:` line.
