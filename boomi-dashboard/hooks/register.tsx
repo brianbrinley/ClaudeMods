@@ -375,7 +375,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   isBanded: options.banner !== false,
   hasFlamingo: options.flamingo !== false,
   isBandAnimated: options.bandAnimation !== false,
-  bandIcon: options.bandIcon === 'boomi' || options.bandIcon === 'diamond' ? options.bandIcon : 'flamingo',
+  bandIcon: options.bandIcon === 'flamingo' || options.bandIcon === 'diamond' ? options.bandIcon : 'boomi',
   isNudgingHandoff: options.handoffNudge !== false,
   budgetUsd: Math.max(0, Number(options.budgetUsd ?? 0) || 0),
   isSuggesting: options.suggestions !== false,
@@ -420,6 +420,8 @@ const FLAMINGO_TICK_MS = 500
 
 /** Boomi's coral, the banner's round mark when the icon is set to boomi. */
 const BOOMI_CORAL = '#FF7C69'
+/** The navy of Boomi's round mark, behind the white b. */
+const BOOMI_NAVY = '#003D58'
 
 /** How often the banner's flamingo moves on. */
 const BAND_FLAMINGO_TICK_MS = 1_000
@@ -2870,8 +2872,8 @@ export const register: Register = (on, options) => {
         if (JSON.stringify(sceneAt(sceneTick)) !== JSON.stringify(sceneAt(await read($, frame)))) await update($, frame, () => sceneTick)
       })
     }
-    // The banner's flamingo: a sparkle in its place for a second in five; the banner redraws only when that changes.
-    if (settings.isBanded && settings.isBandAnimated && settings.bandIcon === 'flamingo') {
+    // The banner's flamingo, or the dot of Boomi's mark: a sparkle in its place for a second in five; the banner redraws only when that changes.
+    if (settings.isBanded && settings.isBandAnimated && settings.bandIcon !== 'diamond') {
       $.clock.every(BAND_FLAMINGO_TICK_MS, async () => {
         bandTick++
         if (bandFlamingoAt(bandTick) !== bandFlamingoAt(await read($, bandFrame))) await update($, bandFrame, () => bandTick)
@@ -3061,10 +3063,23 @@ export const register: Register = (on, options) => {
     const nudge = tipsNow && (held !== null || tipsNow.at !== (await read($, promptNudgeHidden))) ? tipsNow : null
     if (!latest && !welcome && needs.length === 0 && !paused && !nudge) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    // The mark before the name: the flamingo (animated unless turned off), Boomi's coral dot, or the old diamond.
+    // The mark before the name: Boomi's b and its coral dot (the dot twinkles like the flamingo's sparkle), the flamingo (animated unless turned off), or the old diamond. Each is two cells wide.
+    const isSparkling = settings.isBandAnimated && bandFlamingoAt(await read($, bandFrame)) !== '🦩'
     const mark =
-      settings.bandIcon === 'boomi' ? '●' : settings.bandIcon === 'diamond' ? '◆' : settings.isBandAnimated ? bandFlamingoAt(await read($, bandFrame)) : '🦩'
-    const markColor = settings.bandIcon === 'boomi' ? BOOMI_CORAL : undefined
+      settings.bandIcon === 'boomi'
+        ? [
+            <Text key="mark-b" color="#FFFFFF" backgroundColor={BOOMI_NAVY} bold>
+              b
+            </Text>,
+            <Text key="mark-dot" color={BOOMI_CORAL} backgroundColor={BOOMI_NAVY} bold>
+              {isSparkling ? '✦' : '•'}
+            </Text>,
+          ]
+        : settings.bandIcon === 'diamond'
+          ? '◆'
+          : settings.isBandAnimated
+            ? bandFlamingoAt(await read($, bandFrame))
+            : '🦩'
     const count = components(current.activity).length
     const usage = await usageOf($)
     const cost = formatCost(usage.usd)
@@ -3081,7 +3096,7 @@ export const register: Register = (on, options) => {
         <Box flexShrink={1}>
           <Text wrap="truncate-end">
             <Text bold color="claude">
-              <Text color={markColor}>{mark}</Text> BC Dashboard{' '}
+              {typeof mark === 'string' ? <Text>{mark}</Text> : mark} BC Dashboard{' '}
             </Text>
             {held !== null ? <Text color={STATUS.warning.color}>⏸ Held: </Text> : <Text>{icon(nudge.tips.some(t => t.level === 'serious') ? 'serious' : 'warning')} </Text>}
             <Text>Boomi Dashboard suggests a clearer prompt</Text>
@@ -3115,7 +3130,7 @@ export const register: Register = (on, options) => {
         <Box flexShrink={1}>
           <Text wrap="truncate-end">
             <Text bold color="claude">
-              <Text color={markColor}>{mark}</Text> BC Dashboard{' '}
+              {typeof mark === 'string' ? <Text>{mark}</Text> : mark} BC Dashboard{' '}
             </Text>
             {paused && (
               <Text color={STATUS.critical.color}>

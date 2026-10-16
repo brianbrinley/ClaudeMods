@@ -2773,6 +2773,23 @@ test('confirm: a held prompt can go back to the prompt box, or be discarded; the
   expect(sent).toEqual([VAGUE])
 })
 
+test('the banner mark is Boomi\'s b and coral dot by default, and the flamingo or diamond when chosen', async ($, on) => {
+  await promptWorld($, on)
+  await $.tool.call({ tool: 'Bash', command: PUSH })
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...BAND_TARGET })
+  expect(await band.find({ text: 'b' })).toBeDefined()
+  expect(await band.find({ text: '•' })).toBeDefined()
+  expect(await band.find({ text: '🦩' })).toBeUndefined()
+})
+
+test('bandIcon flamingo keeps the flamingo in the banner', { options: { bandIcon: 'flamingo' } }, async ($, on) => {
+  await promptWorld($, on)
+  await $.tool.call({ tool: 'Bash', command: PUSH })
+  const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...BAND_TARGET })
+  expect(await band.find({ text: '🦩' })).toBeDefined()
+  expect(await band.find({ text: '•' })).toBeUndefined()
+})
+
 test('suggest: the banner nudges with the suggestion, Use it fills the prompt box, and ✕ puts the nudge away', { options: { promptCheck: 'suggest' } }, async ($, on) => {
   const { filled, typed } = await promptWorld($, on)
   await typed(VAGUE)
