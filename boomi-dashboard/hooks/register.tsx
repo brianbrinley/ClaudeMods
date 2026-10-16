@@ -124,6 +124,7 @@ import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, groupWithV
 import type { Group, PastSpend, Value } from './config'
 import { blockedDetail, companionChanges, denyMessage, enforcementNote, platformWrites, spentBudgets, spentText, wrapperScripts } from './budget-gate'
 import type { Enforce } from './budget-gate'
+import { BOOMI_MARK_PNG, drawsPictures, markCells } from './boomi-mark'
 import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
 import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
@@ -419,9 +420,6 @@ const UPDATE_SEEN_KEY = 'updateSeen'
 const FLAMINGO_TICK_MS = 500
 
 /** Boomi's coral, the banner's round mark when the icon is set to boomi. */
-const BOOMI_CORAL = '#FF7C69'
-/** The navy of Boomi's round mark, behind the white b. */
-const BOOMI_NAVY = '#003D58'
 
 /** How often the banner's flamingo moves on. */
 const BAND_FLAMINGO_TICK_MS = 1_000
@@ -2872,8 +2870,8 @@ export const register: Register = (on, options) => {
         if (JSON.stringify(sceneAt(sceneTick)) !== JSON.stringify(sceneAt(await read($, frame)))) await update($, frame, () => sceneTick)
       })
     }
-    // The banner's flamingo, or the dot of Boomi's mark: a sparkle in its place for a second in five; the banner redraws only when that changes.
-    if (settings.isBanded && settings.isBandAnimated && settings.bandIcon !== 'diamond') {
+    // The banner's flamingo: a sparkle in its place for a second in five; the banner redraws only when that changes.
+    if (settings.isBanded && settings.isBandAnimated && settings.bandIcon === 'flamingo') {
       $.clock.every(BAND_FLAMINGO_TICK_MS, async () => {
         bandTick++
         if (bandFlamingoAt(bandTick) !== bandFlamingoAt(await read($, bandFrame))) await update($, bandFrame, () => bandTick)
@@ -3063,23 +3061,34 @@ export const register: Register = (on, options) => {
     const nudge = tipsNow && (held !== null || tipsNow.at !== (await read($, promptNudgeHidden))) ? tipsNow : null
     if (!latest && !welcome && needs.length === 0 && !paused && !nudge) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    // The mark before the name: Boomi's b and its coral dot (the dot twinkles like the flamingo's sparkle), the flamingo (animated unless turned off), or the old diamond. Each is two cells wide.
-    const isSparkling = settings.isBandAnimated && bandFlamingoAt(await read($, bandFrame)) !== '🦩'
-    const mark =
-      settings.bandIcon === 'boomi'
-        ? [
-            <Text key="mark-b" color="#FFFFFF" backgroundColor={BOOMI_NAVY} bold>
-              b
-            </Text>,
-            <Text key="mark-dot" color={BOOMI_CORAL} backgroundColor={BOOMI_NAVY} bold>
-              {isSparkling ? '✦' : '•'}
-            </Text>,
-          ]
-        : settings.bandIcon === 'diamond'
-          ? '◆'
-          : settings.isBandAnimated
-            ? bandFlamingoAt(await read($, bandFrame))
-            : '🦩'
+    // The mark before the name. Boomi's is its logo, in a column of its own beside the rows: the picture where the terminal draws pictures, a small badge elsewhere. The flamingo (animated unless turned off) and the diamond are one cell of text.
+    const isBoomi = settings.bandIcon === 'boomi'
+    const inlineMark = isBoomi ? '' : `${settings.bandIcon === 'diamond' ? '◆' : settings.isBandAnimated ? bandFlamingoAt(await read($, bandFrame)) : '🦩'} `
+    const Picture = (isBoomi ? ($.ui.resolve(e) as { Image?: typeof Text }).Image : undefined) as ((props: { source: { png: string }; columns: number; rows: number; alt: string }) => unknown) | undefined
+    const hasPictures = Picture !== undefined && drawsPictures({ TERM: await $.env.get('TERM').catch(() => undefined), TERM_PROGRAM: await $.env.get('TERM_PROGRAM').catch(() => undefined) })
+    const withMark = (body: ReturnType<typeof h>) =>
+      isBoomi ? (
+        <Box>
+          <Box flexShrink={0} flexDirection="column" marginRight={1}>
+            {hasPictures
+              ? Picture!({ source: { png: BOOMI_MARK_PNG }, columns: 4, rows: 2, alt: ' ' })
+              : markCells().map((row, y) => (
+                  <Box key={`mark-${y}`}>
+                    {row.map((cell, x) => (
+                      <Text key={`mark-${y}-${x}`} color={cell.color} backgroundColor={cell.backgroundColor}>
+                        {cell.char}
+                      </Text>
+                    ))}
+                  </Box>
+                ))}
+          </Box>
+          <Box flexDirection="column" flexGrow={1} flexShrink={1} justifyContent="center">
+            {body}
+          </Box>
+        </Box>
+      ) : (
+        body
+      )
     const count = components(current.activity).length
     const usage = await usageOf($)
     const cost = formatCost(usage.usd)
@@ -3096,7 +3105,7 @@ export const register: Register = (on, options) => {
         <Box flexShrink={1}>
           <Text wrap="truncate-end">
             <Text bold color="claude">
-              {typeof mark === 'string' ? <Text>{mark}</Text> : mark} BC Dashboard{' '}
+              {inlineMark}BC Dashboard{' '}
             </Text>
             {held !== null ? <Text color={STATUS.warning.color}>⏸ Held: </Text> : <Text>{icon(nudge.tips.some(t => t.level === 'serious') ? 'serious' : 'warning')} </Text>}
             <Text>Boomi Dashboard suggests a clearer prompt</Text>
@@ -3121,16 +3130,16 @@ export const register: Register = (on, options) => {
         </Box>
       </Box>
     ) : undefined
-    if (!latest && !welcome && needs.length === 0 && !paused) return nudgeRow!
+    if (!latest && !welcome && needs.length === 0 && !paused) return withMark(nudgeRow!)
 
-    return (
+    return withMark(
       <Box flexDirection="column">
       {nudgeRow}
       <Box>
         <Box flexShrink={1}>
           <Text wrap="truncate-end">
             <Text bold color="claude">
-              {typeof mark === 'string' ? <Text>{mark}</Text> : mark} BC Dashboard{' '}
+              {inlineMark}BC Dashboard{' '}
             </Text>
             {paused && (
               <Text color={STATUS.critical.color}>
@@ -3168,7 +3177,7 @@ export const register: Register = (on, options) => {
           <Button key="hide" label="Hide" onPress={() => update($, isBandHidden, () => true)} />
         </Box>
       </Box>
-      </Box>
+      </Box>,
     )
   })
 
