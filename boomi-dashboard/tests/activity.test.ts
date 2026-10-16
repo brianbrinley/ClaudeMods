@@ -71,6 +71,8 @@ import {
   choiceList,
   pondRows,
   bandFlamingoAt,
+  handoffNudgeText,
+  shouldNudgeHandoff,
   sceneAt,
   sceneRows,
   limitViews,
@@ -1194,6 +1196,18 @@ test('the pace in words: where the month leads, when it runs out, today, and onl
   expect(lines.map(l => l.label)).toEqual(['Claude budget', 'Claude pace', 'Claude spend'])
   expect(lines[1]).toMatchObject({ percent: 0, isUnmeasured: true, detail: 'on pace for $796 (72%) by the reset in 16d 4h' })
   expect(usageReadLines(usage as never)).toContain('Claude pace: on pace for $796 (72%) by the reset in 16d 4h')
+})
+
+test('the handoff nudge speaks once, only for a session that did work, and not after /handoff or when turned off', () => {
+  const base = { isOn: true, calls: 3, isNudged: false, isDone: false }
+  expect(shouldNudgeHandoff(base)).toBe(true)
+  expect(shouldNudgeHandoff({ ...base, calls: 0 })).toBe(false)
+  expect(shouldNudgeHandoff({ ...base, isNudged: true })).toBe(false)
+  expect(shouldNudgeHandoff({ ...base, isDone: true })).toBe(false)
+  expect(shouldNudgeHandoff({ ...base, isOn: false })).toBe(false)
+  expect(handoffNudgeText('exit')).toContain('type /exit again to leave without it')
+  expect(handoffNudgeText('clear')).toContain('type /clear again to clear without it')
+  expect(handoffNudgeText('quit')).toContain('/bc-dashboard config handoffNudge off')
 })
 
 test('the banner flamingo shows a sparkle for one tick in five, and never moves the text beside it', () => {

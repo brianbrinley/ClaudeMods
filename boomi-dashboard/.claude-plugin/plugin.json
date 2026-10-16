@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.50.0",
+  "version": "0.51.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -48,6 +48,12 @@
       "type": "boolean",
       "title": "Animate the banner flamingo",
       "description": "Swap the banner's flamingo for a sparkle for a second in every five; only when the banner icon is the flamingo",
+      "default": true
+    },
+    "handoffNudge": {
+      "type": "boolean",
+      "title": "Suggest /handoff on the way out",
+      "description": "The first /exit, /quit or /clear of a session that did work suggests /handoff first; typing the command again goes through",
       "default": true
     },
     "recentHours": {

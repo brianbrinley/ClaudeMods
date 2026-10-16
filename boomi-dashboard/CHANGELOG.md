@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.51.0
+
+- **A nudge toward /handoff on the way out.** The first `/exit`, `/quit` or `/clear` of a session that did work says what `/handoff` saves (a summary for the next session, in `~/handoffs/`) and waits; typing the command again goes through. Running `/handoff` first skips the nudge. The `handoffNudge` setting (also in `/bc-dashboard config`) turns it off. Ctrl+C and Ctrl+D leave without it.
+
 ## 0.50.0
 
 - **A flamingo in the banner.** The mark before "BC Dashboard" is now the flamingo, and it flashes a sparkle for a second in every five. The `bandAnimation` setting turns the animation off.

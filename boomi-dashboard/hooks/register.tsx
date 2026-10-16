@@ -47,6 +47,8 @@ import {
   githubUrl,
   headline,
   bandFlamingoAt,
+  handoffNudgeText,
+  shouldNudgeHandoff,
   sceneAt,
   sceneRows,
   levelOf,
@@ -337,6 +339,7 @@ type Settings = {
   hasFlamingo: boolean
   isBandAnimated: boolean
   bandIcon: 'flamingo' | 'boomi' | 'diamond'
+  isNudgingHandoff: boolean
   budgetUsd: number
   isSuggesting: boolean
   historyDays: number
@@ -373,6 +376,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   hasFlamingo: options.flamingo !== false,
   isBandAnimated: options.bandAnimation !== false,
   bandIcon: options.bandIcon === 'boomi' || options.bandIcon === 'diamond' ? options.bandIcon : 'flamingo',
+  isNudgingHandoff: options.handoffNudge !== false,
   budgetUsd: Math.max(0, Number(options.budgetUsd ?? 0) || 0),
   isSuggesting: options.suggestions !== false,
   historyDays: Math.max(1, Number(options.historyDays ?? 90) || 90),
@@ -2941,6 +2945,22 @@ export const register: Register = (on, options) => {
     }
     return ran
   })
+
+  // On the way out: the first /exit, /quit or /clear of a session that did work says what /handoff saves; typing it again goes through.
+  let isHandoffMade = false
+  let isHandoffNudged = false
+  on('command.run', { command: 'handoff' }, ($, e, next) => {
+    isHandoffMade = true
+    return next(e)
+  })
+  for (const name of ['exit', 'quit', 'clear']) {
+    on('command.run', { command: name }, async ($, e, next) => {
+      const calls = (await read($, ledger)).calls
+      if (!shouldNudgeHandoff({ isOn: settings.isNudgingHandoff, calls, isNudged: isHandoffNudged, isDone: isHandoffMade })) return next(e)
+      isHandoffNudged = true
+      return { text: handoffNudgeText(name) }
+    })
+  }
 
   on('command.run', { command: 'bc-dashboard' }, async ($, e) => {
     await ensureSession($, settings).catch(() => undefined)

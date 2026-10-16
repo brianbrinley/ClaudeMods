@@ -1703,6 +1703,15 @@ export const BAND_FLAMINGO: readonly string[] = ['🦩', '🦩', '🦩', '🦩',
 
 export const bandFlamingoAt = (tick: number): string => BAND_FLAMINGO[Math.max(0, Math.floor(tick)) % BAND_FLAMINGO.length]!
 
+/** Whether the first /exit, /quit or /clear of a session should suggest /handoff: the nudge is on, the session did work, and it hasn't nudged or been handed off yet. */
+export const shouldNudgeHandoff = (s: { isOn: boolean; calls: number; isNudged: boolean; isDone: boolean }): boolean => s.isOn && s.calls > 0 && !s.isNudged && !s.isDone
+
+/** What the nudge says in place of the command, which runs the next time it's typed. */
+export const handoffNudgeText = (command: string): string => {
+  const leave = command === 'clear' ? 'clear' : 'leave'
+  return `Before you ${leave}: /handoff writes a summary of this session to ~/handoffs/ for the next one to pick up. Run it now, or type /${command} again to ${leave} without it. To turn this nudge off: /bc-dashboard config handoffNudge off`
+}
+
 /** The flamingo's width in pixels, and the strip it stands in: room either side for it to turn, and for a visitor. */
 export const FLAMINGO_WIDTH = 12
 export const STRIP_WIDTH = 18
