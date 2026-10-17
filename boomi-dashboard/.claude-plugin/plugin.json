@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.57.0",
+  "version": "0.58.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -238,6 +238,16 @@
         "manual"
       ],
       "default": "auto"
+    },
+    "promptSuggested": {
+      "type": "string",
+      "title": "Prompts taken from a suggestion",
+      "description": "skip leaves a suggestion taken with Tab and sent as it was unchecked; check treats it like any other prompt",
+      "options": [
+        "skip",
+        "check"
+      ],
+      "default": "skip"
     },
     "promptModel": {
       "type": "string",

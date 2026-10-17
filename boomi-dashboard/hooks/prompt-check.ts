@@ -147,6 +147,14 @@ export const checkPrompt = (text: string, facts: PromptFacts, skip: ReadonlySet<
 
 const listed = (parts: readonly string[]) => (parts.length <= 1 ? parts.join('') : `${parts.slice(0, -1).join(', ')} or ${parts[parts.length - 1]}`)
 
+const squash = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase()
+
+/** Whether a typed prompt is, word for word, one of the texts the prompt box showed as a suggestion: Claude's own guess, or a plugin's, taken with Tab. */
+export const isSuggestionTaken = (typed: string, shown: readonly string[]): boolean => {
+  const same = squash(typed)
+  return same !== '' && shown.some(s => squash(s) === same)
+}
+
 const sentence = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
 
 /**
@@ -351,7 +359,7 @@ export const countsAfter = (counts: PromptCounts, before: readonly PromptTip[] |
     const was = byCode[t.code] ?? { seen: 0, followed: 0 }
     byCode[t.code] = { ...was, seen: was.seen + 1 }
   }
-  return { checked: counts.checked + 1, tipped: counts.tipped + (tips.length > 0 ? 1 : 0), followed: counts.followed + followed, byCode }
+  return { ...counts, checked: counts.checked + 1, tipped: counts.tipped + (tips.length > 0 ? 1 : 0), followed: counts.followed + followed, byCode }
 }
 
 const LABELS: Record<PromptCheckCode, string> = {
@@ -377,7 +385,12 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 /** The counts in a line: "6 prompts checked · 4 with tips · 3 tips followed". */
 export const countsLine = (counts: PromptCounts): string =>
-  [plural(counts.checked, 'prompt') + ' checked', `${counts.tipped} with tips`, plural(counts.followed, 'tip') + ' followed'].join(' · ')
+  [
+    plural(counts.checked, 'prompt') + ' checked',
+    `${counts.tipped} with tips`,
+    plural(counts.followed, 'tip') + ' followed',
+    ...(counts.suggested ? [`${counts.suggested} of Claude's suggestions taken as they were`] : []),
+  ].join(' · ')
 
 /** The status line's part: "◐ 3 prompt tips", or that a prompt is held. Serious when one is (a secret, production). */
 export const statusPart = (tips: PromptTips | null, isHeld = false): string | undefined => {
@@ -400,7 +413,7 @@ export const tipsText = (tips: PromptTips | null, counts: PromptCounts, mode: st
     if (tips.why && tips.why.length > 0) lines.push('Why it changed:', ...tips.why.map(w => `  - ${w}`), '')
     lines.push('/bc-dashboard prompt use puts it in the prompt box. /bc-dashboard prompt upgrade has a model rewrite it.')
   }
-  if (counts.checked > 0) {
+  if (counts.checked > 0 || counts.suggested) {
     const top = mostOften(counts)
     lines.push('', `This session: ${countsLine(counts)}${top ? `. Most often: ${top}` : ''}`)
   }

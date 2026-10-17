@@ -347,6 +347,8 @@ The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Promp
 
 **What's left alone:** slash commands, prompts typed while Claude works, messages from other sessions and background tasks, short replies ("yes", "keep going"), prompts with no Boomi words in them, and anything outside a Companion folder. Start a prompt with `>` to send it unchecked (the `>` is taken off).
 
+**Suggestions you take.** When the prompt box shows a dim suggestion (Claude's own guess after a turn, or the dashboard's next step) and you take it with Tab and send it as it was, it isn't your wording, so it isn't checked: no tips, no hold, no rewrite, and no model call. A suggestion you edit is checked like any prompt, and a secret in one is still asked about. Each suggestion is taken once. The count shows in `/bc-dashboard prompt` and the session report (`2 of Claude's suggestions taken as they were`). `promptSuggested check` treats them like any other prompt. The dashboard tells a taken suggestion by matching the words, since Claude Code doesn't say where a prompt came from.
+
 **Privacy:** the prompt is masked before it's kept, kept only in this session's state, and never logged or saved across sessions. A held prompt is kept as typed, in this session only, until you send or discard it. The model rewrite reads the masked prompt, the session's facts, matching component names and Companion's docs, never Companion's `.env` or its token; the dashboard reads only `BOOMI_ENVIRONMENT_ID` from it for the tips.
 
 **Counted:** `/bc-dashboard prompt` and the session report say how many prompts were checked and had tips, how many tips your next prompt followed, and which tip came up most.
@@ -500,6 +502,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `historyDays` | `90` | How far back **Past Companion sessions** reads. |
 | `promptCheck` | `confirm` | [Prompt tips](#prompt-tips): `confirm` holds a flagged prompt until you send it or the upgrade; `suggest` shows tips and sends the prompt; `off` never checks. A secret in a prompt asks unless this is `off`. |
 | `promptView` | `auto` | When the [Prompt tab](#prompt-tips) opens: `auto` when a prompt gets tips, `manual` only when you ask, `off` never. |
+| `promptSuggested` | `skip` | A [suggestion](#prompt-tips) from the prompt box, taken with Tab and sent as it was: `skip` leaves it unchecked, `check` treats it like any other prompt. |
 | `promptRewrite` | `auto` | Whether the model rewrites a prompt that gets tips by itself, in the background (`auto`), or only when you ask (`manual`). |
 | `promptModel` | `haiku` | The model that rewrites a prompt, by itself or when you ask. |
 | `promptSkip` | (none) | Prompt checks to leave out, separated by commas. |

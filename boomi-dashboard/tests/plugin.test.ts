@@ -2859,6 +2859,71 @@ test('/bc-dashboard prompt guide shows what Companion changed since the guide wa
   expect(draft).toContain('Nothing was changed.')
 })
 
+/** The prompt box can show a suggestion: register this before the test first calls `$`. */
+const showsSuggestions = (on: On) => on('prompt.suggest', async () => ({ isShown: true }))
+/** The prompt box shows `text` dim as a suggestion, as the engine does after a turn. */
+const suggest = ($: Engine, text: string) => $.prompt.suggest({ text })
+
+test('a suggestion taken as it was is not checked: no tips, no hold, no rewrite, and it is counted', async ($, on) => {
+  showsSuggestions(on)
+  const requests: { system?: string; prompt?: string }[] = []
+  answers(requests)(on)
+  const { sent, typed } = await promptWorld($, on)
+  await suggest($, VAGUE)
+  await typed(VAGUE)
+  await clock.advance(1)
+  // It went to Claude as it was: not held for the question, and the model never read it.
+  expect(sent).toEqual([VAGUE])
+  expect(requests).toHaveLength(0)
+  expect(tabOpens()).toEqual([])
+  const text = (await $.command.run(dashboard('prompt'))).text
+  expect(text).toContain('No Boomi prompt checked yet')
+  expect(text).toContain("1 of Claude's suggestions taken as they were")
+  // Each suggestion is taken once: the same words typed again are the person's own.
+  await typed(VAGUE)
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('Prompt tips (promptCheck: confirm)')
+  expect(tabOpens()).not.toEqual([])
+})
+
+test('a suggestion the person edited is checked like any other prompt', async ($, on) => {
+  showsSuggestions(on)
+  const { typed } = await promptWorld($, on)
+  await suggest($, 'deploy Orders Sync and test it')
+  await typed('deploy it')
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('"it"')
+})
+
+test('check: promptSuggested check treats a taken suggestion like any other prompt', { options: { promptSuggested: 'check' } }, async ($, on) => {
+  showsSuggestions(on)
+  const { typed } = await promptWorld($, on)
+  await suggest($, VAGUE)
+  await typed(VAGUE)
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('Prompt tips (promptCheck: confirm)')
+  expect((await $.command.run(dashboard('prompt'))).text).not.toContain('suggestions taken')
+})
+
+test('a suggestion with a secret in it is still asked about', async ($, on) => {
+  const asked: string[] = []
+  showsSuggestions(on)
+  const { typed } = await promptWorld($, on, q => (asked.push(q.question), 'Send it with the secret masked'))
+  const text = 'deploy Orders Sync with password=hunter22'
+  await suggest($, text)
+  await typed(text)
+  expect(asked.some(q => /secret/i.test(q))).toBe(true)
+})
+
+test('the dashboard’s own next-step suggestion, taken as it was, is skipped the same way', async ($, on) => {
+  showsSuggestions(on)
+  on('turn.complete', async () => ({ text: '' }))
+  const { sent, typed } = await promptWorld($, on)
+  await $.turn.complete({ reason: 'answer', turnId: 't1', answer: '' } as never)
+  await $.command.run(dashboard('text'))
+  const next = 'Deploy Orders Sync and test it'
+  await typed(next)
+  expect(sent).toContain(next)
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('suggestions taken as they were')
+})
+
 // --- After /clear ---
 
 test('after /clear the dashboard sets the new session up again: it sees the folder anew, checks prompts, and keeps what was saved', async ($, on) => {
