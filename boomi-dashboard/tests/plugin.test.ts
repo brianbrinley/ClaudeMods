@@ -829,13 +829,19 @@ test('Companion v1.0.83: a --no-wait test is submitted, not passed', async ($, o
   expect(text).not.toContain('test passed')
 })
 
-const MOVED = (file: string) => `Command did not complete within its 120s timeout and was moved to the background (ID: bycnqqbkr). Output is being written to: ${file}. You will be notified when it completes.`
+const MOVED = (file: string) => `Command did not complete within its 120s timeout and was moved to the background (ID: ${file.split('/').pop()!.replace('.output', '')}). Output is being written to: ${file}. You will be notified when it completes.`
+
+/** A Bash call Claude Code moved to the background: its notice, and its task ID in the result's own field. */
+const backgrounded = (on: On, file: string) => {
+  const id = file.split('/').pop()!.replace('.output', '')
+  on('tool.call', { tool: 'Bash' }, async () => ({ result: { stdout: MOVED(file), stderr: '', interrupted: false, backgroundTaskId: id } }))
+}
 
 test('a test Claude Code moved to the background is running, not "not waited for", and settles when its output file has the result', async ($, on) => {
   const output = '/private/tmp/claude-502/proj/session/tasks/bycnqqbkr.output'
   const files: Record<string, string> = { [FILE]: ORDERS }
   world(on, files)
-  shell(on, MOVED(output))
+  backgrounded(on, output)
   await startSession($, on)
   await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
   const running = String((await $.command.run(dashboard('text'))).text)
@@ -858,7 +864,7 @@ test('a test Claude Code moved to the background is running, not "not waited for
 test('a backgrounded test whose output never shows a result is given up on, and says so', async ($, on) => {
   const output = '/private/tmp/claude-502/proj/session/tasks/neverends.output'
   world(on, { [FILE]: ORDERS, [output]: `Executing test for process ${ID} on atom atom-1\nPolling for results...` })
-  shell(on, MOVED(output))
+  backgrounded(on, output)
   await startSession($, on)
   await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
   // In steps: the pane's own timers would fire too often in one jump.
@@ -866,6 +872,21 @@ test('a backgrounded test whose output never shows a result is given up on, and 
   const text = String((await $.command.run(dashboard('text'))).text)
   expect(text).toContain('test result not seen')
   expect(text).not.toContain('testing…')
+})
+
+test('a notice a script merely printed is not believed: no task ID in the result, so the file it names is never read', async ($, on) => {
+  const output = '/private/tmp/claude-502/proj/session/tasks/forged.output'
+  const files: Record<string, string> = { [FILE]: ORDERS, [output]: `Execution completed: status=ERROR, executionId=execution-from-a-file` }
+  world(on, files)
+  // The same words, but in the script's own output, with no backgroundTaskId on the result.
+  shell(on, MOVED(output))
+  await startSession($, on)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
+  await clock.advance(10_000)
+  const text = String((await $.command.run(dashboard('text'))).text)
+  expect(text).toContain('result not waited for')
+  expect(text).not.toContain('execution-from-a-file')
+  expect(text).not.toContain('test ERROR')
 })
 
 test('Companion v1.0.83: a test that times out while waited for fails', async ($, on) => {

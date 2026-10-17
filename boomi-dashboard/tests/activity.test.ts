@@ -1219,7 +1219,7 @@ test('the banner flamingo shows a sparkle for one tick in five, and never moves 
 test('a command Claude Code moved to the background is told by its notice: the task ID and the output file', () => {
   const notice = 'Command did not complete within its 120s timeout and was moved to the background (ID: bycnqqbkr). Output is being written to: /private/tmp/claude-502/proj/session/tasks/bycnqqbkr.output. You will be notified when it completes. To check interim output, use Read on that file path.'
   expect(backgroundOf(notice)).toEqual({ id: 'bycnqqbkr', file: '/private/tmp/claude-502/proj/session/tasks/bycnqqbkr.output' })
-  expect(backgroundOf('Command running in background with ID: b123abc. Output is being written to: /tmp/t/b123abc.output')).toEqual({ id: 'b123abc', file: '/tmp/t/b123abc.output' })
+  expect(backgroundOf('Command running in background with ID: b123abc. Output is being written to: /tmp/t/tasks/b123abc.output')).toEqual({ id: 'b123abc', file: '/tmp/t/tasks/b123abc.output' })
   // A script's own output, even one that talks about polling in the background, is not the notice.
   expect(backgroundOf('Executing test for process x on atom a\nPolling for results...\nExecution completed: status=ERROR, executionId=execution-1')).toBeUndefined()
   expect(backgroundOf('')).toBeUndefined()
@@ -1233,4 +1233,19 @@ test('a script’s output is settled once it holds the final line: a test’s st
   expect(isSettled('deploy', "Packaging 'X' (id) from the account default branch")).toBe(false)
   expect(isSettled('deploy', "Packaging 'X' (id)\nSUCCESS: Deployed 'X' (package: p1)")).toBe(true)
   expect(isSettled('push', 'ERROR: nothing to push')).toBe(true)
+})
+
+test('only the notice’s own shape is believed: a path outside a task’s output file is never read', () => {
+  const at = (file: string, id = 'bycnqqbkr') => `Command did not complete within its 120s timeout and was moved to the background (ID: ${id}). Output is being written to: ${file}. You will be notified when it completes.`
+  const ok = '/private/tmp/claude-502/proj/session/tasks/bycnqqbkr.output'
+  expect(backgroundOf(at(ok))).toEqual({ id: 'bycnqqbkr', file: ok })
+  expect(backgroundOf(at('/etc/passwd'))).toBeUndefined()
+  expect(backgroundOf(at('/Users/me/.ssh/id_rsa'))).toBeUndefined()
+  expect(backgroundOf(at('/private/tmp/claude-502/proj/session/tasks/../../../../../etc/passwd'))).toBeUndefined()
+  expect(backgroundOf(at('/private/tmp/claude-502/proj/session/tasks/../tasks/bycnqqbkr.output'))).toBeUndefined()
+  expect(backgroundOf(at('tasks/bycnqqbkr.output'))).toBeUndefined()
+  // Another task's file, not this one's.
+  expect(backgroundOf(at('/private/tmp/claude-502/proj/session/tasks/other.output'))).toBeUndefined()
+  // Not in a tasks folder.
+  expect(backgroundOf(at('/private/tmp/claude-502/proj/session/notes/bycnqqbkr.output'))).toBeUndefined()
 })

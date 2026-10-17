@@ -862,7 +862,9 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
   const output = ran.deny === undefined ? outputOf(ran) : ''
   const isError = ran.isError === true
   // Claude Code moved the command to the background (it outlasted the Bash timeout): what came back is its notice, not the script's output. The steps stay running, and `settleBackground` reads the result from the output file once it's there.
-  const background = ran.deny === undefined ? backgroundOf(output) : undefined
+  // Believed only when the notice's task ID is the one in the result's own structured field: a script's printed text can say anything, but cannot set that.
+  const noticed = ran.deny === undefined ? backgroundOf(output) : undefined
+  const background = noticed && (ran.result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId === noticed.id ? noticed : undefined
   if (background) {
     await record($, list => list.map(a => (started.some(s => s.id === a.id) ? { ...a, detail: 'running in the background', watchFile: background.file } : a)))
     void refreshStatus($, settings)

@@ -428,7 +428,12 @@ export const parseResults = (output: string): Result[] => {
  */
 export const backgroundOf = (output: string): { id: string; file: string } | undefined => {
   const m = output.match(/background[^\n]*?\bID:?\s*\(?([A-Za-z0-9_-]+)\)?[\s\S]{0,40}?written to:\s*(\S+)/i)
-  return m ? { id: m[1]!, file: m[2]!.replace(/\.$/, '') } : undefined
+  if (!m) return undefined
+  const id = m[1]!
+  const file = m[2]!.replace(/\.$/, '')
+  // A command's output is not trusted text: anything could print this notice and name any file. Only Claude Code's own shape is read: an absolute path, no `..`, ending in `/tasks/<this task's ID>.output`.
+  const isTaskOutput = file.startsWith('/') && !/(^|\/)\.\.(\/|$)/.test(file) && file.endsWith(`/tasks/${id}.output`)
+  return isTaskOutput ? { id, file } : undefined
 }
 
 /** Whether a script's output holds its final line yet: a test's status or an ERROR, any other script's SUCCESS or ERROR. */
