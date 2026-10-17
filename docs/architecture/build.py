@@ -14,13 +14,14 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import d1_overview  # noqa: E402
+import d2_prompt_lifecycle  # noqa: E402
 from lib import page  # noqa: E402
 
-DIAGRAMS = [d1_overview]
+DIAGRAMS = [d1_overview, d2_prompt_lifecycle]
 
 COLOPHON = {
-    "exosphere": "boomi-dashboard · Boomi Exosphere tokens · drawn with diagram-design",
-    "valence": "boomi-dashboard · Valence, Miami Deco · drawn with diagram-design",
+    "exosphere": "boomi-dashboard · drawn in Boomi's Exosphere style · made with the diagram-design skill",
+    "valence": "boomi-dashboard · drawn in the Valence (Miami Deco) style · made with the diagram-design skill",
 }
 
 
