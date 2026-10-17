@@ -125,7 +125,7 @@ import type { Group, PastSpend, Value } from './config'
 import { blockedDetail, companionChanges, denyMessage, enforcementNote, platformWrites, spentBudgets, spentText, wrapperScripts } from './budget-gate'
 import type { Enforce } from './budget-gate'
 import { BOOMI_MARK_PNG, drawsPictures } from './boomi-mark'
-import { PALETTES, THEMES, THEME_NAMES, isDarkAppearance, markOf, resolveTheme, themeFromOptions, themeNamed } from './themes'
+import { PALETTES, THEMES, THEME_NAMES, THEME_LABELS, THEME_OPTIONS, isDarkAppearance, markOf, resolveTheme, themeFromOptions, themeNamed } from './themes'
 import type { DrawnTheme, Family } from './themes'
 import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
 import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
@@ -315,6 +315,8 @@ const withUse = async ($: Engine, usage: Usage): Promise<Usage> => {
 }
 
 /** Past Companion sessions folded to their totals, to leave the pane's room to this session; kept across sessions. */
+/** Whether the pane's theme list is open under its Theme button. */
+const isThemeListOpen = atom({ plugin: 'boomi-dashboard', key: 'isThemeListOpen' } as const, false)
 const isPastCollapsed = atom({ plugin: 'boomi-dashboard', key: 'isPastCollapsed' } as const, true)
 const PAST_COLLAPSED_KEY = 'pastCollapsed'
 
@@ -1902,7 +1904,7 @@ const theme = async ($: Engine, settings: Settings, target: string): Promise<str
   }
   const current = await themeOf($, settings)
   const list = THEMES.map(t => `${t === current ? '◆' : '◇'} ${t}`).join('   ')
-  return `${target ? `No theme called ${target}. ` : ''}Themes: ${list}\nPick one with /bc-dashboard theme <name> (auto follows your system's light or dark), or with the buttons in the pane.`
+  return `${target ? `No theme called ${target}. ` : ''}Themes: ${list}\nPick one with /bc-dashboard theme <name> (auto follows your system's light or dark), or with the Theme picker at the bottom of the pane.`
 }
 
 // --- Commands and tools ------------------------------------------------------
@@ -3315,7 +3317,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const { Box, Button: PlainButton, Text } = $.ui.resolve(e)
     const logoPicture = ((await drawsPicturesHere($)) ? ($.ui.resolve(e) as { Image?: typeof Text }).Image : undefined) as ((props: { source: { png: string }; columns: number; rows: number; alt: string }) => unknown) | undefined
     const themeNow = await themeOf($, settings)
     const drawnNow = await drawnThemeOf($, settings)
@@ -3323,6 +3325,7 @@ export const register: Register = (on, options) => {
     const guards = await guardLines($)
     const past = await read($, history)
     const pastHidden = await read($, isPastCollapsed)
+    const themeListOpen = await read($, isThemeListOpen)
     const shown = await read($, historyShown)
     const copiedNow = await read($, copied)
     const reviewingNow = await read($, reviewing)
@@ -3368,6 +3371,14 @@ export const register: Register = (on, options) => {
       <Text color={p.status[level]} backgroundColor={p.bg} bold>
         {STATUS[level].icon}
       </Text>
+    )
+    // A Button's own label takes the terminal's colors (black on a light terminal, unreadable on a dark pane): draw it as Text in the pane's accent instead. The label stays, to name the control.
+    const Button = (props: Parameters<typeof PlainButton>[0]) => (
+      <PlainButton {...props}>
+        <Text color={p.accent} backgroundColor={p.bg}>
+          {props.label}
+        </Text>
+      </PlainButton>
     )
     /** A product's row, as a component's: its name and spend, then its stages. */
     const stageRow = (name: string, ids: number[], list: { level: Level; text: string }[]) => {
@@ -3436,12 +3447,6 @@ export const register: Register = (on, options) => {
             [session, `${rows.length} component${rows.length === 1 ? '' : 's'}`, usage.model].filter(Boolean).join(' · '),
             { color: p.muted },
           )}
-          <Box>
-            {t('Theme ', { color: p.muted })}
-            {THEMES.map(name => (
-              <Button key={`theme-${name}`} label={name === themeNow ? `◆ ${THEME_NAMES[name]}` : THEME_NAMES[name]} onPress={() => pickTheme($, settings, name)} />
-            ))}
-          </Box>
         </Box>
         <Text color={p.rule} backgroundColor={p.bg} wrap="truncate-end">
           {decoRule(width)}
@@ -3739,6 +3744,24 @@ export const register: Register = (on, options) => {
           </Text>
           <Button key="report-html" label="Report ↗" onPress={() => void reportFromPane($, settings)} />
         </Box>
+        <Box>
+          {t('🎨 Theme  ', { color: p.muted })}
+          <Button key="theme" label={`${THEME_LABELS[themeNow]} ${themeListOpen ? '▴' : '▾'}`} onPress={() => update($, isThemeListOpen, open => !open)} />
+        </Box>
+        {themeListOpen && (
+          <Box flexDirection="column" marginLeft={3}>
+            {THEME_OPTIONS.map(option => (
+              <Button
+                key={`theme-${option.value}`}
+                label={`${option.value === themeNow ? '◆' : '◇'} ${option.label}`}
+                onPress={async () => {
+                  await pickTheme($, settings, themeNamed(option.value) ?? 'auto')
+                  await update($, isThemeListOpen, () => false)
+                }}
+              />
+            ))}
+          </Box>
+        )}
       </Box>
     )
   })

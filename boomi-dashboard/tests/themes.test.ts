@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { PALETTES, THEMES, THEME_NAMES, isDarkAppearance, isTheme, markOf, resolveTheme, themeFromOptions, themeNamed } from '../hooks/themes'
+import { PALETTES, THEMES, THEME_NAMES, THEME_OPTIONS, isDarkAppearance, isTheme, markOf, resolveTheme, themeFromOptions, themeNamed } from '../hooks/themes'
 import type { DrawnTheme } from '../hooks/themes'
 
 const DRAWN = THEMES.filter((t): t is DrawnTheme => t !== 'auto')
@@ -96,4 +96,9 @@ test('the mark is the flamingo in Whimsical and the logo everywhere else', () =>
   expect(markOf('exosphere-light')).toBe('logo')
   expect(markOf('exosphere-dark')).toBe('logo')
   expect(markOf('terminal')).toBe('logo')
+})
+
+test('the picker lists every theme once, each with a label of its own', () => {
+  expect(THEME_OPTIONS.map(o => o.value)).toEqual([...THEMES])
+  expect(new Set(THEME_OPTIONS.map(o => o.label)).size).toBe(THEMES.length)
 })

@@ -26,7 +26,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** it prints the report and `Saved to …/boomi-session-report-<date>.md`, and the file exists. **Fail:** an error.
 - [ ] **B8. Past sessions.** Press **Scan** under **Past Companion sessions**.
   **Pass:** it lists earlier Companion sessions on this machine, and one session's cost is within a few cents of what `/cost` showed in it. **Fail:** `History needs Perl`, an empty list when you know there were sessions, or a cost far off; send the line.
-- [ ] **B9. Pane basics.** Theme buttons switch Day, Night and Terminal; **☐** closes an item and **Reopen** brings it back.
+- [x] **B9. Pane basics.** The **🎨 Theme** picker under the `session` line opens and switches themes, and button labels stay readable in a dark theme; **☐** closes an item and **Reopen** brings it back.
   **Pass:** both. **Fail:** say which.
 
 - [ ] **B10. Guardrails.** With boomi-runtime loaded, run `/boomi up`.

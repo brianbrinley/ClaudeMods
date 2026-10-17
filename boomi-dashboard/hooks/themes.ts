@@ -111,6 +111,19 @@ export const THEME_NAMES: Record<PaneTheme, string> = {
   terminal: 'Terminal',
 }
 
+/** What the pane's picker shows for each theme: the look and the mode, each with an emoji and a word, since some terminals draw emoji at the wrong width. */
+export const THEME_LABELS: Record<PaneTheme, string> = {
+  auto: '🌓 Auto (follows your system)',
+  'exosphere-light': '🏢 Exosphere · ☀️ Light',
+  'exosphere-dark': '🏢 Exosphere · 🌙 Dark',
+  'whimsical-light': '🦩 Whimsical · ☀️ Light',
+  'whimsical-dark': '🦩 Whimsical · 🌙 Dark',
+  terminal: '⌨️ Terminal (your colors)',
+}
+
+/** The picker's options, in the order the pane lists the themes. */
+export const THEME_OPTIONS = THEMES.map(value => ({ value, label: THEME_LABELS[value] }))
+
 /** The names earlier versions used: Valence Day and Night are Whimsical's two looks now. */
 const ALIASES: Record<string, PaneTheme> = { day: 'whimsical-light', night: 'whimsical-dark' }
 
