@@ -16,9 +16,10 @@ sys.path.insert(0, str(HERE))
 import d1_overview  # noqa: E402
 import d2_prompt_lifecycle  # noqa: E402
 import d3_companion_awareness  # noqa: E402
+import d4_budget_gate  # noqa: E402
 from lib import page  # noqa: E402
 
-DIAGRAMS = [d1_overview, d2_prompt_lifecycle, d3_companion_awareness]
+DIAGRAMS = [d1_overview, d2_prompt_lifecycle, d3_companion_awareness, d4_budget_gate]
 
 
 def main() -> None:

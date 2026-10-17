@@ -80,6 +80,8 @@ def _css(theme: dict, w: int) -> str:
     .n-focal {{ fill: rgb(var(--accent-rgb) / 0.08); stroke: var(--accent); stroke-width: 1.2; }}
     .n-store {{ fill: rgb(var(--ink-rgb) / 0.05); stroke: var(--muted); stroke-width: 1; }}
     .n-external {{ fill: rgb(var(--ink-rgb) / 0.03); stroke: rgb(var(--ink-rgb) / 0.30); stroke-width: 1; }}
+    .n-security {{ fill: rgb(var(--accent-rgb) / 0.05); stroke: rgb(var(--accent-rgb) / 0.50); stroke-width: 1; stroke-dasharray: 4 4; }}
+    .n-security + .tag {{ stroke: rgb(var(--accent-rgb) / 0.50); }}
     .n-input {{ fill: rgb(var(--muted-rgb) / 0.10); stroke: var(--soft); stroke-width: 1; }}
     .n-input + .tag {{ stroke: rgb(var(--muted-rgb) / 0.50); }}
     .lifeline {{ stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 3 3; }}
@@ -184,6 +186,25 @@ def node(x: int, y: int, w: int, h: int, kind: str, tag: str, name: str, subs: l
     ]
     for i, s in enumerate(subs):
         out.append(f'<text class="t-sub" x="{cx}" y="{y + (h // 2) + 14 + i * 14}">{escape(s)}</text>')
+    return "".join(out)
+
+
+def oval(x: int, y: int, w: int, h: int, name: str) -> str:
+    """A start or end: an oval (rx = half the height) with one line of text."""
+    r = h // 2
+    return (
+        f'<rect class="paper" x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}"/>'
+        f'<rect class="n-backend" x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}"/>'
+        f'<text class="t-name" x="{x + w // 2}" y="{y + h // 2 + 4}">{escape(name)}</text>'
+    )
+
+
+def diamond(cx: int, cy: int, w: int, h: int, kind: str, name: str, subs: list[str]) -> str:
+    """A decision: a diamond, with its question in the name and the detail in the sublabels (the text sits in its wide middle)."""
+    pts = f"{cx},{cy - h // 2} {cx + w // 2},{cy} {cx},{cy + h // 2} {cx - w // 2},{cy}"
+    out = [f'<polygon class="paper" points="{pts}"/>', f'<polygon class="n-{kind}" points="{pts}"/>', f'<text class="t-name" x="{cx}" y="{cy - 6}">{escape(name)}</text>']
+    for i, s in enumerate(subs):
+        out.append(f'<text class="t-sub" x="{cx}" y="{cy + 10 + i * 14}">{escape(s)}</text>')
     return "".join(out)
 
 

@@ -21,8 +21,9 @@ Two choices differ from the skill's defaults, on purpose: the fonts are the them
 
 | [`d2-prompt-lifecycle.html`](d2-prompt-lifecycle.html) (Valence: [`valence/`](valence/d2-prompt-lifecycle.html)) | What happens to a prompt you type: the check, the hold, the background rewrite, and the upgrade you send |
 | [`d3-companion-awareness.html`](d3-companion-awareness.html) (Valence: [`valence/`](valence/d3-companion-awareness.html)) | How the dashboard stays aware of Companion: the version check, the pointer index, retrieval, and the stamped guide with its drift check |
+| [`d4-budget-gate.html`](d4-budget-gate.html) (Valence: [`valence/`](valence/d4-budget-gate.html)) | What the dashboard does with each shell command: the budget gate (warn, ask or refuse), then note, run, read, record and show |
 
-More are planned (a tool call to a budget decision, how the three mods relate); see `tasks/todo.md`.
+One more is planned (how the three mods relate); see `tasks/todo.md`.
 
 ## Building them
 
