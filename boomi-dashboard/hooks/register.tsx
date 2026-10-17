@@ -180,6 +180,8 @@ const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const,
 
 /** The tick the flamingo's scene last changed at: the pane draws sceneAt(it). */
 const frame = atom({ plugin: 'boomi-dashboard', key: 'frame' } as const, 0)
+/** Which turn of the spinner the Prompt tab shows while a rewrite is running; ticks only then. */
+const spin = atom({ plugin: 'boomi-dashboard', key: 'spin' } as const, 0)
 
 /** The tick the banner's flamingo last changed at: the banner draws bandFlamingoAt(it). */
 const bandFrame = atom({ plugin: 'boomi-dashboard', key: 'bandFrame' } as const, 0)
@@ -432,6 +434,9 @@ const REPORT_SCAN_KEY = 'reportScan'
 const UPDATE_SEEN_KEY = 'updateSeen'
 
 /** How often the flamingo's frame moves on while Claude works. */
+/** The rewrite's spinner turns this often, and only while a rewrite runs. */
+const SPIN_MS = 250
+const SPINNER = ['◐', '◓', '◑', '◒'] as const
 const FLAMINGO_TICK_MS = 500
 
 /** Boomi's coral, the banner's round mark when the icon is set to boomi. */
@@ -2996,6 +3001,10 @@ export const register: Register = (on, options) => {
       $.clock.after(20_000, () => readBreakdown($).catch(() => undefined))
       $.clock.every(BREAKDOWN_MS, () => readBreakdown($).catch(() => undefined))
     }
+    // The Prompt tab's spinner: it turns only while a rewrite runs, so the pane isn't redrawn the rest of the time.
+    $.clock.every(SPIN_MS, async () => {
+      if (await read($, promptBusy)) await update($, spin, n => n + 1)
+    })
     // The flamingo's scene: what it does next is checked every half second, in Whimsical only.
     if (settings.hasLogo) {
       // It stands in one place, working or not; the pane redraws only when the scene changes.
@@ -3323,6 +3332,7 @@ export const register: Register = (on, options) => {
     const tips = await read($, promptTips)
     const counts = await read($, promptCounts)
     const busy = await read($, promptBusy)
+    const spinner = SPINNER[(await read($, spin)) % SPINNER.length]!
     const said = await read($, promptNote)
     const held = await read($, promptHeld)
     const draft = await read($, promptNoteDraft)
@@ -3352,7 +3362,7 @@ export const register: Register = (on, options) => {
     const tipRows = (tips?.tips ?? []).reduce((n, tip) => n + wrapLines(`  ${tip.text}`, width).length, 0)
     // The note's field wraps as it's typed, beside its Regenerate hint.
     const noteRows = Math.max(1, wrapLines(draft, width - 14).length) - 1
-    const fixedRows = 3 + wrapLines(intro, width).length + 2 + tipRows + 4 + 1 + (said ? wrapLines(said, width).length : 0) + 2 + 2 + noteRows + 1 + (tries[shown]?.note ? 1 : 0) + (tips?.guidedBy?.length ? 1 : 0) + (guideDrift ? wrapLines(guideDrift, width).length : 0) + ((tips?.why?.length ?? 0) > 0 ? 2 + (tips?.why ?? []).reduce((n, line) => n + wrapLines(`  ${line}`, width).length, 0) : 0)
+    const fixedRows = 3 + wrapLines(intro, width).length + 2 + tipRows + 4 + 1 + (said ? wrapLines(said, width).length : 0) + 2 + 2 + noteRows + 1 + (tries[shown]?.note ? 1 : 0) + (busy ? wrapLines(`${spinner} ${settings.promptModel} is writing a better upgrade. The one above is the quick version, and it stays until the new one arrives.`, width).length : 0) + (tips?.guidedBy?.length ? 1 : 0) + (guideDrift ? wrapLines(guideDrift, width).length : 0) + ((tips?.why?.length ?? 0) > 0 ? 2 + (tips?.why ?? []).reduce((n, line) => n + wrapLines(`  ${line}`, width).length, 0) : 0)
     const textRows = Math.max(4, room - fixedRows - 1)
     // Side by side the cards share the rows; one above the other, your prompt takes up to a third.
     const promptRows = isWide ? textRows : Math.max(2, Math.min(Math.floor(textRows / 3), wrapLines(tips?.masked ?? '', cardColumns).length))
@@ -3422,7 +3432,7 @@ export const register: Register = (on, options) => {
             ))}
             <Box flexDirection={isWide ? 'row' : 'column'} columnGap={1} marginTop={1}>
               {card('YOUR PROMPT', tips.masked, false, promptRows)}
-              {card(tips.rewrittenBy ? `UPGRADED BY ${tips.rewrittenBy.toUpperCase()}` : 'UPGRADED', tips.upgrade, true, upgradeRows)}
+              {card(busy ? `UPGRADED  ${spinner} ${settings.promptModel.toUpperCase()} IS WRITING A BETTER ONE…` : tips.rewrittenBy ? `UPGRADED BY ${tips.rewrittenBy.toUpperCase()}` : 'UPGRADED', tips.upgrade, true, upgradeRows)}
             </Box>
             <Box flexWrap="wrap" columnGap={1}>
               {held !== null ? (
@@ -3446,13 +3456,14 @@ export const register: Register = (on, options) => {
                 </Box>
               )}
             </Box>
+            {busy ? t(`${spinner} ${settings.promptModel} is writing a better upgrade. The one above is the quick version, and it stays until the new one arrives.`, { color: p.heading }) : undefined}
             {said ? t(said, { color: p.muted }) : undefined}
             {(tips.why?.length ?? 0) > 0 && heading('Why it changed')}
             {(tips.why ?? []).map(line => t(`  ${line}`))}
             {tips.guidedBy && tips.guidedBy.length > 0 ? t(`Read Companion's guidance: ${tips.guidedBy.join(', ')}`, { color: p.muted }) : undefined}
             {guideDrift ? t(guideDrift, { color: STATUS.warning.color }) : undefined}
             <Box flexWrap="wrap" columnGap={1} marginTop={1}>
-              <Button key="prompt-rewrite" label={busy ? '◐ Rewriting…' : tries.length > 1 ? 'Regenerate' : 'Upgrade with a model'} onPress={() => void rewriteFromTab($, settings)} />
+              <Button key="prompt-rewrite" label={busy ? `${spinner} Rewriting…` : tries.length > 1 ? 'Regenerate' : 'Upgrade with a model'} onPress={() => void rewriteFromTab($, settings)} />
               {tries.length > 1 ? (
                 <Box columnGap={1}>
                   <Button key="prompt-try-back" label="◀" onPress={() => showTry($, -1)} />
@@ -3491,6 +3502,8 @@ export const register: Register = (on, options) => {
     const past = await read($, history)
     const pastHidden = await read($, isPastCollapsed)
     const themeListOpen = await read($, isThemeListOpen)
+    const promptWorking = await read($, promptBusy)
+    const spinNow = await read($, spin)
     const shown = await read($, historyShown)
     const copiedNow = await read($, copied)
     const reviewingNow = await read($, reviewing)
@@ -3620,7 +3633,7 @@ export const register: Register = (on, options) => {
           <Box>
             <Text backgroundColor={p.bg}>
               {icon(lastTips.tips.some(tip => tip.level === 'serious') ? 'serious' : 'warning')}
-              {t(` ${lastTips.tips.length} prompt tip${lastTips.tips.length === 1 ? '' : 's'} for your last prompt  `)}
+              {t(` ${lastTips.tips.length} prompt tip${lastTips.tips.length === 1 ? '' : 's'} for your last prompt${promptWorking ? ` · ${SPINNER[spinNow % SPINNER.length]} upgrading it…` : ''}  `)}
             </Text>
             <Button key="prompt-open" label="Prompt tips" onPress={() => showPromptTab($, lastTips.tips.length)} />
           </Box>
