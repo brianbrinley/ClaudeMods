@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How the mods and Companion fit together</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;1,400&family=Noto+Sans:wght@400;500;600&family=Fira+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --paper:#f5f5f5;--paper-2:#e5e5e5;--ink:#1f1f1f;--ink-rgb:31 31 31;--muted:#707070;--muted-rgb:112 112 112;--soft:#666666;--rule-solid:#cccccc;--accent:#bc4a37;--accent-rgb:188 74 55;--link:#006cd6;--node:#ffffff; color-scheme: light dark;
+      --f-title:'Poppins', system-ui, sans-serif; --f-callout:'Poppins', system-ui, sans-serif; --f-name:'Noto Sans', system-ui, sans-serif; --f-mono:'Fira Mono', ui-monospace, monospace; --f-eyebrow:'Fira Mono', ui-monospace, monospace; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper:#1f1f1f;--paper-2:#2e2e2e;--ink:#ffffff;--ink-rgb:255 255 255;--muted:#cccccc;--muted-rgb:204 204 204;--soft:#b3b3b3;--rule-solid:#707070;--accent:#ff9685;--accent-rgb:255 150 133;--link:#66b6f6;--node:#2e2e2e; } }
+    :root[data-theme="dark"] { --paper:#1f1f1f;--paper-2:#2e2e2e;--ink:#ffffff;--ink-rgb:255 255 255;--muted:#cccccc;--muted-rgb:204 204 204;--soft:#b3b3b3;--rule-solid:#707070;--accent:#ff9685;--accent-rgb:255 150 133;--link:#66b6f6;--node:#2e2e2e; color-scheme: dark; }
+    :root[data-theme="light"] { color-scheme: light; }
+    body { font-family: var(--f-name); background: var(--paper); color: var(--ink); min-height: 100vh; padding: 3rem 2rem; }
+    .frame { max-width: 1280px; width: 100%; margin: 0 auto; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: var(--f-eyebrow); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--f-title); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 500; letter-spacing: -0.01em; line-height: 1.15; color: var(--ink); margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 1280px; display: block; }
+    .notes { display: grid; grid-template-columns: 1.1fr 1fr 0.9fr; gap: 1rem; margin-top: 1.5rem; }
+    .note { background: var(--node); border: 1px solid rgb(var(--ink-rgb) / 0.12); border-radius: 6px; padding: 1rem 1.1rem; }
+    .note h2 { font-family: var(--f-name); font-size: 0.8rem; font-weight: 600; margin-bottom: 0.4rem; }
+    .note p { font-size: 0.8rem; line-height: 1.5; color: var(--muted); }
+    .note code { font-family: ui-monospace, SFMono-Regular, Menlo, 'Fira Mono', monospace; font-size: 0.72rem; color: var(--ink); }
+    @media (max-width: 760px) { .notes { grid-template-columns: 1fr; } body { padding: 2rem 1rem; } }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+    /* the diagram's roles */
+    .paper { fill: var(--paper); }
+    .zone { fill: rgb(var(--ink-rgb) / 0.02); stroke: rgb(var(--ink-rgb) / 0.10); stroke-width: 0.8; }
+    .n-backend { fill: var(--node); stroke: var(--ink); stroke-width: 1; }
+    .n-focal { fill: rgb(var(--accent-rgb) / 0.08); stroke: var(--accent); stroke-width: 1.2; }
+    .n-store { fill: rgb(var(--ink-rgb) / 0.05); stroke: var(--muted); stroke-width: 1; }
+    .n-external { fill: rgb(var(--ink-rgb) / 0.03); stroke: rgb(var(--ink-rgb) / 0.30); stroke-width: 1; }
+    .n-optional { fill: rgb(var(--ink-rgb) / 0.02); stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 4 3; }
+    .n-optional + .tag { stroke: rgb(var(--ink-rgb) / 0.30); }
+    .n-security { fill: rgb(var(--accent-rgb) / 0.05); stroke: rgb(var(--accent-rgb) / 0.50); stroke-width: 1; stroke-dasharray: 4 4; }
+    .n-security + .tag { stroke: rgb(var(--accent-rgb) / 0.50); }
+    .n-input { fill: rgb(var(--muted-rgb) / 0.10); stroke: var(--soft); stroke-width: 1; }
+    .n-input + .tag { stroke: rgb(var(--muted-rgb) / 0.50); }
+    .lifeline { stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 3 3; }
+    .bar { fill: rgb(var(--ink-rgb) / 0.06); stroke: var(--muted); stroke-width: 0.8; }
+    .seq-frame { fill: rgb(var(--ink-rgb) / 0.02); stroke: rgb(var(--ink-rgb) / 0.22); stroke-width: 1; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .seq-frame { fill: rgb(var(--ink-rgb) / 0.04); } }
+    :root[data-theme="dark"] .seq-frame { fill: rgb(var(--ink-rgb) / 0.04); }
+    .frame-tab { fill: var(--paper); stroke: rgb(var(--ink-rgb) / 0.22); stroke-width: 1; }
+    .divider { stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 4 3; }
+    .t-op { font-family: var(--f-eyebrow); font-size: 8px; letter-spacing: 0.12em; fill: var(--muted); text-anchor: middle; }
+    .t-guard { font-family: var(--f-mono); font-size: 8px; letter-spacing: 0.04em; fill: var(--muted); }
+    .t-callout { font-family: var(--f-callout); font-style: italic; font-size: 14px; fill: var(--ink); }
+    .leader { fill: none; stroke: rgb(var(--ink-rgb) / 0.40); stroke-width: 1; stroke-dasharray: 4 3; }
+    .dot { fill: var(--ink); }
+    .tag { fill: transparent; stroke-width: 0.8; }
+    .n-backend + .tag { stroke: rgb(var(--ink-rgb) / 0.40); }
+    .n-focal + .tag { stroke: rgb(var(--accent-rgb) / 0.50); }
+    .n-store + .tag { stroke: rgb(var(--muted-rgb) / 0.50); }
+    .n-external + .tag { stroke: rgb(var(--ink-rgb) / 0.30); }
+    .t-name { font-family: var(--f-name); font-size: 12px; font-weight: 600; fill: var(--ink); text-anchor: middle; }
+    .t-sub { font-family: var(--f-mono); font-size: 9px; fill: var(--muted); text-anchor: middle; }
+    .t-tag { font-family: var(--f-eyebrow); font-size: 7px; letter-spacing: 0.08em; fill: var(--muted); text-anchor: middle; }
+    .t-zone { font-family: var(--f-eyebrow); font-size: 7px; letter-spacing: 0.14em; fill: var(--soft); text-anchor: middle; }
+    .t-arrow { font-family: var(--f-mono); font-size: 8px; letter-spacing: 0.06em; fill: var(--soft); text-anchor: middle; }
+    .t-legend { font-family: var(--f-eyebrow); font-size: 8px; letter-spacing: 0.14em; fill: var(--muted); }
+    .a { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+    .a-accent { fill: none; stroke: var(--accent); stroke-width: 1.2; }
+    .a-link { fill: none; stroke: var(--link); stroke-width: 1.2; }
+    .dash { stroke-dasharray: 5 4; stroke-width: 1; }
+    .m-muted { fill: var(--muted); } .m-accent { fill: var(--accent); } .m-link { fill: var(--link); }
+    .rule { stroke: rgb(var(--ink-rgb) / 0.10); stroke-width: 0.8; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · the repository&#x27;s mods</p>
+    <h1>How the mods and Companion fit together</h1>
+    <div class="diagram-container">
+      <svg viewBox="0 64 1280 592" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="d5-mods-title d5-mods-desc">
+        <title id="d5-mods-title">How the mods and Companion fit together</title>
+        <desc id="d5-mods-desc">Architecture of the repository&#x27;s mods with Boomi Companion: boomi-runtime provisions a temporary Boomi runtime and writes Companion&#x27;s environment file, Companion builds and tests on it through the Boomi platform, and boomi-dashboard reads the runtime mod&#x27;s state and watches Companion&#x27;s steps; boomi-standards is set aside, and the dashboard already reads its state for when it returns.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-muted" points="0 0, 8 3, 0 6"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-accent" points="0 0, 8 3, 0 6"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-link" points="0 0, 8 3, 0 6"/></marker>
+        </defs>
+        <rect class="paper" x="0" y="64" width="1280" height="592"/>
+<line class="a" x1="280" y1="336" x2="370" y2="336" marker-end="url(#arrow)"/>
+        <rect class="paper" x="303" y="316" width="44" height="12" rx="2"/><text class="t-arrow" x="325" y="325">WRITES</text>
+        <line class="a" x1="590" y1="336" x2="680" y2="336" marker-end="url(#arrow)"/>
+        <rect class="paper" x="611" y="316" width="48" height="12" rx="2"/><text class="t-arrow" x="635" y="325">READ BY</text>
+        <line class="a dash" x1="990" y1="336" x2="900" y2="336" marker-end="url(#arrow)"/>
+        <rect class="paper" x="923" y="316" width="44" height="12" rx="2"/><text class="t-arrow" x="945" y="325">GUARDS</text>
+        <line class="a" x1="170" y1="288" x2="170" y2="192" marker-end="url(#arrow)"/>
+        <rect class="paper" x="178" y="234" width="80" height="12" rx="2"/><text class="t-arrow" x="218" y="243">RUNTIME STATE</text>
+        <line class="a" x1="790" y1="288" x2="790" y2="192" marker-end="url(#arrow)"/>
+        <rect class="paper" x="800" y="234" width="60" height="12" rx="2"/><text class="t-arrow" x="830" y="243">ITS STEPS</text>
+        <line class="a dash" x1="1100" y1="288" x2="1100" y2="192" marker-end="url(#arrow)"/>
+        <rect class="paper" x="1108" y="234" width="52" height="12" rx="2"/><text class="t-arrow" x="1134" y="243">ACTIVITY</text>
+        <line class="a-link" x1="170" y1="384" x2="170" y2="472" marker-end="url(#arrow-link)"/>
+        <rect class="paper" x="178" y="422" width="64" height="12" rx="2"/><text class="t-arrow" x="210" y="431">PROVISIONS</text>
+        <line class="a-link" x1="790" y1="384" x2="790" y2="472" marker-end="url(#arrow-link)"/>
+        <rect class="paper" x="798" y="422" width="88" height="12" rx="2"/><text class="t-arrow" x="842" y="431">BUILDS + TESTS</text>
+        <rect class="paper" x="100" y="104" width="1040" height="88" rx="6"/><rect class="n-focal" x="100" y="104" width="1040" height="88" rx="6"/><rect class="tag" x="108" y="110" width="28" height="12" rx="2"/><text class="t-tag" x="122" y="119">MOD</text><text class="t-name" x="620" y="146">boomi-dashboard</text><text class="t-sub" x="620" y="162">watches Companion&#x27;s steps, cost and budget</text><text class="t-sub" x="620" y="176">polls the platform, read-only</text>
+        <rect class="paper" x="60" y="288" width="220" height="96" rx="6"/><rect class="n-backend" x="60" y="288" width="220" height="96" rx="6"/><rect class="tag" x="68" y="294" width="28" height="12" rx="2"/><text class="t-tag" x="82" y="303">MOD</text><text class="t-name" x="170" y="334">boomi-runtime</text><text class="t-sub" x="170" y="350">a temporary runtime</text><text class="t-sub" x="170" y="364">/boomi up · smoke · down</text>
+        <rect class="paper" x="370" y="288" width="220" height="96" rx="6"/><rect class="n-store" x="370" y="288" width="220" height="96" rx="6"/><rect class="tag" x="378" y="294" width="32" height="12" rx="2"/><text class="t-tag" x="394" y="303">FILE</text><text class="t-name" x="480" y="334">Companion&#x27;s .env</text><text class="t-sub" x="480" y="350">the environment to build on</text><text class="t-sub" x="480" y="364">runtime writes, Companion reads</text>
+        <rect class="paper" x="680" y="288" width="220" height="96" rx="6"/><rect class="n-external" x="680" y="288" width="220" height="96" rx="6"/><rect class="tag" x="688" y="294" width="44" height="12" rx="2"/><text class="t-tag" x="710" y="303">PLUGIN</text><text class="t-name" x="790" y="334">Boomi Companion</text><text class="t-sub" x="790" y="350">bc-integration and the others</text><text class="t-sub" x="790" y="364">scripts build, deploy, test</text>
+        <rect class="paper" x="990" y="288" width="220" height="96" rx="6"/><rect class="n-optional" x="990" y="288" width="220" height="96" rx="6"/><rect class="tag" x="998" y="294" width="60" height="12" rx="2"/><text class="t-tag" x="1028" y="303">SET ASIDE</text><text class="t-name" x="1100" y="334">boomi-standards</text><text class="t-sub" x="1100" y="350">holds components to standards</text><text class="t-sub" x="1100" y="364">back soon (IDEAS.md)</text>
+        <rect class="paper" x="60" y="472" width="880" height="80" rx="6"/><rect class="n-external" x="60" y="472" width="880" height="80" rx="6"/><rect class="tag" x="68" y="478" width="28" height="12" rx="2"/><text class="t-tag" x="82" y="487">API</text><text class="t-name" x="500" y="510">Boomi platform</text><text class="t-sub" x="500" y="526">the runtime&#x27;s TEST environment, and your account</text>
+        <line class="rule" x1="40" y1="592" x2="1240" y2="592"/><text class="t-legend" x="40" y="612">LEGEND</text><rect class="n-focal" x="120" y="602" width="24" height="12" rx="2"/><text class="t-legend" x="156" y="612">THE DASHBOARD</text><line class="a" x1="336" y1="608" x2="360" y2="608" marker-end="url(#arrow)"/><text class="t-legend" x="372" y="612">HANDS OVER · READS</text><line class="a-link" x1="552" y1="608" x2="576" y2="608" marker-end="url(#arrow-link)"/><text class="t-legend" x="588" y="612">BOOMI API</text><line class="a dash" x1="768" y1="608" x2="792" y2="608" marker-end="url(#arrow)"/><text class="t-legend" x="804" y="612">SET ASIDE · OPTIONAL</text>
+      </svg>
+    </div>
+    <div class="notes"><div class="note"><h2>Two mods, one hand-off</h2><p>boomi-runtime gives a session its own temporary runtime and writes Companion's <code>.env</code>, so Boomi Companion builds and tests on it. The dashboard doesn't need the runtime mod, but shows its state when it's there.</p></div><div class="note"><h2>The dashboard only reads</h2><p>It reads the other mods' state and never writes it: only a value's owner writes it. It watches Companion through the shell commands Claude runs, not through any API of Companion's.</p></div><div class="note"><h2>A mod set aside</h2><p>boomi-standards held Companion's components to a team's standards before they reached Boomi. It's set aside and tracked in <code>IDEAS.md</code>. The dashboard already reads its state, so it will show what was blocked once the mod is back.</p></div></div>
+  </div>
+</body>
+</html>
