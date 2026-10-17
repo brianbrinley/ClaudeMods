@@ -35,3 +35,24 @@ Status: PLAN, awaiting review. Nothing below is built.
 ## Decisions on the open questions (2026-10-16)
 1. Default theme follows the OS light/dark.
 2. Existing flamingo users land on Whimsical after the update; Exosphere users and new installs get Exosphere.
+
+---
+
+# Added 2026-10-17
+
+## Docs site: the boomi-dashboard page is too big (to do later, not started)
+- [ ] The single boomi-dashboard page on https://brianbrinley.github.io/ClaudeMods/ is overwhelming. Split it into sections or pages (front door, what it does, settings, prompt tips, reference) and add a way to find things.
+- [ ] Per the global CLAUDE.md: invoke `impeccable` (and `boomi-branding` where it applies) before changing markup or CSS; Pages access rules apply (state who can see the site before changing anything about publishing).
+
+## Visual architecture reference (decided 2026-10-17)
+Audience: very technical people the project was shared with, who want a detailed visual explanation, not just READMEs.
+- Decision: **Exosphere** for the standalone HTML files, **Valence** versions on GitHub Pages (the docs site's Architecture page).
+- Tool: the `diagram-design` plugin (third-party, MIT, Cathryn Lavery; each diagram is one self-contained HTML + SVG file). Its skill was not registered in the session it was installed in; it may need a restart. Read its output before publishing.
+- [x] Read the plugin's SKILL.md and its brand onboarding; feed it Exosphere tokens (reuse `hooks/report-html.ts`) and Valence tokens (`brand/tokens.json`)
+- [x] D1 Overall architecture: hooks module, pure modules, state contract, pane / banner / status line
+- [ ] D2 Prompt upgrade lifecycle (sequence): submit, checks, hold, background rewrite, why notes, taken-suggestion skip
+- [ ] D3 Awareness of Companion: docs, pointer index, retrieval, model; version stamps and drift
+- [ ] D4 From a tool call to a pane row and a budget decision
+- [ ] D5 How the three mods relate
+- [ ] Standalone files under `docs/architecture/` (Exosphere); Valence copies built into the site via `site/build.py` (`PAGES`, `COPY_PATHS`, workflow `paths`)
+- [ ] Check each in a real browser, light and dark; no customer names

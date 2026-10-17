@@ -8,3 +8,5 @@ node_modules/
 
 # Docs site build output
 _site/
+
+__pycache__/
