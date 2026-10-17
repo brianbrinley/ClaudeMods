@@ -23,7 +23,6 @@
     .note h2 { font-family: var(--f-name); font-size: 0.8rem; font-weight: 600; margin-bottom: 0.4rem; }
     .note p { font-size: 0.8rem; line-height: 1.5; color: var(--muted); }
     .note code { font-family: ui-monospace, SFMono-Regular, Menlo, 'Fira Mono', monospace; font-size: 0.72rem; color: var(--ink); }
-    footer { margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid rgb(var(--ink-rgb) / 0.12); font-family: var(--f-mono); font-size: 0.66rem; color: var(--muted); }
     @media (max-width: 760px) { .notes { grid-template-columns: 1fr; } body { padding: 2rem 1rem; } }
     @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
     /* the diagram's roles */
@@ -112,7 +111,6 @@
       </svg>
     </div>
     <div class="notes"><div class="note"><h2>Events in, drawing out</h2><p>Claude Code raises an event (<code>tool.call</code>, <code>turn.*</code>, <code>prompt.submit</code>, <code>session.start</code>, <code>ui.render</code>). One module hooks them, and answers <code>ui.render</code> with what to draw: the pane, the Prompt tab, the banner, the status line and toasts.</p></div><div class="note"><h2>Logic stays testable</h2><p>Anything that needs no engine call is a plain function in its own file, with unit tests that call it directly. Helpers that take <code>$</code> stay in the hooks module, because the engine follows <code>$</code> only within one file.</p></div><div class="note"><h2>Reads out, installs nothing</h2><p>It reads Companion's docs, polls Boomi's API, and runs <code>git fetch</code> once a day. A model is called only to rewrite a prompt or draft guide edits. Nothing installs unless you run <code>/bc-dashboard upgrade</code>.</p></div></div>
-    <footer>boomi-dashboard · drawn in the Valence (Miami Deco) style · made with the diagram-design skill</footer>
   </div>
 </body>
 </html>
