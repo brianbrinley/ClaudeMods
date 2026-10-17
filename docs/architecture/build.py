@@ -15,9 +15,10 @@ sys.path.insert(0, str(HERE))
 
 import d1_overview  # noqa: E402
 import d2_prompt_lifecycle  # noqa: E402
+import d3_companion_awareness  # noqa: E402
 from lib import page  # noqa: E402
 
-DIAGRAMS = [d1_overview, d2_prompt_lifecycle]
+DIAGRAMS = [d1_overview, d2_prompt_lifecycle, d3_companion_awareness]
 
 COLOPHON = {
     "exosphere": "boomi-dashboard · drawn in Boomi's Exosphere style · made with the diagram-design skill",

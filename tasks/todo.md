@@ -51,7 +51,7 @@ Audience: very technical people the project was shared with, who want a detailed
 - [x] Read the plugin's SKILL.md and its brand onboarding; feed it Exosphere tokens (reuse `hooks/report-html.ts`) and Valence tokens (`brand/tokens.json`)
 - [x] D1 Overall architecture: hooks module, pure modules, state contract, pane / banner / status line
 - [x] D2 Prompt upgrade lifecycle (sequence): submit, checks, hold, background rewrite, why notes, taken-suggestion skip
-- [ ] D3 Awareness of Companion: docs, pointer index, retrieval, model; version stamps and drift
+- [x] D3 Awareness of Companion: docs, pointer index, retrieval, model; version stamps and drift
 - [ ] D4 From a tool call to a pane row and a budget decision
 - [ ] D5 How the three mods relate
 - [ ] Standalone files under `docs/architecture/` (Exosphere); Valence copies built into the site via `site/build.py` (`PAGES`, `COPY_PATHS`, workflow `paths`)

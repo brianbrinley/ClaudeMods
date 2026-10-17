@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How the dashboard stays aware of Companion</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poiret+One&family=Josefin+Sans:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --paper:#FBF6EE;--paper-2:#f1eadd;--ink:#0B0B0B;--ink-rgb:11 11 11;--muted:#52514E;--muted-rgb:82 81 78;--soft:#52514E;--rule-solid:#9A7B3F;--accent:#C2185B;--accent-rgb:194 24 91;--link:#0F766E;--node:#ffffff; color-scheme: light dark;
+      --f-title:'Poiret One', 'Josefin Sans', system-ui, sans-serif; --f-callout:'Josefin Sans', system-ui, sans-serif; --f-name:'Josefin Sans', system-ui, sans-serif; --f-mono:system-ui, -apple-system, 'Segoe UI', sans-serif; --f-eyebrow:'Josefin Sans', system-ui, sans-serif; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper:#161A2E;--paper-2:#1F2440;--ink:#FFFFFF;--ink-rgb:255 255 255;--muted:#C9CBE0;--muted-rgb:201 203 224;--soft:#C9CBE0;--rule-solid:#6f6240;--accent:#F48FB1;--accent-rgb:244 143 177;--link:#5EEAD4;--node:#1F2440; } }
+    :root[data-theme="dark"] { --paper:#161A2E;--paper-2:#1F2440;--ink:#FFFFFF;--ink-rgb:255 255 255;--muted:#C9CBE0;--muted-rgb:201 203 224;--soft:#C9CBE0;--rule-solid:#6f6240;--accent:#F48FB1;--accent-rgb:244 143 177;--link:#5EEAD4;--node:#1F2440; color-scheme: dark; }
+    :root[data-theme="light"] { color-scheme: light; }
+    body { font-family: var(--f-name); background: var(--paper); color: var(--ink); min-height: 100vh; padding: 3rem 2rem; }
+    .frame { max-width: 1280px; width: 100%; margin: 0 auto; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: var(--f-eyebrow); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--f-title); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400; letter-spacing: -0.01em; line-height: 1.15; color: var(--ink); margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 1280px; display: block; }
+    .notes { display: grid; grid-template-columns: 1.1fr 1fr 0.9fr; gap: 1rem; margin-top: 1.5rem; }
+    .note { background: var(--node); border: 1px solid rgb(var(--ink-rgb) / 0.12); border-radius: 6px; padding: 1rem 1.1rem; }
+    .note h2 { font-family: var(--f-name); font-size: 0.8rem; font-weight: 600; margin-bottom: 0.4rem; }
+    .note p { font-size: 0.8rem; line-height: 1.5; color: var(--muted); }
+    .note code { font-family: ui-monospace, SFMono-Regular, Menlo, 'Fira Mono', monospace; font-size: 0.72rem; color: var(--ink); }
+    footer { margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid rgb(var(--ink-rgb) / 0.12); font-family: var(--f-mono); font-size: 0.66rem; color: var(--muted); }
+    @media (max-width: 760px) { .notes { grid-template-columns: 1fr; } body { padding: 2rem 1rem; } }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+    /* the diagram's roles */
+    .paper { fill: var(--paper); }
+    .zone { fill: rgb(var(--ink-rgb) / 0.02); stroke: rgb(var(--ink-rgb) / 0.10); stroke-width: 0.8; }
+    .n-backend { fill: var(--node); stroke: var(--ink); stroke-width: 1; }
+    .n-focal { fill: rgb(var(--accent-rgb) / 0.08); stroke: var(--accent); stroke-width: 1.2; }
+    .n-store { fill: rgb(var(--ink-rgb) / 0.05); stroke: var(--muted); stroke-width: 1; }
+    .n-external { fill: rgb(var(--ink-rgb) / 0.03); stroke: rgb(var(--ink-rgb) / 0.30); stroke-width: 1; }
+    .n-input { fill: rgb(var(--muted-rgb) / 0.10); stroke: var(--soft); stroke-width: 1; }
+    .n-input + .tag { stroke: rgb(var(--muted-rgb) / 0.50); }
+    .lifeline { stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 3 3; }
+    .bar { fill: rgb(var(--ink-rgb) / 0.06); stroke: var(--muted); stroke-width: 0.8; }
+    .seq-frame { fill: rgb(var(--ink-rgb) / 0.02); stroke: rgb(var(--ink-rgb) / 0.22); stroke-width: 1; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .seq-frame { fill: rgb(var(--ink-rgb) / 0.04); } }
+    :root[data-theme="dark"] .seq-frame { fill: rgb(var(--ink-rgb) / 0.04); }
+    .frame-tab { fill: var(--paper); stroke: rgb(var(--ink-rgb) / 0.22); stroke-width: 1; }
+    .divider { stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 4 3; }
+    .t-op { font-family: var(--f-eyebrow); font-size: 8px; letter-spacing: 0.12em; fill: var(--muted); text-anchor: middle; }
+    .t-guard { font-family: var(--f-mono); font-size: 8px; letter-spacing: 0.04em; fill: var(--muted); }
+    .t-callout { font-family: var(--f-callout); font-style: italic; font-size: 14px; fill: var(--ink); }
+    .leader { fill: none; stroke: rgb(var(--ink-rgb) / 0.40); stroke-width: 1; stroke-dasharray: 4 3; }
+    .dot { fill: var(--ink); }
+    .tag { fill: transparent; stroke-width: 0.8; }
+    .n-backend + .tag { stroke: rgb(var(--ink-rgb) / 0.40); }
+    .n-focal + .tag { stroke: rgb(var(--accent-rgb) / 0.50); }
+    .n-store + .tag { stroke: rgb(var(--muted-rgb) / 0.50); }
+    .n-external + .tag { stroke: rgb(var(--ink-rgb) / 0.30); }
+    .t-name { font-family: var(--f-name); font-size: 12px; font-weight: 600; fill: var(--ink); text-anchor: middle; }
+    .t-sub { font-family: var(--f-mono); font-size: 9px; fill: var(--muted); text-anchor: middle; }
+    .t-tag { font-family: var(--f-eyebrow); font-size: 7px; letter-spacing: 0.08em; fill: var(--muted); text-anchor: middle; }
+    .t-zone { font-family: var(--f-eyebrow); font-size: 7px; letter-spacing: 0.14em; fill: var(--soft); text-anchor: middle; }
+    .t-arrow { font-family: var(--f-mono); font-size: 8px; letter-spacing: 0.06em; fill: var(--soft); text-anchor: middle; }
+    .t-legend { font-family: var(--f-eyebrow); font-size: 8px; letter-spacing: 0.14em; fill: var(--muted); }
+    .a { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+    .a-accent { fill: none; stroke: var(--accent); stroke-width: 1.2; }
+    .a-link { fill: none; stroke: var(--link); stroke-width: 1.2; }
+    .dash { stroke-dasharray: 5 4; stroke-width: 1; }
+    .m-muted { fill: var(--muted); } .m-accent { fill: var(--accent); } .m-link { fill: var(--link); }
+    .rule { stroke: rgb(var(--ink-rgb) / 0.10); stroke-width: 0.8; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · Companion&#x27;s docs</p>
+    <h1>How the dashboard stays aware of Companion</h1>
+    <div class="diagram-container">
+      <svg viewBox="0 64 1280 652" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="d3-companion-awareness-title d3-companion-awareness-desc">
+        <title id="d3-companion-awareness-title">How the dashboard stays aware of Companion</title>
+        <desc id="d3-companion-awareness-desc">Data flow for the dashboard&#x27;s awareness of Boomi Companion: installed plugin versions decide whether the index of pointers to Companion&#x27;s docs is rebuilt, only for what changed; a prompt&#x27;s words pick a few sections to read for the model; and the dashboard&#x27;s own guide, stamped with a version, is compared with what is installed so a person reviews any drift.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-muted" points="0 0, 8 3, 0 6"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-accent" points="0 0, 8 3, 0 6"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-link" points="0 0, 8 3, 0 6"/></marker>
+        </defs>
+        <rect class="paper" x="0" y="64" width="1280" height="652"/>
+<line class="a" x1="200" y1="288" x2="200" y2="200" marker-end="url(#arrow)"/>
+        <rect class="paper" x="210" y="238" width="52" height="12" rx="2"/><text class="t-arrow" x="236" y="247">VERSIONS</text>
+        <line class="a-accent" x1="320" y1="152" x2="520" y2="152" marker-end="url(#arrow-accent)"/>
+        <rect class="paper" x="382" y="132" width="76" height="12" rx="2"/><text class="t-arrow" x="420" y="141">CHANGED ONLY</text>
+        <line class="a" x1="640" y1="200" x2="640" y2="288" marker-end="url(#arrow)"/>
+        <rect class="paper" x="650" y="238" width="80" height="12" rx="2"/><text class="t-arrow" x="690" y="247">WHERE TO READ</text>
+        <line class="a" x1="320" y1="336" x2="520" y2="336" marker-end="url(#arrow)"/>
+        <rect class="paper" x="380" y="316" width="80" height="12" rx="2"/><text class="t-arrow" x="420" y="325">READ SECTIONS</text>
+        <line class="a" x1="760" y1="336" x2="960" y2="336" marker-end="url(#arrow)"/>
+        <rect class="paper" x="834" y="316" width="52" height="12" rx="2"/><text class="t-arrow" x="860" y="325">GUIDANCE</text>
+        <line class="a" x1="1080" y1="472" x2="1080" y2="384" marker-end="url(#arrow)"/>
+        <rect class="paper" x="1090" y="422" width="76" height="12" rx="2"/><text class="t-arrow" x="1128" y="431">WHAT IT ASKS</text>
+        <line class="a" x1="200" y1="384" x2="200" y2="472" marker-end="url(#arrow)"/>
+        <rect class="paper" x="210" y="422" width="60" height="12" rx="2"/><text class="t-arrow" x="240" y="431">INSTALLED</text>
+        <line class="a" x1="320" y1="520" x2="520" y2="520" marker-end="url(#arrow)"/>
+        <rect class="paper" x="386" y="500" width="68" height="12" rx="2"/><text class="t-arrow" x="420" y="509">DRIFT + LOG</text>
+        <line class="a" x1="760" y1="520" x2="960" y2="520" marker-end="url(#arrow)"/>
+        <rect class="paper" x="820" y="500" width="80" height="12" rx="2"/><text class="t-arrow" x="860" y="509">EDITS + STAMP</text>
+        <path class="a" d="M1080,568 V596 Q1080,604 1072,604 H208 Q200,604 200,596 V568" marker-end="url(#arrow)"/>
+        <rect class="paper" x="610" y="584" width="60" height="12" rx="2"/><text class="t-arrow" x="640" y="593">THE STAMP</text>
+        <rect class="paper" x="80" y="104" width="240" height="96" rx="6"/><rect class="n-backend" x="80" y="104" width="240" height="96" rx="6"/><rect class="tag" x="88" y="110" width="36" height="12" rx="2"/><text class="t-tag" x="106" y="119">CHECK</text><text class="t-name" x="200" y="150">Did a version change?</text><text class="t-sub" x="200" y="166">installed versions vs the index</text><text class="t-sub" x="200" y="180">nothing read if none moved</text>
+        <rect class="paper" x="520" y="104" width="240" height="96" rx="6"/><rect class="n-focal" x="520" y="104" width="240" height="96" rx="6"/><rect class="tag" x="528" y="110" width="36" height="12" rx="2"/><text class="t-tag" x="546" y="119">STORE</text><text class="t-name" x="640" y="150">Pointer index</text><text class="t-sub" x="640" y="166">headings + key words per doc</text><text class="t-sub" x="640" y="180">a fingerprint each, no text</text>
+        <rect class="paper" x="80" y="288" width="240" height="96" rx="6"/><rect class="n-external" x="80" y="288" width="240" height="96" rx="6"/><rect class="tag" x="88" y="294" width="48" height="12" rx="2"/><text class="t-tag" x="112" y="303">ON DISK</text><text class="t-name" x="200" y="334">Companion plugins</text><text class="t-sub" x="200" y="350">bc-integration and the others</text><text class="t-sub" x="200" y="364">docs, a CHANGELOG, a version</text>
+        <rect class="paper" x="520" y="288" width="240" height="96" rx="6"/><rect class="n-backend" x="520" y="288" width="240" height="96" rx="6"/><rect class="tag" x="528" y="294" width="36" height="12" rx="2"/><text class="t-tag" x="546" y="303">MATCH</text><text class="t-name" x="640" y="334">Retrieval</text><text class="t-sub" x="640" y="350">your prompt → the best sections</text><text class="t-sub" x="640" y="364">6 at most, 10,000 characters</text>
+        <rect class="paper" x="960" y="288" width="240" height="96" rx="6"/><rect class="n-external" x="960" y="288" width="240" height="96" rx="6"/><rect class="tag" x="968" y="294" width="36" height="12" rx="2"/><text class="t-tag" x="986" y="303">MODEL</text><text class="t-name" x="1080" y="334">Prompt model</text><text class="t-sub" x="1080" y="350">writes the upgrade and why</text><text class="t-sub" x="1080" y="364">the tab names plugin + version</text>
+        <rect class="paper" x="960" y="472" width="240" height="96" rx="6"/><rect class="n-backend" x="960" y="472" width="240" height="96" rx="6"/><rect class="tag" x="968" y="478" width="32" height="12" rx="2"/><text class="t-tag" x="984" y="487">OURS</text><text class="t-name" x="1080" y="518">The guide</text><text class="t-sub" x="1080" y="534">what Claude asks, per plugin</text><text class="t-sub" x="1080" y="548">stamped with a version</text>
+        <rect class="paper" x="80" y="472" width="240" height="96" rx="6"/><rect class="n-backend" x="80" y="472" width="240" height="96" rx="6"/><rect class="tag" x="88" y="478" width="36" height="12" rx="2"/><text class="t-tag" x="106" y="487">CHECK</text><text class="t-name" x="200" y="518">Drift check</text><text class="t-sub" x="200" y="534">stamp vs installed version</text><text class="t-sub" x="200" y="548">the tab flags it, shows the log</text>
+        <rect class="paper" x="520" y="472" width="240" height="96" rx="6"/><rect class="n-input" x="520" y="472" width="240" height="96" rx="6"/><rect class="tag" x="528" y="478" width="44" height="12" rx="2"/><text class="t-tag" x="550" y="487">REVIEW</text><text class="t-name" x="640" y="518">You</text><text class="t-sub" x="640" y="534">read the model&#x27;s draft</text><text class="t-sub" x="640" y="548">edit the guide, set the stamp</text>
+        <line class="rule" x1="40" y1="636" x2="1240" y2="636"/><text class="t-legend" x="40" y="656">LEGEND</text><rect class="n-focal" x="120" y="646" width="24" height="12" rx="2"/><text class="t-legend" x="156" y="656">THE INDEX</text><line class="a" x1="336" y1="652" x2="360" y2="652" marker-end="url(#arrow)"/><text class="t-legend" x="372" y="656">DATA FLOW</text><line class="a-accent" x1="552" y1="652" x2="576" y2="652" marker-end="url(#arrow-accent)"/><text class="t-legend" x="588" y="656">ONLY WHAT CHANGED</text>
+      </svg>
+    </div>
+    <div class="notes"><div class="note"><h2>Decoupled</h2><p>The dashboard keeps no copy of Companion's docs. Its index holds pointers: each doc's headings, key words and a fingerprint. A weekly Companion upgrade is picked up on its own, and nothing goes stale.</p></div><div class="note"><h2>Aware, cheaply</h2><p>The index is rebuilt only when a plugin's version changes, and then only the docs whose fingerprint changed. Between upgrades nothing is read until a prompt needs a few sections.</p></div><div class="note"><h2>Drift is a person&#x27;s call</h2><p>What Claude must ask before each kind of work is the dashboard's own guide, stamped with the version it was written for. When Companion moves on, the Prompt tab says so, and a model drafts edits for you to review. It never changes the guide itself.</p></div></div>
+    <footer>boomi-dashboard · drawn in the Valence (Miami Deco) style · made with the diagram-design skill</footer>
+  </div>
+</body>
+</html>

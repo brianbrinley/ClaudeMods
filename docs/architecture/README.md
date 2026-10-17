@@ -20,8 +20,9 @@ Two choices differ from the skill's defaults, on purpose: the fonts are the them
 | [`d1-overview.html`](d1-overview.html) (Valence: [`valence/`](valence/d1-overview.html)) | How the mod plugs into Claude Code: the hooks module, the pure modules, state, what it draws, and what it reads |
 
 | [`d2-prompt-lifecycle.html`](d2-prompt-lifecycle.html) (Valence: [`valence/`](valence/d2-prompt-lifecycle.html)) | What happens to a prompt you type: the check, the hold, the background rewrite, and the upgrade you send |
+| [`d3-companion-awareness.html`](d3-companion-awareness.html) (Valence: [`valence/`](valence/d3-companion-awareness.html)) | How the dashboard stays aware of Companion: the version check, the pointer index, retrieval, and the stamped guide with its drift check |
 
-More are planned (awareness of Companion, a tool call to a budget decision, how the three mods relate); see `tasks/todo.md`.
+More are planned (a tool call to a budget decision, how the three mods relate); see `tasks/todo.md`.
 
 ## Building them
 
