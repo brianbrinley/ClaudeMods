@@ -377,9 +377,9 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** five diagrams, each fitting the column with no side scrolling, and **Open full size** opens that diagram on its own page. **Fail:** an empty or cut-off box, or the link goes nowhere.
 - [ ] **R2. Diagrams follow the theme.** Press the moon button on the Architecture page, then open one diagram full size.
   **Pass:** the diagrams turn Night with the page, and the full-size diagram opens in Night too. **Fail:** a Day diagram on a Night page, or the other way round.
-- [ ] **R3. Dashboard pages.** Open **Companion Dashboard**, then each pill: Overview, Using it, Spend and budgets, Prompt tips, Reference, How it works.
+- [ ] **R3. Dashboard pages.** Open **Companion Dashboard**, then each pill: Overview, Day to day, Cost and budgets, Prompt tips, Reference, How it works.
   **Pass:** each is a short page with its own sections, and ← / → at the bottom go to the neighbouring pages. **Fail:** a page is empty or repeats another.
 - [ ] **R4. Links across pages.** On **Reference**, follow the **Budget enforcement** link in the settings table.
-  **Pass:** it lands on **Spend and budgets** at that section. **Fail:** it stays on Reference or lands at the top of a page.
+  **Pass:** it lands on **Cost and budgets** at that section. **Fail:** it stays on Reference or lands at the top of a page.
 - [ ] **R5. Search.** Type `budget enforce` in the header's search box, press ↓ then Enter.
   **Pass:** results list headings with the page they're on, and Enter opens **Budget enforcement**. **Fail:** no results, or the wrong page.

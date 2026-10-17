@@ -35,9 +35,9 @@ PAGES = [
 SPLITS = {
     "boomi-dashboard": [
         ("", "Overview", ["install", "what-you-see"]),
-        ("using", "Using it", ["stages-and-what-needs-attention", "companions-other-plugins", "watched-components",
-                               "companions-activity-log", "past-companion-sessions", "session-report"]),
-        ("spend", "Spend and budgets", ["tokens-and-spend"]),
+        ("using", "Day to day", ["stages-and-what-needs-attention", "companions-other-plugins", "watched-components",
+                                 "companions-activity-log", "past-companion-sessions", "session-report"]),
+        ("spend", "Cost and budgets", ["tokens-and-spend"]),
         ("prompts", "Prompt tips", ["prompt-tips"]),
         ("reference", "Reference", ["commands-and-tools", "setup-and-settings", "limits"]),
         ("internals", "How it works", ["how-it-works", "whats-coming-next", "development"]),
