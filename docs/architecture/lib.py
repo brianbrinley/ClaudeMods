@@ -71,7 +71,6 @@ def _css(theme: dict, w: int) -> str:
     .note h2 {{ font-family: var(--f-name); font-size: 0.8rem; font-weight: 600; margin-bottom: 0.4rem; }}
     .note p {{ font-size: 0.8rem; line-height: 1.5; color: var(--muted); }}
     .note code {{ font-family: ui-monospace, SFMono-Regular, Menlo, 'Fira Mono', monospace; font-size: 0.72rem; color: var(--ink); }}
-    footer {{ margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid rgb(var(--ink-rgb) / 0.12); font-family: var(--f-mono); font-size: 0.66rem; color: var(--muted); }}
     @media (max-width: 760px) {{ .notes {{ grid-template-columns: 1fr; }} body {{ padding: 2rem 1rem; }} }}
     @media print {{ .diagram-container {{ overflow-x: visible; }} svg {{ min-width: 0; }} }}
     /* the diagram's roles */
@@ -115,13 +114,12 @@ def _css(theme: dict, w: int) -> str:
   """
 
 
-def page(theme_key: str, *, slug: str, eyebrow: str, title: str, desc: str, viewbox: tuple[int, int, int, int], body: str, notes: list[tuple[str, str]] | None = None, colophon: str = "") -> str:
+def page(theme_key: str, *, slug: str, eyebrow: str, title: str, desc: str, viewbox: tuple[int, int, int, int], body: str, notes: list[tuple[str, str]] | None = None) -> str:
     theme = THEMES[theme_key]
     x0, y0, w, h = viewbox
     cards = ""
     if notes:
         cards = '<div class="notes">' + "".join(f"<div class=\"note\"><h2>{escape(t)}</h2><p>{p}</p></div>" for t, p in notes) + "</div>"
-    foot = f"<footer>{colophon}</footer>" if colophon else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -149,7 +147,6 @@ def page(theme_key: str, *, slug: str, eyebrow: str, title: str, desc: str, view
       </svg>
     </div>
     {cards}
-    {foot}
   </div>
 </body>
 </html>

@@ -20,11 +20,6 @@ from lib import page  # noqa: E402
 
 DIAGRAMS = [d1_overview, d2_prompt_lifecycle, d3_companion_awareness]
 
-COLOPHON = {
-    "exosphere": "boomi-dashboard · drawn in Boomi's Exosphere style · made with the diagram-design skill",
-    "valence": "boomi-dashboard · drawn in the Valence (Miami Deco) style · made with the diagram-design skill",
-}
-
 
 def main() -> None:
     for module in DIAGRAMS:
@@ -39,7 +34,6 @@ def main() -> None:
                 viewbox=module.VIEWBOX,
                 body=module.body(),
                 notes=getattr(module, "NOTES", None),
-                colophon=COLOPHON[theme],
             )
             out = folder / f"{module.SLUG}.html"
             out.write_text(html, encoding="utf-8")

@@ -23,7 +23,6 @@
     .note h2 { font-family: var(--f-name); font-size: 0.8rem; font-weight: 600; margin-bottom: 0.4rem; }
     .note p { font-size: 0.8rem; line-height: 1.5; color: var(--muted); }
     .note code { font-family: ui-monospace, SFMono-Regular, Menlo, 'Fira Mono', monospace; font-size: 0.72rem; color: var(--ink); }
-    footer { margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid rgb(var(--ink-rgb) / 0.12); font-family: var(--f-mono); font-size: 0.66rem; color: var(--muted); }
     @media (max-width: 760px) { .notes { grid-template-columns: 1fr; } body { padding: 2rem 1rem; } }
     @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
     /* the diagram's roles */
@@ -112,7 +111,6 @@
       </svg>
     </div>
     <div class="notes"><div class="note"><h2>Decoupled</h2><p>The dashboard keeps no copy of Companion's docs. Its index holds pointers: each doc's headings, key words and a fingerprint. A weekly Companion upgrade is picked up on its own, and nothing goes stale.</p></div><div class="note"><h2>Aware, cheaply</h2><p>The index is rebuilt only when a plugin's version changes, and then only the docs whose fingerprint changed. Between upgrades nothing is read until a prompt needs a few sections.</p></div><div class="note"><h2>Drift is a person&#x27;s call</h2><p>What Claude must ask before each kind of work is the dashboard's own guide, stamped with the version it was written for. When Companion moves on, the Prompt tab says so, and a model drafts edits for you to review. It never changes the guide itself.</p></div></div>
-    <footer>boomi-dashboard · drawn in Boomi's Exosphere style · made with the diagram-design skill</footer>
   </div>
 </body>
 </html>
