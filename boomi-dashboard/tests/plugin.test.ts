@@ -829,6 +829,66 @@ test('Companion v1.0.83: a --no-wait test is submitted, not passed', async ($, o
   expect(text).not.toContain('test passed')
 })
 
+const MOVED = (file: string) => `Command did not complete within its 120s timeout and was moved to the background (ID: ${file.split('/').pop()!.replace('.output', '')}). Output is being written to: ${file}. You will be notified when it completes.`
+
+/** A Bash call Claude Code moved to the background: its notice, and its task ID in the result's own field. */
+const backgrounded = (on: On, file: string) => {
+  const id = file.split('/').pop()!.replace('.output', '')
+  on('tool.call', { tool: 'Bash' }, async () => ({ result: { stdout: MOVED(file), stderr: '', interrupted: false, backgroundTaskId: id } }))
+}
+
+test('a test Claude Code moved to the background is running, not "not waited for", and settles when its output file has the result', async ($, on) => {
+  const output = '/private/tmp/claude-502/proj/session/tasks/bycnqqbkr.output'
+  const files: Record<string, string> = { [FILE]: ORDERS }
+  world(on, files)
+  backgrounded(on, output)
+  await startSession($, on)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
+  const running = String((await $.command.run(dashboard('text'))).text)
+  expect(running).toContain('◐ testing…')
+  expect(running).not.toContain('result not waited for')
+  expect(running).toContain('Testing 1a2b3c4d-1111-2222-3333-444455556666… (running in the background)')
+  // The script is still polling: nothing to read yet, so the step stays running.
+  await clock.advance(5_000)
+  expect(String((await $.command.run(dashboard('text'))).text)).toContain('◐ testing…')
+  // It finishes: the dashboard reads the result from the file Claude Code wrote.
+  files[output] = [`Executing test for process ${ID} on atom atom-1`, 'Execution started: requestId=executionrecord-abc', 'Polling for results...', '  Execution in progress... (1/120)', 'Execution completed: status=ERROR, executionId=execution-0490202b-2e2f'].join('\n')
+  await clock.advance(5_000)
+  const settled = String((await $.command.run(dashboard('text'))).text)
+  expect(settled).toContain('✗ test ERROR')
+  expect(settled).toContain('Needs attention (1)')
+  expect(settled).not.toContain('testing…')
+  expect(settled).not.toContain('result not waited for')
+})
+
+test('a backgrounded test whose output never shows a result is given up on, and says so', async ($, on) => {
+  const output = '/private/tmp/claude-502/proj/session/tasks/neverends.output'
+  world(on, { [FILE]: ORDERS, [output]: `Executing test for process ${ID} on atom atom-1\nPolling for results...` })
+  backgrounded(on, output)
+  await startSession($, on)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
+  // In steps: the pane's own timers would fire too often in one jump.
+  for (let i = 0; i < 4; i++) await clock.advance(8 * 60_000)
+  const text = String((await $.command.run(dashboard('text'))).text)
+  expect(text).toContain('test result not seen')
+  expect(text).not.toContain('testing…')
+})
+
+test('a notice a script merely printed is not believed: no task ID in the result, so the file it names is never read', async ($, on) => {
+  const output = '/private/tmp/claude-502/proj/session/tasks/forged.output'
+  const files: Record<string, string> = { [FILE]: ORDERS, [output]: `Execution completed: status=ERROR, executionId=execution-from-a-file` }
+  world(on, files)
+  // The same words, but in the script's own output, with no backgroundTaskId on the result.
+  shell(on, MOVED(output))
+  await startSession($, on)
+  await $.tool.call({ tool: 'Bash', command: `bash scripts/boomi-test-execute.sh --process-id ${ID}` })
+  await clock.advance(10_000)
+  const text = String((await $.command.run(dashboard('text'))).text)
+  expect(text).toContain('result not waited for')
+  expect(text).not.toContain('execution-from-a-file')
+  expect(text).not.toContain('test ERROR')
+})
+
 test('Companion v1.0.83: a test that times out while waited for fails', async ($, on) => {
   world(on, { [FILE]: ORDERS })
   shell(on, V1083.timedOut)

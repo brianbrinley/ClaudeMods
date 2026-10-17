@@ -420,6 +420,28 @@ export const parseResults = (output: string): Result[] => {
   return results
 }
 
+/**
+ * A command Claude Code moved to the background (it hit the Bash timeout, 120 s
+ * by default, or was run in the background): its task's ID and the file its
+ * output is being written to. The result Claude Code hands back then is that
+ * message, not the script's output.
+ */
+export const backgroundOf = (output: string): { id: string; file: string } | undefined => {
+  const m = output.match(/background[^\n]*?\bID:?\s*\(?([A-Za-z0-9_-]+)\)?[\s\S]{0,40}?written to:\s*(\S+)/i)
+  if (!m) return undefined
+  const id = m[1]!
+  const file = m[2]!.replace(/\.$/, '')
+  // A command's output is not trusted text: anything could print this notice and name any file. Only Claude Code's own shape is read: an absolute path, no `..`, ending in `/tasks/<this task's ID>.output`.
+  const isTaskOutput = file.startsWith('/') && !/(^|\/)\.\.(\/|$)/.test(file) && file.endsWith(`/tasks/${id}.output`)
+  return isTaskOutput ? { id, file } : undefined
+}
+
+/** Whether a script's output holds its final line yet: a test's status or an ERROR, any other script's SUCCESS or ERROR. */
+export const isSettled = (kind: ActivityKind, output: string): boolean =>
+  kind === 'test'
+    ? /^\s*Execution completed: status=|^\s*ERROR:/m.test(output)
+    : /^\s*(SUCCESS|ERROR):|already exists with ID:|nothing sent to the platform/m.test(output)
+
 /** The results of one kind of script (or of no telling kind) in a command's output. */
 export const readResults = (kind: ActivityKind, output: string, _isError: boolean): Result[] =>
   parseResults(output).filter(result => result.kind === kind || result.kind === undefined)
@@ -668,7 +690,7 @@ export const describe = (a: Activity): string => {
       test: 'Testing',
       other: 'Running',
     }
-    return `${doing[a.kind]} ${a.kind === 'other' ? (SCRIPT_WORDS[a.script ?? ''] ?? a.script ?? 'a Companion script').toLowerCase() : a.subject}…`
+    return `${doing[a.kind]} ${a.kind === 'other' ? (SCRIPT_WORDS[a.script ?? ''] ?? a.script ?? 'a Companion script').toLowerCase() : a.subject}…${a.watchFile ? ' (running in the background)' : ''}`
   }
   if (a.outcome === 'blocked') return `Blocked: ${a.kind === 'other' ? a.script : `${a.kind} of ${a.subject}`}`
   if (a.outcome === 'failed') {
@@ -1031,7 +1053,7 @@ export const stages = (row: ComponentRow, runs: readonly Run[] = []): Stage[] =>
     if (tested.outcome === 'running') out.push({ level: 'warning', text: 'testing…' })
     else if (tested.outcome === 'failed') out.push({ level: 'critical', text: `test ${tested.executionStatus ?? 'failed'}` })
     else if (tested.outcome === 'blocked') out.push({ level: 'serious', text: 'test blocked' })
-    else if (!tested.executionStatus) out.push({ level: 'warning', text: 'test submitted, result not waited for' })
+    else if (!tested.executionStatus) out.push({ level: 'warning', text: tested.watchFile ? 'test result not seen' : 'test submitted, result not waited for' })
     else out.push({ level: levelOf(tested), text: tested.executionStatus === 'COMPLETE' ? 'test passed' : `test ${tested.executionStatus}` })
   }
   return out

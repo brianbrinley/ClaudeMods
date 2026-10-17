@@ -553,7 +553,7 @@ The dashboard follows Claude's tool calls, so tracking the session costs no Plat
 | `boomi-component-push.sh <file>` | Saved, with the new version |
 | `boomi-component-pull.sh` | Pulled |
 | `boomi-deploy.sh` / `boomi-undeploy.sh` | Deployed or undeployed, or the error |
-| `boomi-test-execute.sh --process-id <id>` | The execution's status; `ERROR`, `ABORTED` or `DISCARDED` is a failure. With `--no-wait`, ◐ submitted |
+| `boomi-test-execute.sh --process-id <id>` | The execution's status; `ERROR`, `ABORTED` or `DISCARDED` is a failure. With `--no-wait`, ◐ submitted. If Claude Code moves a slow test to the background, ◐ `testing…` until the result is in the output file Claude Code names, which the dashboard reads every five seconds (`test result not seen` after 30 minutes) |
 | Any other Companion script | A line under **Claude's latest steps** |
 
 | Engine call | Used for |

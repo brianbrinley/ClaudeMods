@@ -31,6 +31,12 @@ export type Activity = {
   /** The component file, from `active-development/` on, when there is one. */
   file?: string
   componentId?: string
+  /**
+   * A step whose command Claude Code moved to the background: the file its
+   * output is written to, read until the step has its result. Still set on a
+   * step the dashboard gave up on, so it can say the result was not seen.
+   */
+  watchFile?: string
   /** The component's type as its XML has it: process, connector-settings, ... */
   type?: string
   /** For `other`: the script's name without `boomi-` and `.sh`. */

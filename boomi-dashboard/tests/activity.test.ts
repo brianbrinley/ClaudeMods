@@ -84,8 +84,7 @@ import {
   monthSpend,
   monthView,
   resumeCommand,
-  resumable,
-} from '../hooks/activity'
+  resumable, backgroundOf, isSettled } from '../hooks/activity'
 import { agentstudioReading, bdiRunId, connectorProject, connectordevReading, isAwaitingApproval, productRun, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, productWords, quarantineChecks, quarantineReading } from '../hooks/products'
 import { reviewPrompt, reviewSession, reviewText } from '../hooks/review'
 import type { Activity, Dashboard } from '../types'
@@ -1215,4 +1214,38 @@ test('the banner flamingo shows a sparkle for one tick in five, and never moves 
   expect(frames).toEqual(['🦩', '🦩', '🦩', '🦩', '✨', '🦩', '✨'])
   expect(bandFlamingoAt(-3)).toBe('🦩')
   expect(bandFlamingoAt(2.9)).toBe('🦩')
+})
+
+test('a command Claude Code moved to the background is told by its notice: the task ID and the output file', () => {
+  const notice = 'Command did not complete within its 120s timeout and was moved to the background (ID: bycnqqbkr). Output is being written to: /private/tmp/claude-502/proj/session/tasks/bycnqqbkr.output. You will be notified when it completes. To check interim output, use Read on that file path.'
+  expect(backgroundOf(notice)).toEqual({ id: 'bycnqqbkr', file: '/private/tmp/claude-502/proj/session/tasks/bycnqqbkr.output' })
+  expect(backgroundOf('Command running in background with ID: b123abc. Output is being written to: /tmp/t/tasks/b123abc.output')).toEqual({ id: 'b123abc', file: '/tmp/t/tasks/b123abc.output' })
+  // A script's own output, even one that talks about polling in the background, is not the notice.
+  expect(backgroundOf('Executing test for process x on atom a\nPolling for results...\nExecution completed: status=ERROR, executionId=execution-1')).toBeUndefined()
+  expect(backgroundOf('')).toBeUndefined()
+})
+
+test('a script’s output is settled once it holds the final line: a test’s status or an ERROR, another script’s SUCCESS or ERROR', () => {
+  const polling = 'Executing test for process x on atom a\nExecution started: requestId=executionrecord-1\nPolling for results...\n  Execution in progress... (1/120)'
+  expect(isSettled('test', polling)).toBe(false)
+  expect(isSettled('test', `${polling}\nExecution completed: status=ERROR, executionId=execution-1`)).toBe(true)
+  expect(isSettled('test', `${polling}\nERROR: Polling timed out after 120 attempts`)).toBe(true)
+  expect(isSettled('deploy', "Packaging 'X' (id) from the account default branch")).toBe(false)
+  expect(isSettled('deploy', "Packaging 'X' (id)\nSUCCESS: Deployed 'X' (package: p1)")).toBe(true)
+  expect(isSettled('push', 'ERROR: nothing to push')).toBe(true)
+})
+
+test('only the notice’s own shape is believed: a path outside a task’s output file is never read', () => {
+  const at = (file: string, id = 'bycnqqbkr') => `Command did not complete within its 120s timeout and was moved to the background (ID: ${id}). Output is being written to: ${file}. You will be notified when it completes.`
+  const ok = '/private/tmp/claude-502/proj/session/tasks/bycnqqbkr.output'
+  expect(backgroundOf(at(ok))).toEqual({ id: 'bycnqqbkr', file: ok })
+  expect(backgroundOf(at('/etc/passwd'))).toBeUndefined()
+  expect(backgroundOf(at('/Users/me/.ssh/id_rsa'))).toBeUndefined()
+  expect(backgroundOf(at('/private/tmp/claude-502/proj/session/tasks/../../../../../etc/passwd'))).toBeUndefined()
+  expect(backgroundOf(at('/private/tmp/claude-502/proj/session/tasks/../tasks/bycnqqbkr.output'))).toBeUndefined()
+  expect(backgroundOf(at('tasks/bycnqqbkr.output'))).toBeUndefined()
+  // Another task's file, not this one's.
+  expect(backgroundOf(at('/private/tmp/claude-502/proj/session/tasks/other.output'))).toBeUndefined()
+  // Not in a tasks folder.
+  expect(backgroundOf(at('/private/tmp/claude-502/proj/session/notes/bycnqqbkr.output'))).toBeUndefined()
 })

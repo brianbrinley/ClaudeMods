@@ -2,6 +2,13 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.60.0
+
+- **A test that runs long is no longer shown as "result not waited for".** Claude Code moves a Bash command to the background when it outlasts its timeout (120 seconds by default), and a test that polls for a slow process does. What comes back to the dashboard is then only that notice, with none of the script's output, so a test that was still polling looked like one submitted with `--no-wait`, and stayed that way. Such a step now shows `◐ testing…` and `Testing X… (running in the background)`.
+- **The result is read from the output file.** Claude Code writes the background command's output to a file and names it in the notice. The dashboard checks that file every five seconds, and when the script's final line is there (a test's status, or an `ERROR:`), the step settles as if the command had returned it: `✗ test ERROR` and **Needs attention** for a failure, `test passed` for a pass, with a toast as usual. Other Companion scripts that run long (a deploy, a push) settle the same way.
+- **Only Claude Code's own notice is followed.** A command's output is not trusted text, so the dashboard reads an output file only when the notice's task ID matches the `backgroundTaskId` in the result's own field (which a script's printed text can't set), and the file is an absolute path with no `..` that ends in `/tasks/<that ID>.output`. A script that merely prints the same words gets no file read.
+- **Giving up is said plainly.** If no result appears within 30 minutes (a test polls for ten at most), the step says `test result not seen` instead of claiming a submission.
+
 ## 0.59.0
 
 - **You can see the upgrade being written.** While the model rewrites a prompt, the Prompt tab's upgrade card says `UPGRADED ◐ HAIKU IS WRITING A BETTER ONE…` with a spinner that turns, a line under the cards says the quick version above stays until the new one arrives, and the **Upgrade with a model** button turns into `◐ Rewriting…`. The dashboard pane's prompt-tips row adds `· ◐ upgrading it…`. All of it clears when the upgrade lands, or when the model fails (the checks' upgrade stays). The spinner ticks only while a rewrite runs, so nothing is redrawn the rest of the time.
