@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>From a shell command to a pane row and a budget decision</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;1,400&family=Noto+Sans:wght@400;500;600&family=Fira+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --paper:#f5f5f5;--paper-2:#e5e5e5;--ink:#1f1f1f;--ink-rgb:31 31 31;--muted:#707070;--muted-rgb:112 112 112;--soft:#666666;--rule-solid:#cccccc;--accent:#bc4a37;--accent-rgb:188 74 55;--link:#006cd6;--node:#ffffff; color-scheme: light dark;
+      --f-title:'Poppins', system-ui, sans-serif; --f-callout:'Poppins', system-ui, sans-serif; --f-name:'Noto Sans', system-ui, sans-serif; --f-mono:'Fira Mono', ui-monospace, monospace; --f-eyebrow:'Fira Mono', ui-monospace, monospace; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper:#1f1f1f;--paper-2:#2e2e2e;--ink:#ffffff;--ink-rgb:255 255 255;--muted:#cccccc;--muted-rgb:204 204 204;--soft:#b3b3b3;--rule-solid:#707070;--accent:#ff9685;--accent-rgb:255 150 133;--link:#66b6f6;--node:#2e2e2e; } }
+    :root[data-theme="dark"] { --paper:#1f1f1f;--paper-2:#2e2e2e;--ink:#ffffff;--ink-rgb:255 255 255;--muted:#cccccc;--muted-rgb:204 204 204;--soft:#b3b3b3;--rule-solid:#707070;--accent:#ff9685;--accent-rgb:255 150 133;--link:#66b6f6;--node:#2e2e2e; color-scheme: dark; }
+    :root[data-theme="light"] { color-scheme: light; }
+    body { font-family: var(--f-name); background: var(--paper); color: var(--ink); min-height: 100vh; padding: 3rem 2rem; }
+    .frame { max-width: 1280px; width: 100%; margin: 0 auto; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: var(--f-eyebrow); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--f-title); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 500; letter-spacing: -0.01em; line-height: 1.15; color: var(--ink); margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 1280px; display: block; }
+    .notes { display: grid; grid-template-columns: 1.1fr 1fr 0.9fr; gap: 1rem; margin-top: 1.5rem; }
+    .note { background: var(--node); border: 1px solid rgb(var(--ink-rgb) / 0.12); border-radius: 6px; padding: 1rem 1.1rem; }
+    .note h2 { font-family: var(--f-name); font-size: 0.8rem; font-weight: 600; margin-bottom: 0.4rem; }
+    .note p { font-size: 0.8rem; line-height: 1.5; color: var(--muted); }
+    .note code { font-family: ui-monospace, SFMono-Regular, Menlo, 'Fira Mono', monospace; font-size: 0.72rem; color: var(--ink); }
+    @media (max-width: 760px) { .notes { grid-template-columns: 1fr; } body { padding: 2rem 1rem; } }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+    /* the diagram's roles */
+    .paper { fill: var(--paper); }
+    .zone { fill: rgb(var(--ink-rgb) / 0.02); stroke: rgb(var(--ink-rgb) / 0.10); stroke-width: 0.8; }
+    .n-backend { fill: var(--node); stroke: var(--ink); stroke-width: 1; }
+    .n-focal { fill: rgb(var(--accent-rgb) / 0.08); stroke: var(--accent); stroke-width: 1.2; }
+    .n-store { fill: rgb(var(--ink-rgb) / 0.05); stroke: var(--muted); stroke-width: 1; }
+    .n-external { fill: rgb(var(--ink-rgb) / 0.03); stroke: rgb(var(--ink-rgb) / 0.30); stroke-width: 1; }
+    .n-security { fill: rgb(var(--accent-rgb) / 0.05); stroke: rgb(var(--accent-rgb) / 0.50); stroke-width: 1; stroke-dasharray: 4 4; }
+    .n-security + .tag { stroke: rgb(var(--accent-rgb) / 0.50); }
+    .n-input { fill: rgb(var(--muted-rgb) / 0.10); stroke: var(--soft); stroke-width: 1; }
+    .n-input + .tag { stroke: rgb(var(--muted-rgb) / 0.50); }
+    .lifeline { stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 3 3; }
+    .bar { fill: rgb(var(--ink-rgb) / 0.06); stroke: var(--muted); stroke-width: 0.8; }
+    .seq-frame { fill: rgb(var(--ink-rgb) / 0.02); stroke: rgb(var(--ink-rgb) / 0.22); stroke-width: 1; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .seq-frame { fill: rgb(var(--ink-rgb) / 0.04); } }
+    :root[data-theme="dark"] .seq-frame { fill: rgb(var(--ink-rgb) / 0.04); }
+    .frame-tab { fill: var(--paper); stroke: rgb(var(--ink-rgb) / 0.22); stroke-width: 1; }
+    .divider { stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 4 3; }
+    .t-op { font-family: var(--f-eyebrow); font-size: 8px; letter-spacing: 0.12em; fill: var(--muted); text-anchor: middle; }
+    .t-guard { font-family: var(--f-mono); font-size: 8px; letter-spacing: 0.04em; fill: var(--muted); }
+    .t-callout { font-family: var(--f-callout); font-style: italic; font-size: 14px; fill: var(--ink); }
+    .leader { fill: none; stroke: rgb(var(--ink-rgb) / 0.40); stroke-width: 1; stroke-dasharray: 4 3; }
+    .dot { fill: var(--ink); }
+    .tag { fill: transparent; stroke-width: 0.8; }
+    .n-backend + .tag { stroke: rgb(var(--ink-rgb) / 0.40); }
+    .n-focal + .tag { stroke: rgb(var(--accent-rgb) / 0.50); }
+    .n-store + .tag { stroke: rgb(var(--muted-rgb) / 0.50); }
+    .n-external + .tag { stroke: rgb(var(--ink-rgb) / 0.30); }
+    .t-name { font-family: var(--f-name); font-size: 12px; font-weight: 600; fill: var(--ink); text-anchor: middle; }
+    .t-sub { font-family: var(--f-mono); font-size: 9px; fill: var(--muted); text-anchor: middle; }
+    .t-tag { font-family: var(--f-eyebrow); font-size: 7px; letter-spacing: 0.08em; fill: var(--muted); text-anchor: middle; }
+    .t-zone { font-family: var(--f-eyebrow); font-size: 7px; letter-spacing: 0.14em; fill: var(--soft); text-anchor: middle; }
+    .t-arrow { font-family: var(--f-mono); font-size: 8px; letter-spacing: 0.06em; fill: var(--soft); text-anchor: middle; }
+    .t-legend { font-family: var(--f-eyebrow); font-size: 8px; letter-spacing: 0.14em; fill: var(--muted); }
+    .a { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+    .a-accent { fill: none; stroke: var(--accent); stroke-width: 1.2; }
+    .a-link { fill: none; stroke: var(--link); stroke-width: 1.2; }
+    .dash { stroke-dasharray: 5 4; stroke-width: 1; }
+    .m-muted { fill: var(--muted); } .m-accent { fill: var(--accent); } .m-link { fill: var(--link); }
+    .rule { stroke: rgb(var(--ink-rgb) / 0.10); stroke-width: 0.8; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Flowchart · the budget gate</p>
+    <h1>From a shell command to a pane row and a budget decision</h1>
+    <div class="diagram-container">
+      <svg viewBox="0 64 1280 540" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="d4-budget-gate-title d4-budget-gate-desc">
+        <title id="d4-budget-gate-title">From a shell command to a pane row and a budget decision</title>
+        <desc id="d4-budget-gate-desc">Flowchart of what the dashboard does with each shell command Claude runs: a Companion change while a budget is spent is refused, or asked about in confirm mode; every other command is noted as running, run, read into a step, recorded, and shown in the pane, the status line and a toast.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-muted" points="0 0, 8 3, 0 6"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-accent" points="0 0, 8 3, 0 6"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-link" points="0 0, 8 3, 0 6"/></marker>
+        </defs>
+        <rect class="paper" x="0" y="64" width="1280" height="540"/>
+<line class="a" x1="265" y1="160" x2="345" y2="160" marker-end="url(#arrow)"/>
+        <line class="a" x1="585" y1="160" x2="655" y2="160" marker-end="url(#arrow)"/>
+        <rect class="paper" x="606" y="140" width="28" height="12" rx="2"/><text class="t-arrow" x="620" y="149">YES</text>
+        <line class="a" x1="895" y1="160" x2="945" y2="160" marker-end="url(#arrow)"/>
+        <rect class="paper" x="906" y="140" width="28" height="12" rx="2"/><text class="t-arrow" x="920" y="149">YES</text>
+        <line class="a" x1="465" y1="220" x2="465" y2="276" marker-end="url(#arrow)"/>
+        <rect class="paper" x="437" y="242" width="20" height="12" rx="2"/><text class="t-arrow" x="447" y="251">NO</text>
+        <path class="a" d="M775,220 V240 Q775,248 767,248 H497 Q489,248 489,256 V276" marker-end="url(#arrow)"/>
+        <rect class="paper" x="622" y="228" width="20" height="12" rx="2"/><text class="t-arrow" x="632" y="237">NO</text>
+        <line class="a" x1="575" y1="316" x2="665" y2="316" marker-end="url(#arrow)"/>
+        <line class="a" x1="885" y1="316" x2="945" y2="316" marker-end="url(#arrow)"/>
+        <line class="a" x1="1055" y1="356" x2="1055" y2="412" marker-end="url(#arrow)"/>
+        <path class="a" d="M1165,160 H1217 Q1225,160 1225,168 V444 Q1225,452 1217,452 H1165" marker-end="url(#arrow)"/>
+        <rect class="paper" x="1169" y="300" width="48" height="12" rx="2"/><text class="t-arrow" x="1193" y="309">BLOCKED</text>
+        <line class="a" x1="945" y1="452" x2="885" y2="452" marker-end="url(#arrow)"/>
+        <rect class="paper" x="45" y="140" width="220" height="40" rx="20"/><rect class="n-backend" x="45" y="140" width="220" height="40" rx="20"/><text class="t-name" x="155" y="164">Claude runs a shell command</text>
+        <polygon class="paper" points="465,100 585,160 465,220 345,160"/><polygon class="n-focal" points="465,100 585,160 465,220 345,160"/><text class="t-name" x="465" y="154">Spent budget?</text><text class="t-sub" x="465" y="170">and a change in Boomi</text><text class="t-sub" x="465" y="184">reads never count</text>
+        <polygon class="paper" points="775,100 895,160 775,220 655,160"/><polygon class="n-backend" points="775,100 895,160 775,220 655,160"/><text class="t-name" x="775" y="154">Refused?</text><text class="t-sub" x="775" y="170">block mode, or you</text><text class="t-sub" x="775" y="184">choose Stop</text>
+        <rect class="paper" x="945" y="120" width="220" height="80" rx="6"/><rect class="n-security" x="945" y="120" width="220" height="80" rx="6"/><rect class="tag" x="953" y="126" width="32" height="12" rx="2"/><text class="t-tag" x="969" y="135">GATE</text><text class="t-name" x="1055" y="158">Refuse, tell Claude</text><text class="t-sub" x="1055" y="174">step recorded as blocked</text><text class="t-sub" x="1055" y="188">told to stop and report</text>
+        <rect class="paper" x="355" y="276" width="220" height="80" rx="6"/><rect class="n-backend" x="355" y="276" width="220" height="80" rx="6"/><rect class="tag" x="363" y="282" width="32" height="12" rx="2"/><text class="t-tag" x="379" y="291">STEP</text><text class="t-name" x="465" y="314">Note it as running</text><text class="t-sub" x="465" y="330">any Companion script;</text><text class="t-sub" x="465" y="344">other commands pass</text>
+        <rect class="paper" x="665" y="276" width="220" height="80" rx="6"/><rect class="n-external" x="665" y="276" width="220" height="80" rx="6"/><rect class="tag" x="673" y="282" width="36" height="12" rx="2"/><text class="t-tag" x="691" y="291">SHELL</text><text class="t-name" x="775" y="314">The command runs</text><text class="t-sub" x="775" y="330">Claude Code runs it</text><text class="t-sub" x="775" y="344">may move it to the background</text>
+        <rect class="paper" x="945" y="276" width="220" height="80" rx="6"/><rect class="n-backend" x="945" y="276" width="220" height="80" rx="6"/><rect class="tag" x="953" y="282" width="32" height="12" rx="2"/><text class="t-tag" x="969" y="291">READ</text><text class="t-name" x="1055" y="314">Read its output</text><text class="t-sub" x="1055" y="330">the script&#x27;s own result</text><text class="t-sub" x="1055" y="344">ok · failed · still running</text>
+        <rect class="paper" x="945" y="412" width="220" height="80" rx="6"/><rect class="n-store" x="945" y="412" width="220" height="80" rx="6"/><rect class="tag" x="953" y="418" width="36" height="12" rx="2"/><text class="t-tag" x="971" y="427">STATE</text><text class="t-name" x="1055" y="450">Record the step</text><text class="t-sub" x="1055" y="466">kept in the dashboard&#x27;s state</text><text class="t-sub" x="1055" y="480">saved for the next session</text>
+        <rect class="paper" x="665" y="412" width="220" height="80" rx="6"/><rect class="n-backend" x="665" y="412" width="220" height="80" rx="6"/><rect class="tag" x="673" y="418" width="20" height="12" rx="2"/><text class="t-tag" x="683" y="427">UI</text><text class="t-name" x="775" y="450">What you see</text><text class="t-sub" x="775" y="466">pane rows · Needs attention</text><text class="t-sub" x="775" y="480">status line · a toast</text>
+        <line class="rule" x1="40" y1="532" x2="1240" y2="532"/><text class="t-legend" x="40" y="552">LEGEND</text><rect class="n-focal" x="120" y="542" width="24" height="12" rx="2"/><text class="t-legend" x="156" y="552">THE BUDGET GATE</text><line class="a" x1="336" y1="548" x2="360" y2="548" marker-end="url(#arrow)"/><text class="t-legend" x="372" y="552">FLOW</text>
+      </svg>
+    </div>
+    <div class="notes"><div class="note"><h2>A gate before a change</h2><p>Only Companion changes are held against a spent budget: creates, pushes, deploys, undeploys, test runs, and changing calls to the Platform API. Reads, pulls and status checks always run.</p></div><div class="note"><h2>Warn, ask or refuse</h2><p><code>budgetEnforce</code> chooses. <code>warn</code> (the default) only warns; <code>confirm</code> asks you each time (allow once, allow for the session, raise the budget, or stop); <code>block</code> refuses. A refusal tells Claude which budget is spent and not to work around it.</p></div><div class="note"><h2>Every command becomes a step</h2><p>Whatever runs, the dashboard reads the script's output into a step. A command Claude Code moved to the background stays running until its result is in. A refused step shows as blocked under Needs attention.</p></div></div>
+  </div>
+</body>
+</html>

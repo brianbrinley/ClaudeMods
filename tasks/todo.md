@@ -52,7 +52,7 @@ Audience: very technical people the project was shared with, who want a detailed
 - [x] D1 Overall architecture: hooks module, pure modules, state contract, pane / banner / status line
 - [x] D2 Prompt upgrade lifecycle (sequence): submit, checks, hold, background rewrite, why notes, taken-suggestion skip
 - [x] D3 Awareness of Companion: docs, pointer index, retrieval, model; version stamps and drift
-- [ ] D4 From a tool call to a pane row and a budget decision
+- [x] D4 From a tool call to a pane row and a budget decision
 - [ ] D5 How the three mods relate
 - [ ] Standalone files under `docs/architecture/` (Exosphere); Valence copies built into the site via `site/build.py` (`PAGES`, `COPY_PATHS`, workflow `paths`)
 - [ ] Check each in a real browser, light and dark; no customer names
