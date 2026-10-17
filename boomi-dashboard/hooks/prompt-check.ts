@@ -5,6 +5,8 @@
 import type { PromptCheckCode, PromptCounts, PromptTip, PromptTips } from '../types'
 import { STATUS } from './activity'
 import { mask } from './upgrade'
+import { guideFor, guideLine } from './prompt-guide'
+import type { GuideEntry } from './prompt-guide'
 
 /** What the session knows that a prompt might lean on, from the dashboard's own steps. */
 export type PromptFacts = {
@@ -212,28 +214,22 @@ export const upgradePrompt = (text: string, facts: PromptFacts, tips: readonly P
 export const WHY_MARK = '---why---'
 
 /**
- * What Claude would stop and ask before each kind of Boomi work: the questions
- * a better prompt answers up front. Built in for now; `rewriteSystem` takes
- * more, so a team's own niche (its naming rules, its environments, its
- * approval steps) can join them without touching the rest.
+ * What Claude would stop and ask before each kind of Boomi work, from the
+ * integration plugin's lines of the guide (prompt-guide.ts): the questions a
+ * better prompt answers up front. `rewriteSystem` takes the lines for the
+ * plugins on in the session, and extra guidance of a team's own, so a niche
+ * can join them without touching the rest.
  */
-export const TASK_QUESTIONS: readonly string[] = [
-  'a new process: the source and target systems, what starts it, the data format, and what happens to a record that fails',
-  'a deploy: the environment, and whether to test after',
-  'a fix: the error or execution ID, and what correct looks like',
-  'a map: the source and target profiles, and any field rules',
-  'a test: the data to use, and what a pass is',
-  'anything in production: whether Claude may change or run it',
-]
+export const TASK_QUESTIONS: readonly string[] = guideFor([]).map(guideLine)
 
 /** The model's instructions: polish the request, fill in what is vague, ask the rest as [decide: …] placeholders, and say why. `extraGuidance` is a team's own lines, added last. */
-export const rewriteSystem = (extraGuidance: readonly string[] = []): string =>
+export const rewriteSystem = (extraGuidance: readonly string[] = [], entries: readonly GuideEntry[] = guideFor([])): string =>
   [
     "You turn a person's prompt to Claude Code into a better prompt for Boomi integration work done with Boomi Companion. Their prompt is often short and leans on context only they have. The goal is a prompt they could send as it is, and a person who learns what a good one holds.",
     'Do three things:',
     '1. Polish the request: say what they asked for plainly and specifically, in the first person, as they would type it, in your own words where theirs is vague or rambling. Keep exactly what they meant and asked for.',
     '2. Fill in what is vague from the facts, components and guidance below: the component "it" means, the environment, the last failure. Use a listed component or fact only where the prompt clearly means it.',
-    `3. Where Claude would have to stop and ask the person something before acting, put that question in the prompt as a [decide: question] placeholder, with a suggested default after a dash where the facts or guidance support one: [decide: which environment - Dev?]. The usual gaps are, for ${TASK_QUESTIONS.join('; for ')}.`,
+    `3. Where Claude would have to stop and ask the person something before acting, put that question in the prompt as a [decide: question] placeholder, with a suggested default after a dash where the facts or guidance support one: [decide: which environment - Dev?]. The usual gaps are, for ${entries.map(guideLine).join('; for ')}.`,
     'Never invent component names, IDs, environments, systems, fields, data or numbers. Where something is unknown, leave a [decide: …] placeholder.',
     'Never add features, steps, systems, logic or requirements the person did not ask for (no upserts, write-backs, subprocesses or error handling they did not mention). The components and guidance below only tell you which existing names fit and what to ask the person about: turn a gap into a [decide: …] question, never into a decision made for them.',
     'When the person adds a note for this try, follow it. When an earlier try is given, write a different one that follows the note.',

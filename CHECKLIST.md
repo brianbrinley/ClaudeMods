@@ -322,6 +322,15 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **O25. Manual turns it off.** Run `/bc-dashboard config promptRewrite manual`, then type `deploy it` again.
   **Pass:** the tab shows the checks' upgrade only, `Upgrade with a model` still works when pressed, and no rewrite arrives by itself. **Fail:** a rewrite arrives anyway.
 
+- [ ] **O26. The rewrite reads the subfolders.** *(0.57.0)* With Companion installed, type `deploy it`, and read the rewrite's note in the tab.
+  **Pass:** the tab says `Read Companion's guidance: bc-integration <your version>`, and a rewrite asking about something only a subfolder doc covers (try `fix the map, still failing` or `test the process`) leans on it. **Fail:** no `Read Companion's guidance` line, or a rewrite that ignores Companion's guides.
+- [ ] **O27. The index follows an upgrade.** Run a Companion upgrade (or change `bc-integration`'s version folder), start a new session, and type a prompt with tips.
+  **Pass:** the first rewrite after the upgrade takes a moment longer, later ones don't, and the tab names the new version. **Fail:** it still names the old version, or every rewrite is slow.
+- [ ] **O28. The guide notices drift.** With Companion newer than `GUIDE_STAMP` in `hooks/prompt-guide.ts`, open the Prompt tab, then run `/bc-dashboard prompt guide`.
+  **Pass:** the tab shows `The dashboard's guide was written for bc-integration … (now …)`; the command lists the changelog lines since that version. **Fail:** neither shows, or it lists lines from versions the guide already covers.
+- [ ] **O29. Refresh drafts, never writes.** Run `/bc-dashboard prompt guide refresh`.
+  **Pass:** it prints `ADD`, `CHANGE` or `REMOVE` lines (or `Nothing to change.`), each naming the changelog line or doc heading behind it, ends with `Nothing was changed.`, and no file changes (`git status` is clean). **Fail:** a line with no supporting note, or a changed file.
+
 ## P. Usage breakdown and your Claude budget
 
 *boomi-dashboard 0.47.0, on a Claude subscription login.*

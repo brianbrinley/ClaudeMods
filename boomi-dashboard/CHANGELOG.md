@@ -2,6 +2,14 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.57.0
+
+- **The rewrite reads all of Companion's docs.** It was reading one file, `BOOMI_THINKING.md`: the `guides/`, `steps/`, `components/` and `platform_entities/` folders (about 110 docs in bc-integration 1.0.83) were never opened, and the other Companion plugins' docs were not read at all. It now reads every installed Companion plugin's reference docs.
+- **A bigger, smarter budget.** Up to 6 sections, each cut to the paragraphs that best match your prompt (not the first 1,200 characters), 10,000 characters in all, with a doc's file name counting toward a match.
+- **An index of pointers, kept between sessions.** Each doc's fingerprint, section headings and key words, never Companion's text, so the text can't go stale. It's rebuilt when a Companion plugin's version changes, and only changed docs are parsed again.
+- **Guided by Companion's version.** The Prompt tab says which plugins and versions the rewrite read.
+- **A guide that notices Companion upgrades.** The dashboard's list of what Claude asks is now tagged by plugin and stamped with the version it was written for. The tab flags drift; `/bc-dashboard prompt guide` shows what changed in Companion's changelog since; `/bc-dashboard prompt guide refresh` has the model draft the edits, each tied to a changelog line or doc heading, for you to review. It never changes anything itself.
+
 ## 0.56.0
 
 - **A better prompt upgrade, written by a model.** When a prompt gets tips, the checks' upgrade shows at once and, a moment later, the prompt model (`promptModel`, haiku by default) writes a better one in the background as the next try. It polishes your request, fills in what's vague from the session, and turns what Claude would have stopped to ask into `[decide: which environment - Dev?]` placeholders, with a suggested default only where the session or Companion's guidance supports one. It still never invents names or adds work you didn't ask for.

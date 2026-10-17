@@ -221,6 +221,8 @@ export type PromptTips = {
   shown?: number
   /** What the shown rewrite says it changed and why, up to three notes. */
   why?: string[]
+  /** The Companion plugins (with versions) whose docs the shown rewrite read. */
+  guidedBy?: string[]
 }
 
 /** One upgrade of a prompt: by the checks, or by a model with the person's note. */

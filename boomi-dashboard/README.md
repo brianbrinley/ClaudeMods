@@ -321,12 +321,14 @@ The upgrade adds only what the session knows, as sentences. What it doesn't know
 
 **What a rewrite reads,** besides your masked prompt and the session's facts:
 - **This folder's components** whose names share words with the prompt (up to 8, from the component XML under `componentsDir`), so "the Salesforce connection" can name the one you have. It uses a name only where the prompt clearly means it.
-- **Companion's own guidance:** the sections of bc-integration's reference docs (such as `BOOMI_THINKING.md`) that best match the prompt's words, up to 3, so the rewrite asks for what Companion needs for a listener, a map or a connection.
+- **Companion's own guidance:** every reference doc of every Companion plugin installed (bc-integration's `guides/`, `steps/`, `components/` and `platform_entities/` as well as `BOOMI_THINKING.md`, and the other plugins' own). The sections that best match the prompt's words, their headings and file names counting most, are read from the docs themselves: up to 6, each cut to its best paragraphs (2,000 characters at most), 10,000 characters in all, so the rewrite asks for what Companion needs for a listener, a map or a connection.
 - **Your note** and **the try before**, so each regenerate is different.
 
 The rewrite polishes your wording, fills in what's vague from the session, and turns what Claude would have stopped to ask (the environment for a deploy, the source and target of a new process, what a passing test is) into a `[decide: which environment - Dev?]` placeholder, with a suggested default only where the session or Companion's guidance supports one. It never adds features, steps or logic you didn't ask for: the components and guidance only decide which existing names fit and what to ask you, and a gap becomes a question, never a decision made for you. It never fills the prompt box by itself, and a prompt whose only tip is a secret is never sent to a model. It reads only the facts a tip needs, such as the last failure only for a fix.
 
-The tab says how much of each it read. It's a plain word match, with no index or embeddings to set up. A rewrite reads a few thousand tokens in a separate call, so it adds nothing to your session's context; only the prompt you send does.
+The tab says how much of each it read, and which Companion plugins and versions it came from. It's a plain word match, with no embeddings to set up. To keep it quick, the dashboard keeps an **index of pointers** to Companion's docs (each doc's fingerprint, its section headings and their key words, never Companion's text), saved between sessions. It's rebuilt when a Companion plugin's version changes, re-reading each doc only to see whether it did, so a weekly Companion upgrade is picked up on its own and nothing is read again in between.
+
+**The guide, and Companion upgrades.** What Claude has to ask before each kind of work is the dashboard's own guide (`hooks/prompt-guide.ts`), tagged by Companion plugin and stamped with the version it was written against. When Companion moves on, the Prompt tab says so (`The dashboard's guide was written for bc-integration 1.0.83 (now 1.0.90)`). `/bc-dashboard prompt guide` shows each plugin's state and the changelog lines since the guide's version; `/bc-dashboard prompt guide refresh` has the model draft edits for each plugin that has moved on or has no lines yet, each naming the changelog line or doc heading behind it. It prints the draft and changes nothing: you read it, edit the guide and set its stamp. A rewrite reads a few thousand tokens in a separate call, so it adds nothing to your session's context; only the prompt you send does.
 
 The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Prompt tips** button. `promptView` decides when the tab opens by itself: `auto` (default) when a prompt gets tips, `manual` only when you ask, `off` never.
 
@@ -455,7 +457,7 @@ With a connection it loads its fonts from Google Fonts; offline it falls back to
 | `/bc-dashboard theme [name]` | | Picks the pane's theme, or lists them. |
 | `/bc-dashboard components [csv] [save]` | | Copies every component with its IDs, tab-separated for a spreadsheet (`csv`: as CSV; `save`: also writes a `.csv` file). |
 | `/bc-dashboard config [budget\|pane\|data]` | | Walks through the dashboard's settings a question at a time, or one group of them. `config <setting> <value>` sets one, such as `config budgetUsd 5`. `config list` shows them all. |
-| `/bc-dashboard prompt [use\|upgrade]` | | Your last Boomi prompt's [tips](#prompt-tips) and an upgraded prompt; `use` puts it in the prompt box, `upgrade` has a model rewrite it. |
+| `/bc-dashboard prompt [use\|upgrade\|guide [refresh]]` | | Your last Boomi prompt's [tips](#prompt-tips) and an upgraded prompt; `use` puts it in the prompt box, `upgrade` has a model rewrite it, `guide` compares the dashboard's guide with the installed Companion plugins and `guide refresh` drafts edits. |
 | `/bc-dashboard banner` | | Shows the banner again after **Hide**. |
 
 Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix?" and it answers from the summary.
