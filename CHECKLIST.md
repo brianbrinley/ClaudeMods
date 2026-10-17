@@ -336,6 +336,9 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **O31. The upgrade shows it's being written.** *(0.59.0)* Type `deploy it` in a Companion folder, with `promptRewrite` at `auto`, and watch the Prompt tab.
   **Pass:** at once the card says `UPGRADED`; then it reads `UPGRADED ◐ HAIKU IS WRITING A BETTER ONE…` with the ◐ turning (◐ ◓ ◑ ◒), a line under the cards says the quick version stays until the new one arrives, and the pane's prompt-tips row ends `· ◐ upgrading it…`. When the upgrade lands, all three go and the card says `UPGRADED BY HAIKU`. **Fail:** no indicator, a spinner that never stops, or one that keeps turning after the upgrade has landed.
 
+- [ ] **O32. A slow test settles when it finishes.** *(0.60.0)* Have Claude run a test of a process that takes over two minutes (or the demo `Always Fails` process on a slow atom) without `--no-wait`, so that Claude Code moves the command to the background.
+  **Pass:** the process shows `◐ testing…` and Claude's latest steps say `Testing … (running in the background)`; never `test submitted, result not waited for`. Within about ten seconds of the script printing its result, the step becomes `✗ test ERROR` (or `test passed`), a failure appears under **Needs attention**, and a toast says so. **Fail:** it stays on `testing…` after the result is out, or says `result not waited for`, or `test result not seen` for a test that finished.
+
 ## P. Usage breakdown and your Claude budget
 
 *boomi-dashboard 0.47.0, on a Claude subscription login.*

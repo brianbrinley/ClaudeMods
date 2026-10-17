@@ -42,6 +42,8 @@ import {
   formatSpend,
   formatTokens,
   assignResults,
+  backgroundOf,
+  isSettled,
   parseResults,
   friendlyType,
   githubUrl,
@@ -859,6 +861,14 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
   const endedAt = await $.clock.now()
   const output = ran.deny === undefined ? outputOf(ran) : ''
   const isError = ran.isError === true
+  // Claude Code moved the command to the background (it outlasted the Bash timeout): what came back is its notice, not the script's output. The steps stay running, and `settleBackground` reads the result from the output file once it's there.
+  const background = ran.deny === undefined ? backgroundOf(output) : undefined
+  if (background) {
+    await record($, list => list.map(a => (started.some(s => s.id === a.id) ? { ...a, detail: 'running in the background', watchFile: background.file } : a)))
+    void refreshStatus($, settings)
+    void saveActivity($, settings)
+    return
+  }
   // Each result in the output is one step: a loop over six components is six.
   const { first, extras } = assignResults(
     started.filter(a => a.kind !== 'other' && a.kind !== 'pull'),
@@ -880,6 +890,7 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
       outcome: reading.outcome,
       detail: reading.detail,
       endedAt,
+      watchFile: undefined,
       // An ID only the output gave (the command's came from the shell) takes the name it has in another step.
       subject: reading.name ?? fresh.name ?? (a.subject === 'a component' && componentId ? knownName(before, componentId) : undefined) ?? a.subject,
       componentId,
@@ -936,6 +947,33 @@ const noteEnd = async ($: Engine, settings: Settings, started: readonly Activity
   for (const a of [...done, ...added]) announce($, settings, a)
   void refreshStatus($, settings)
   void saveActivity($, settings)
+}
+
+/** How long a backgrounded command is watched: a test polls for ten minutes at most, so this is well past its end. */
+const BACKGROUND_GIVE_UP_MS = 30 * 60_000
+const BACKGROUND_CHECK_MS = 5_000
+
+/**
+ * Steps whose command Claude Code moved to the background: reads each one's
+ * output file, and when the script's final line is in it, settles the steps
+ * as if the command had returned it. A file with nothing yet leaves them
+ * running; past `BACKGROUND_GIVE_UP_MS` they say the result wasn't seen.
+ */
+const settleBackground = async ($: Engine, settings: Settings) => {
+  const waiting = (await read($, dashboard)).activity.filter(a => a.watchFile && a.outcome === 'running')
+  if (waiting.length === 0) return
+  const now = await $.clock.now()
+  for (const file of new Set(waiting.map(a => a.watchFile!))) {
+    const group = waiting.filter(a => a.watchFile === file)
+    const text = String(await $.fs.read(file).catch(() => '')).slice(0, 200_000)
+    if (text && group.every(a => a.kind === 'other' || a.kind === 'pull' || isSettled(a.kind, text))) {
+      await noteEnd($, settings, group, { text })
+    } else if (now - Math.min(...group.map(a => a.startedAt)) > BACKGROUND_GIVE_UP_MS) {
+      await record($, list => list.map(a => (group.some(g => g.id === a.id) ? { ...a, outcome: 'ok' as const, detail: 'result not seen', endedAt: now } : a)))
+      void refreshStatus($, settings)
+      void saveActivity($, settings)
+    }
+  }
 }
 
 /** A toast for what someone would want to hear about without looking. */
@@ -3001,6 +3039,8 @@ export const register: Register = (on, options) => {
       $.clock.after(20_000, () => readBreakdown($).catch(() => undefined))
       $.clock.every(BREAKDOWN_MS, () => readBreakdown($).catch(() => undefined))
     }
+    // A command Claude Code moved to the background: its steps settle when its output file has the result.
+    $.clock.every(BACKGROUND_CHECK_MS, () => settleBackground($, settings).catch(() => undefined))
     // The Prompt tab's spinner: it turns only while a rewrite runs, so the pane isn't redrawn the rest of the time.
     $.clock.every(SPIN_MS, async () => {
       if (await read($, promptBusy)) await update($, spin, n => n + 1)
