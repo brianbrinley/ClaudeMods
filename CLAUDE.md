@@ -20,6 +20,8 @@ No Claude attribution in commits or pull requests: commit messages end with thei
 
 `.github/workflows/pages.yml` publishes https://brianbrinley.github.io/ClaudeMods/ on every merge to `main` that touches the READMEs, `brand/`, `site/` or a mod:
 - `site/build.py` renders the READMEs listed in its `PAGES` with `site/template.html`, `brand/valence.css` and `site/assets/`. A `PAGES` entry whose nav label is `None` is built but left out of the top nav (the Style page, `site/style.md`). Code blocks get a Copy button.
+- A long README can be split into several pages on the site with `SPLITS` in `site/build.py` (the boomi-dashboard README is six). Each of its `##` sections must be listed there, or the build stops; links to a section find the page that holds it. The header's search covers every heading on the site.
+- The Architecture page (`site/architecture.md`) shows the Valence diagrams from `docs/architecture/valence/`, scaled to the column; rebuild them with `python3 docs/architecture/build.py`.
 - Mermaid diagrams render in the browser and switch to `brand/mermaid-init-night.txt` in Night mode.
 - `<div data-flamingo></div>` in a README becomes the dashboard pane's 8-bit flamingo, drawn from the sprite in `boomi-dashboard/hooks/activity.ts` and floated beside the opening prose. It's hidden on narrow screens and stands still under reduced motion. GitHub shows nothing for it.
 

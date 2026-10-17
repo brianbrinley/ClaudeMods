@@ -23,6 +23,12 @@
   <nav aria-label="Main">
 {{nav}}
     <a href="https://github.com/brianbrinley/ClaudeMods">GitHub</a>
+    <div class="search" role="search">
+      <label class="visually-hidden" for="site-search">Search the docs</label>
+      <input id="site-search" type="search" placeholder="Search" autocomplete="off" spellcheck="false" aria-controls="search-results" aria-expanded="false">
+      <ul id="search-results" class="search-results" hidden></ul>
+      <p id="search-status" class="visually-hidden" aria-live="polite"></p>
+    </div>
     <button type="button" class="theme-toggle" aria-label="Switch between Day and Night theme">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
     </button>
@@ -35,7 +41,7 @@
   <div class="rule" aria-hidden="true"><span></span><i></i><b></b><i></i><span></span></div>
   <p>Built from <a href="https://github.com/brianbrinley/ClaudeMods/tree/main/{{source_dir}}">{{source}}</a> on <a href="https://github.com/brianbrinley/ClaudeMods/commit/{{sha}}">{{sha_short}}</a> · {{built}}</p>
 </footer>
-<script>window.VALENCE_NIGHT_INIT = {{night_init}};</script>
+<script>window.VALENCE_NIGHT_INIT = {{night_init}}; window.VALENCE_ROOT = "{{root}}";</script>
 <script type="module" src="{{root}}assets/site.js"></script>
 </body>
 </html>

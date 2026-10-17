@@ -13,6 +13,7 @@ on:
       - "site/**"
       - "boomi-runtime/**"
       - "boomi-dashboard/**"
+      - "docs/architecture/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
