@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.59.0
+
+- **You can see the upgrade being written.** While the model rewrites a prompt, the Prompt tab's upgrade card says `UPGRADED ◐ HAIKU IS WRITING A BETTER ONE…` with a spinner that turns, a line under the cards says the quick version above stays until the new one arrives, and the **Upgrade with a model** button turns into `◐ Rewriting…`. The dashboard pane's prompt-tips row adds `· ◐ upgrading it…`. All of it clears when the upgrade lands, or when the model fails (the checks' upgrade stays). The spinner ticks only while a rewrite runs, so nothing is redrawn the rest of the time.
+
 ## 0.58.0
 
 - **Suggestions you take aren't checked.** When the prompt box shows a dim suggestion (Claude's own guess after a turn, or the dashboard's next step) and you take it with Tab and send it as it was, it isn't your wording: no tips, no hold, no rewrite, no model call. Edited suggestions are checked as usual, a secret in one is still asked about, and each suggestion is taken once. Claude Code doesn't say where a prompt came from, so the dashboard matches the words.

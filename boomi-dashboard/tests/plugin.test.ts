@@ -2924,6 +2924,39 @@ test('the dashboard’s own next-step suggestion, taken as it was, is skipped th
   expect((await $.command.run(dashboard('prompt'))).text).toContain('suggestions taken as they were')
 })
 
+test('while the model writes the upgrade, the tab and the pane say so, with a spinner that turns, and it clears when the upgrade arrives', async ($, on) => {
+  let release = () => {}
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.complete', async () => {
+    await gate
+    return { value: { isAnswered: true, text: REWRITTEN, usage: { input_tokens: 900, output_tokens: 80, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } as never
+  })
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  // The checks' upgrade shows at once, with nothing said about a rewrite yet.
+  expect(await tab.find({ text: /IS WRITING A BETTER ONE/ })).toBeUndefined()
+  const started = clock.advance(1)
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(await tab.find({ text: /^UPGRADED\s+◐ HAIKU IS WRITING A BETTER ONE…$/ })).toBeDefined()
+  expect(await tab.find({ text: /haiku is writing a better upgrade\. The one above is the quick version/ })).toBeDefined()
+  expect(await tab.find({ type: 'Button', key: 'prompt-rewrite' }).then(b => b?.props.label)).toBe('◐ Rewriting…')
+  expect(await pane.find({ text: /for your last prompt · ◐ upgrading it…/ })).toBeDefined()
+  // The spinner turns while it waits.
+  void clock.advance(250)
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(await tab.find({ text: /^UPGRADED\s+◓ HAIKU IS WRITING A BETTER ONE…$/ })).toBeDefined()
+  release()
+  await started
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(await tab.find({ text: /UPGRADED BY HAIKU/ })).toBeDefined()
+  expect(await tab.find({ text: /IS WRITING A BETTER ONE/ })).toBeUndefined()
+  expect(await pane.find({ text: /upgrading it…/ })).toBeUndefined()
+})
+
 // --- After /clear ---
 
 test('after /clear the dashboard sets the new session up again: it sees the folder anew, checks prompts, and keeps what was saved', async ($, on) => {
