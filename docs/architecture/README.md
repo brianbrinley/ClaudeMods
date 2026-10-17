@@ -13,6 +13,31 @@ The colors come from the same sources as the rest of the repository: Exosphere's
 
 Two choices differ from the skill's defaults, on purpose: the fonts are the theme's own (Poppins, Noto Sans and Fira Mono for Exosphere; Poiret One, Josefin Sans and the system sans for Valence), and the light skin's `ink-strong` is white or black, whichever clears 4.5:1 on the accent fill.
 
+## Diagrams
+
+| File | Shows |
+|---|---|
+| [`d1-overview.html`](d1-overview.html) (Valence: [`valence/`](valence/d1-overview.html)) | How the mod plugs into Claude Code: the hooks module, the pure modules, state, what it draws, and what it reads |
+
+More are planned (the prompt-upgrade lifecycle, awareness of Companion, a tool call to a budget decision, how the three mods relate); see `tasks/todo.md`.
+
+## Building them
+
+The HTML files are generated, so the two themes can't drift apart:
+
+```
+python3 docs/architecture/build.py
+```
+
+`lib.py` holds the themes (their values come from the profiles) and the helpers that keep the skill's rules: the 4px grid, orthogonal connectors, masked labels and one port per connector. Each diagram is a small module (`d1_overview.py`) with its nodes and connectors. The files follow the reader's light or dark setting, and `data-theme="light"` or `"dark"` on `<html>` forces one.
+
+Check a file with the skill's own tools after a change:
+
+```
+python3 <diagram-design>/skills/diagram-design/scripts/self_check.py docs/architecture/d1-overview.html
+python3 <diagram-design>/scripts/verify-geometry.py docs/architecture/d1-overview.html
+```
+
 ## Using a profile
 
 The skill keeps profiles in `~/.diagram-design/profiles/` and its `.diagram-design` marker can only name one of those. These profiles live in the repository instead, so they travel with it: ask for a diagram and point the skill at the profile file to use as the style guide. To check one after editing it:
