@@ -8,7 +8,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root { --paper:#f5f5f5;--paper-2:#e5e5e5;--ink:#1f1f1f;--ink-rgb:31 31 31;--muted:#707070;--muted-rgb:112 112 112;--soft:#666666;--rule-solid:#cccccc;--accent:#bc4a37;--accent-rgb:188 74 55;--link:#006cd6;--node:#ffffff; color-scheme: light dark;
-      --f-title:'Poppins', system-ui, sans-serif; --f-name:'Noto Sans', system-ui, sans-serif; --f-mono:'Fira Mono', ui-monospace, monospace; --f-eyebrow:'Fira Mono', ui-monospace, monospace; }
+      --f-title:'Poppins', system-ui, sans-serif; --f-callout:'Poppins', system-ui, sans-serif; --f-name:'Noto Sans', system-ui, sans-serif; --f-mono:'Fira Mono', ui-monospace, monospace; --f-eyebrow:'Fira Mono', ui-monospace, monospace; }
     @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper:#1f1f1f;--paper-2:#2e2e2e;--ink:#ffffff;--ink-rgb:255 255 255;--muted:#cccccc;--muted-rgb:204 204 204;--soft:#b3b3b3;--rule-solid:#707070;--accent:#ff9685;--accent-rgb:255 150 133;--link:#66b6f6;--node:#2e2e2e; } }
     :root[data-theme="dark"] { --paper:#1f1f1f;--paper-2:#2e2e2e;--ink:#ffffff;--ink-rgb:255 255 255;--muted:#cccccc;--muted-rgb:204 204 204;--soft:#b3b3b3;--rule-solid:#707070;--accent:#ff9685;--accent-rgb:255 150 133;--link:#66b6f6;--node:#2e2e2e; color-scheme: dark; }
     :root[data-theme="light"] { color-scheme: light; }
@@ -33,6 +33,20 @@
     .n-focal { fill: rgb(var(--accent-rgb) / 0.08); stroke: var(--accent); stroke-width: 1.2; }
     .n-store { fill: rgb(var(--ink-rgb) / 0.05); stroke: var(--muted); stroke-width: 1; }
     .n-external { fill: rgb(var(--ink-rgb) / 0.03); stroke: rgb(var(--ink-rgb) / 0.30); stroke-width: 1; }
+    .n-input { fill: rgb(var(--muted-rgb) / 0.10); stroke: var(--soft); stroke-width: 1; }
+    .n-input + .tag { stroke: rgb(var(--muted-rgb) / 0.50); }
+    .lifeline { stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 3 3; }
+    .bar { fill: rgb(var(--ink-rgb) / 0.06); stroke: var(--muted); stroke-width: 0.8; }
+    .seq-frame { fill: rgb(var(--ink-rgb) / 0.02); stroke: rgb(var(--ink-rgb) / 0.22); stroke-width: 1; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .seq-frame { fill: rgb(var(--ink-rgb) / 0.04); } }
+    :root[data-theme="dark"] .seq-frame { fill: rgb(var(--ink-rgb) / 0.04); }
+    .frame-tab { fill: var(--paper); stroke: rgb(var(--ink-rgb) / 0.22); stroke-width: 1; }
+    .divider { stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 4 3; }
+    .t-op { font-family: var(--f-eyebrow); font-size: 8px; letter-spacing: 0.12em; fill: var(--muted); text-anchor: middle; }
+    .t-guard { font-family: var(--f-mono); font-size: 8px; letter-spacing: 0.04em; fill: var(--muted); }
+    .t-callout { font-family: var(--f-callout); font-style: italic; font-size: 14px; fill: var(--ink); }
+    .leader { fill: none; stroke: rgb(var(--ink-rgb) / 0.40); stroke-width: 1; stroke-dasharray: 4 3; }
+    .dot { fill: var(--ink); }
     .tag { fill: transparent; stroke-width: 0.8; }
     .n-backend + .tag { stroke: rgb(var(--ink-rgb) / 0.40); }
     .n-focal + .tag { stroke: rgb(var(--accent-rgb) / 0.50); }
@@ -98,7 +112,7 @@
       </svg>
     </div>
     <div class="notes"><div class="note"><h2>Events in, drawing out</h2><p>Claude Code raises an event (<code>tool.call</code>, <code>turn.*</code>, <code>prompt.submit</code>, <code>session.start</code>, <code>ui.render</code>). One module hooks them, and answers <code>ui.render</code> with what to draw: the pane, the Prompt tab, the banner, the status line and toasts.</p></div><div class="note"><h2>Logic stays testable</h2><p>Anything that needs no engine call is a plain function in its own file, with unit tests that call it directly. Helpers that take <code>$</code> stay in the hooks module, because the engine follows <code>$</code> only within one file.</p></div><div class="note"><h2>Reads out, installs nothing</h2><p>It reads Companion's docs, polls Boomi's API, and runs <code>git fetch</code> once a day. A model is called only to rewrite a prompt or draft guide edits. Nothing installs unless you run <code>/bc-dashboard upgrade</code>.</p></div></div>
-    <footer>boomi-dashboard · Boomi Exosphere tokens · drawn with diagram-design</footer>
+    <footer>boomi-dashboard · drawn in Boomi's Exosphere style · made with the diagram-design skill</footer>
   </div>
 </body>
 </html>

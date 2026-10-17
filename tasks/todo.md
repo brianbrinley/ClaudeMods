@@ -50,7 +50,7 @@ Audience: very technical people the project was shared with, who want a detailed
 - Tool: the `diagram-design` plugin (third-party, MIT, Cathryn Lavery; each diagram is one self-contained HTML + SVG file). Its skill was not registered in the session it was installed in; it may need a restart. Read its output before publishing.
 - [x] Read the plugin's SKILL.md and its brand onboarding; feed it Exosphere tokens (reuse `hooks/report-html.ts`) and Valence tokens (`brand/tokens.json`)
 - [x] D1 Overall architecture: hooks module, pure modules, state contract, pane / banner / status line
-- [ ] D2 Prompt upgrade lifecycle (sequence): submit, checks, hold, background rewrite, why notes, taken-suggestion skip
+- [x] D2 Prompt upgrade lifecycle (sequence): submit, checks, hold, background rewrite, why notes, taken-suggestion skip
 - [ ] D3 Awareness of Companion: docs, pointer index, retrieval, model; version stamps and drift
 - [ ] D4 From a tool call to a pane row and a budget decision
 - [ ] D5 How the three mods relate

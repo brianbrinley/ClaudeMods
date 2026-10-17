@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>What happens to a prompt you type</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;1,400&family=Noto+Sans:wght@400;500;600&family=Fira+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --paper:#f5f5f5;--paper-2:#e5e5e5;--ink:#1f1f1f;--ink-rgb:31 31 31;--muted:#707070;--muted-rgb:112 112 112;--soft:#666666;--rule-solid:#cccccc;--accent:#bc4a37;--accent-rgb:188 74 55;--link:#006cd6;--node:#ffffff; color-scheme: light dark;
+      --f-title:'Poppins', system-ui, sans-serif; --f-callout:'Poppins', system-ui, sans-serif; --f-name:'Noto Sans', system-ui, sans-serif; --f-mono:'Fira Mono', ui-monospace, monospace; --f-eyebrow:'Fira Mono', ui-monospace, monospace; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper:#1f1f1f;--paper-2:#2e2e2e;--ink:#ffffff;--ink-rgb:255 255 255;--muted:#cccccc;--muted-rgb:204 204 204;--soft:#b3b3b3;--rule-solid:#707070;--accent:#ff9685;--accent-rgb:255 150 133;--link:#66b6f6;--node:#2e2e2e; } }
+    :root[data-theme="dark"] { --paper:#1f1f1f;--paper-2:#2e2e2e;--ink:#ffffff;--ink-rgb:255 255 255;--muted:#cccccc;--muted-rgb:204 204 204;--soft:#b3b3b3;--rule-solid:#707070;--accent:#ff9685;--accent-rgb:255 150 133;--link:#66b6f6;--node:#2e2e2e; color-scheme: dark; }
+    :root[data-theme="light"] { color-scheme: light; }
+    body { font-family: var(--f-name); background: var(--paper); color: var(--ink); min-height: 100vh; padding: 3rem 2rem; }
+    .frame { max-width: 1280px; width: 100%; margin: 0 auto; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: var(--f-eyebrow); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--f-title); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 500; letter-spacing: -0.01em; line-height: 1.15; color: var(--ink); margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 1280px; display: block; }
+    .notes { display: grid; grid-template-columns: 1.1fr 1fr 0.9fr; gap: 1rem; margin-top: 1.5rem; }
+    .note { background: var(--node); border: 1px solid rgb(var(--ink-rgb) / 0.12); border-radius: 6px; padding: 1rem 1.1rem; }
+    .note h2 { font-family: var(--f-name); font-size: 0.8rem; font-weight: 600; margin-bottom: 0.4rem; }
+    .note p { font-size: 0.8rem; line-height: 1.5; color: var(--muted); }
+    .note code { font-family: ui-monospace, SFMono-Regular, Menlo, 'Fira Mono', monospace; font-size: 0.72rem; color: var(--ink); }
+    footer { margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid rgb(var(--ink-rgb) / 0.12); font-family: var(--f-mono); font-size: 0.66rem; color: var(--muted); }
+    @media (max-width: 760px) { .notes { grid-template-columns: 1fr; } body { padding: 2rem 1rem; } }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+    /* the diagram's roles */
+    .paper { fill: var(--paper); }
+    .zone { fill: rgb(var(--ink-rgb) / 0.02); stroke: rgb(var(--ink-rgb) / 0.10); stroke-width: 0.8; }
+    .n-backend { fill: var(--node); stroke: var(--ink); stroke-width: 1; }
+    .n-focal { fill: rgb(var(--accent-rgb) / 0.08); stroke: var(--accent); stroke-width: 1.2; }
+    .n-store { fill: rgb(var(--ink-rgb) / 0.05); stroke: var(--muted); stroke-width: 1; }
+    .n-external { fill: rgb(var(--ink-rgb) / 0.03); stroke: rgb(var(--ink-rgb) / 0.30); stroke-width: 1; }
+    .n-input { fill: rgb(var(--muted-rgb) / 0.10); stroke: var(--soft); stroke-width: 1; }
+    .n-input + .tag { stroke: rgb(var(--muted-rgb) / 0.50); }
+    .lifeline { stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 3 3; }
+    .bar { fill: rgb(var(--ink-rgb) / 0.06); stroke: var(--muted); stroke-width: 0.8; }
+    .seq-frame { fill: rgb(var(--ink-rgb) / 0.02); stroke: rgb(var(--ink-rgb) / 0.22); stroke-width: 1; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .seq-frame { fill: rgb(var(--ink-rgb) / 0.04); } }
+    :root[data-theme="dark"] .seq-frame { fill: rgb(var(--ink-rgb) / 0.04); }
+    .frame-tab { fill: var(--paper); stroke: rgb(var(--ink-rgb) / 0.22); stroke-width: 1; }
+    .divider { stroke: rgb(var(--ink-rgb) / 0.20); stroke-width: 1; stroke-dasharray: 4 3; }
+    .t-op { font-family: var(--f-eyebrow); font-size: 8px; letter-spacing: 0.12em; fill: var(--muted); text-anchor: middle; }
+    .t-guard { font-family: var(--f-mono); font-size: 8px; letter-spacing: 0.04em; fill: var(--muted); }
+    .t-callout { font-family: var(--f-callout); font-style: italic; font-size: 14px; fill: var(--ink); }
+    .leader { fill: none; stroke: rgb(var(--ink-rgb) / 0.40); stroke-width: 1; stroke-dasharray: 4 3; }
+    .dot { fill: var(--ink); }
+    .tag { fill: transparent; stroke-width: 0.8; }
+    .n-backend + .tag { stroke: rgb(var(--ink-rgb) / 0.40); }
+    .n-focal + .tag { stroke: rgb(var(--accent-rgb) / 0.50); }
+    .n-store + .tag { stroke: rgb(var(--muted-rgb) / 0.50); }
+    .n-external + .tag { stroke: rgb(var(--ink-rgb) / 0.30); }
+    .t-name { font-family: var(--f-name); font-size: 12px; font-weight: 600; fill: var(--ink); text-anchor: middle; }
+    .t-sub { font-family: var(--f-mono); font-size: 9px; fill: var(--muted); text-anchor: middle; }
+    .t-tag { font-family: var(--f-eyebrow); font-size: 7px; letter-spacing: 0.08em; fill: var(--muted); text-anchor: middle; }
+    .t-zone { font-family: var(--f-eyebrow); font-size: 7px; letter-spacing: 0.14em; fill: var(--soft); text-anchor: middle; }
+    .t-arrow { font-family: var(--f-mono); font-size: 8px; letter-spacing: 0.06em; fill: var(--soft); text-anchor: middle; }
+    .t-legend { font-family: var(--f-eyebrow); font-size: 8px; letter-spacing: 0.14em; fill: var(--muted); }
+    .a { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+    .a-accent { fill: none; stroke: var(--accent); stroke-width: 1.2; }
+    .a-link { fill: none; stroke: var(--link); stroke-width: 1.2; }
+    .dash { stroke-dasharray: 5 4; stroke-width: 1; }
+    .m-muted { fill: var(--muted); } .m-accent { fill: var(--accent); } .m-link { fill: var(--link); }
+    .rule { stroke: rgb(var(--ink-rgb) / 0.10); stroke-width: 0.8; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Sequence · the prompt upgrade</p>
+    <h1>What happens to a prompt you type</h1>
+    <div class="diagram-container">
+      <svg viewBox="0 48 1280 732" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="d2-prompt-lifecycle-title d2-prompt-lifecycle-desc">
+        <title id="d2-prompt-lifecycle-title">What happens to a prompt you type</title>
+        <desc id="d2-prompt-lifecycle-desc">Sequence of a prompt in a Companion session: a suggestion taken with Tab passes straight through; any other Boomi prompt is checked by rules, shown with tips and a quick upgrade in the Prompt tab and held, while a model writes a better upgrade in the background and swaps it in, and the upgrade you send goes in unchecked.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-muted" points="0 0, 8 3, 0 6"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-accent" points="0 0, 8 3, 0 6"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-link" points="0 0, 8 3, 0 6"/></marker>
+        </defs>
+        <rect class="paper" x="0" y="48" width="1280" height="732"/>
+<rect class="seq-frame" x="332" y="252" width="828" height="344" rx="4"/><rect class="frame-tab" x="332" y="252" width="40" height="16" rx="2"/><text class="t-op" x="352" y="264">ALT</text>
+        <text class="t-guard" x="412" y="280">[taken with Tab, sent as it was]</text>
+        <line class="divider" x1="340" y1="340" x2="1152" y2="340"/>
+        <text class="t-guard" x="412" y="356">[any other Boomi prompt]</text>
+        <line class="lifeline" x1="160" y1="152" x2="160" y2="704"/>
+        <line class="lifeline" x1="400" y1="152" x2="400" y2="704"/>
+        <line class="lifeline" x1="640" y1="152" x2="640" y2="704"/>
+        <line class="lifeline" x1="880" y1="152" x2="880" y2="704"/>
+        <line class="lifeline" x1="1120" y1="152" x2="1120" y2="704"/>
+        <rect class="bar" x="396" y="192" width="8" height="280"/>
+        <rect class="bar" x="636" y="228" width="8" height="244"/>
+        <rect class="bar" x="636" y="492" width="8" height="88"/>
+        <rect class="bar" x="1116" y="500" width="8" height="40"/>
+        <line class="a" x1="160" y1="192" x2="396" y2="192" marker-end="url(#arrow)"/>
+        <rect class="paper" x="256" y="172" width="44" height="12" rx="2"/><text class="t-arrow" x="278" y="181">SUBMIT</text>
+        <line class="a" x1="404" y1="228" x2="636" y2="228" marker-end="url(#arrow)"/>
+        <rect class="paper" x="480" y="208" width="80" height="12" rx="2"/><text class="t-arrow" x="520" y="217">PROMPT.SUBMIT</text>
+        <line class="a dash" x1="636" y1="316" x2="404" y2="316" marker-end="url(#arrow)"/>
+        <rect class="paper" x="482" y="296" width="76" height="12" rx="2"/><text class="t-arrow" x="520" y="305">PASS THROUGH</text>
+        <path class="a" d="M644,380 H668 Q676,380 676,388 V396 Q676,404 668,404 H644" marker-end="url(#arrow)"/><rect class="paper" x="688" y="386" width="68" height="12" rx="2"/><text class="t-arrow" x="722" y="395">RULE CHECKS</text>
+        <line class="a" x1="644" y1="428" x2="880" y2="428" marker-end="url(#arrow)"/>
+        <rect class="paper" x="716" y="408" width="88" height="12" rx="2"/><text class="t-arrow" x="760" y="417">TIPS + UPGRADE</text>
+        <line class="a dash" x1="636" y1="464" x2="404" y2="464" marker-end="url(#arrow)"/>
+        <rect class="paper" x="486" y="444" width="68" height="12" rx="2"/><text class="t-arrow" x="520" y="453">DROP · HELD</text>
+        <text class="t-guard" x="652" y="486">a timer starts it, with Companion&#x27;s guidance</text>
+        <line class="a" x1="644" y1="500" x2="1116" y2="500" marker-end="url(#arrow)"/>
+        <rect class="paper" x="976" y="480" width="48" height="12" rx="2"/><text class="t-arrow" x="1000" y="489">REWRITE</text>
+        <line class="a dash" x1="1116" y1="536" x2="644" y2="536" marker-end="url(#arrow)"/>
+        <rect class="paper" x="960" y="516" width="80" height="12" rx="2"/><text class="t-arrow" x="1000" y="525">UPGRADE + WHY</text>
+        <line class="a" x1="644" y1="572" x2="880" y2="572" marker-end="url(#arrow)"/>
+        <rect class="paper" x="736" y="552" width="48" height="12" rx="2"/><text class="t-arrow" x="760" y="561">SWAP IN</text>
+        <line class="a" x1="160" y1="644" x2="880" y2="644" marker-end="url(#arrow)"/>
+        <rect class="paper" x="482" y="624" width="76" height="12" rx="2"/><text class="t-arrow" x="520" y="633">SEND UPGRADE</text>
+        <line class="a-accent" x1="880" y1="680" x2="400" y2="680" marker-end="url(#arrow-accent)"/>
+        <rect class="paper" x="726" y="660" width="68" height="12" rx="2"/><text class="t-arrow" x="760" y="669">SENT AS YOU</text>
+        <rect class="paper" x="72" y="88" width="176" height="64" rx="6"/><rect class="n-input" x="72" y="88" width="176" height="64" rx="6"/><rect class="tag" x="80" y="94" width="36" height="12" rx="2"/><text class="t-tag" x="98" y="103">INPUT</text><text class="t-name" x="160" y="118">You</text><text class="t-sub" x="160" y="134">the prompt box</text>
+        <rect class="paper" x="312" y="88" width="176" height="64" rx="6"/><rect class="n-backend" x="312" y="88" width="176" height="64" rx="6"/><rect class="tag" x="320" y="94" width="32" height="12" rx="2"/><text class="t-tag" x="336" y="103">HOST</text><text class="t-name" x="400" y="118">Claude Code</text><text class="t-sub" x="400" y="134">raises prompt.submit</text>
+        <rect class="paper" x="552" y="88" width="176" height="64" rx="6"/><rect class="n-focal" x="552" y="88" width="176" height="64" rx="6"/><rect class="tag" x="560" y="94" width="28" height="12" rx="2"/><text class="t-tag" x="574" y="103">MOD</text><text class="t-name" x="640" y="118">Hooks module</text><text class="t-sub" x="640" y="134">register.tsx</text>
+        <rect class="paper" x="792" y="88" width="176" height="64" rx="6"/><rect class="n-backend" x="792" y="88" width="176" height="64" rx="6"/><rect class="tag" x="800" y="94" width="20" height="12" rx="2"/><text class="t-tag" x="810" y="103">UI</text><text class="t-name" x="880" y="118">Prompt tab</text><text class="t-sub" x="880" y="134">in the pane&#x27;s place</text>
+        <rect class="paper" x="1032" y="88" width="176" height="64" rx="6"/><rect class="n-external" x="1032" y="88" width="176" height="64" rx="6"/><rect class="tag" x="1040" y="94" width="36" height="12" rx="2"/><text class="t-tag" x="1058" y="103">MODEL</text><text class="t-name" x="1120" y="118">Prompt model</text><text class="t-sub" x="1120" y="134">haiku, in the background</text>
+        <line class="rule" x1="40" y1="724" x2="1240" y2="724"/><text class="t-legend" x="40" y="744">LEGEND</text><rect class="n-focal" x="120" y="734" width="24" height="12" rx="2"/><text class="t-legend" x="156" y="744">THE MOD</text><line class="a" x1="336" y1="740" x2="360" y2="740" marker-end="url(#arrow)"/><text class="t-legend" x="372" y="744">CALL</text><line class="a dash" x1="552" y1="740" x2="576" y2="740" marker-end="url(#arrow)"/><text class="t-legend" x="588" y="744">RETURN</text><line class="a-accent" x1="768" y1="740" x2="792" y2="740" marker-end="url(#arrow-accent)"/><text class="t-legend" x="804" y="744">THE UPGRADE IS SENT</text>
+      </svg>
+    </div>
+    <div class="notes"><div class="note"><h2>Quick first, better second</h2><p>The rules check every Boomi prompt, with no model call, so a quick upgrade is ready at once. A model then writes a better one in the background and swaps it in, with a few notes on why it changed.</p></div><div class="note"><h2>Held, not blocked</h2><p>In <code>confirm</code> mode (the default) the prompt waits in the Prompt tab: send it as typed, send the upgrade, or edit it. Claude sees nothing until you choose. A suggestion taken with Tab skips all of this.</p></div><div class="note"><h2>Never checked twice</h2><p>What the dashboard sends from the Prompt tab goes in as your own words, unchecked, so it can't loop back. A secret in a prompt is asked about first, unless the checks are off.</p></div></div>
+    <footer>boomi-dashboard · drawn in Boomi's Exosphere style · made with the diagram-design skill</footer>
+  </div>
+</body>
+</html>
