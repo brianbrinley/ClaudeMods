@@ -333,7 +333,10 @@ When an item passes, tick it here. When every item in a section passes, the sect
 
 - [ ] **O30. A taken suggestion isn't checked.** *(0.58.0)* After Claude finishes a turn, the prompt box shows a dim suggestion. Take it with Tab and press Enter, as it is.
   **Pass:** it goes to Claude with nothing held and no Prompt tab; `/bc-dashboard prompt` says `1 of Claude's suggestions taken as they were`. Then type a vague prompt yourself (`deploy it`): it is checked as usual. **Fail:** a suggestion taken as it was gets tips, is held, or isn't counted. If a vague suggestion you took was checked anyway, send the suggestion's text: the match may be failing on a character the box changes.
- and your Claude budget
+- [ ] **O31. The upgrade shows it's being written.** *(0.59.0)* Type `deploy it` in a Companion folder, with `promptRewrite` at `auto`, and watch the Prompt tab.
+  **Pass:** at once the card says `UPGRADED`; then it reads `UPGRADED ◐ HAIKU IS WRITING A BETTER ONE…` with the ◐ turning (◐ ◓ ◑ ◒), a line under the cards says the quick version stays until the new one arrives, and the pane's prompt-tips row ends `· ◐ upgrading it…`. When the upgrade lands, all three go and the card says `UPGRADED BY HAIKU`. **Fail:** no indicator, a spinner that never stops, or one that keeps turning after the upgrade has landed.
+
+## P. Usage breakdown and your Claude budget
 
 *boomi-dashboard 0.47.0, on a Claude subscription login.*
 
