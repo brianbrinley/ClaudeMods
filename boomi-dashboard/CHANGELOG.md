@@ -2,6 +2,12 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.58.0
+
+- **Suggestions you take aren't checked.** When the prompt box shows a dim suggestion (Claude's own guess after a turn, or the dashboard's next step) and you take it with Tab and send it as it was, it isn't your wording: no tips, no hold, no rewrite, no model call. Edited suggestions are checked as usual, a secret in one is still asked about, and each suggestion is taken once. Claude Code doesn't say where a prompt came from, so the dashboard matches the words.
+- **`promptSuggested` setting.** `skip` (default) or `check`, which treats a taken suggestion like any other prompt.
+- **Counted.** `/bc-dashboard prompt` and the session report say how many of Claude's suggestions were taken as they were.
+
 ## 0.57.0
 
 - **The rewrite reads all of Companion's docs.** It was reading one file, `BOOMI_THINKING.md`: the `guides/`, `steps/`, `components/` and `platform_entities/` folders (about 110 docs in bc-integration 1.0.83) were never opened, and the other Companion plugins' docs were not read at all. It now reads every installed Companion plugin's reference docs.

@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { NO_COUNTS, REWRITE_SYSTEM, checkPrompt, countsAfter, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteParts, rewriteRequest, rewriteSystem, TASK_QUESTIONS, WHY_MARK, statusPart, tipsText, upgradePrompt, wrapLines } from '../hooks/prompt-check'
+import { NO_COUNTS, countsLine, REWRITE_SYSTEM, checkPrompt, countsAfter, findSecrets, isCheckable, maskPrompt, reportLines, isSuggestionTaken, rewriteFrom, rewriteParts, rewriteRequest, rewriteSystem, TASK_QUESTIONS, WHY_MARK, statusPart, tipsText, upgradePrompt, wrapLines } from '../hooks/prompt-check'
 import type { PromptFacts } from '../hooks/prompt-check'
 import { contextLines, folderComponentOf, keywords, relevantComponents, relevantSections, sectionsOf } from '../hooks/retrieve'
 
@@ -200,4 +200,19 @@ test('a rewrite comes apart into the prompt and up to three notes on what change
 test('/bc-dashboard prompt says why an upgrade changed', () => {
   const tips = { at: 1, masked: 'deploy it', tips: checkPrompt('deploy it', FACTS), upgrade: 'Deploy Orders Sync to [decide: environment].', rewrittenBy: 'haiku', why: ['Named the process.'] }
   expect(tipsText(tips, NO_COUNTS, 'confirm')).toContain('Why it changed:\n  - Named the process.')
+})
+
+test('a prompt is a taken suggestion when it matches one the box showed, ignoring spacing and case', () => {
+  expect(isSuggestionTaken('Deploy Orders Sync and test it', ['deploy orders sync  and test it'])).toBe(true)
+  expect(isSuggestionTaken('  deploy it\n', ['run the tests', 'Deploy it'])).toBe(true)
+  expect(isSuggestionTaken('deploy Orders Sync to dev', ['Deploy Orders Sync and test it'])).toBe(false)
+  expect(isSuggestionTaken('', [''])).toBe(false)
+  expect(isSuggestionTaken('deploy it', [])).toBe(false)
+})
+
+test('the counts say how many suggestions were taken, and a checked prompt keeps that count', () => {
+  const counts = { ...NO_COUNTS, suggested: 2 }
+  expect(countsLine(counts)).toContain("2 of Claude's suggestions taken as they were")
+  expect(countsLine(NO_COUNTS)).not.toContain('suggestions taken')
+  expect(countsAfter(counts, undefined, []).suggested).toBe(2)
 })

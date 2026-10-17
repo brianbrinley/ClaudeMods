@@ -137,7 +137,7 @@ import { GUIDE, GUIDE_STAMP, REFRESH_SYSTEM, driftNote, guideFor, guideStatus, g
 import { companionUseLine, isFresh, parseUsage, topHabit, usageArgv } from './usage-breakdown'
 import { paceOf, recordDay } from './spend-history'
 import type { SpendDays } from './spend-history'
-import { NO_COUNTS, NUDGE_ONLY, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, maskPrompt, reportLines, rewriteParts, rewriteRequest, rewriteSystem, statusPart, tipsText, upgradePrompt } from './prompt-check'
+import { NO_COUNTS, NUDGE_ONLY, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, isSuggestionTaken, maskPrompt, reportLines, rewriteParts, rewriteRequest, rewriteSystem, statusPart, tipsText, upgradePrompt } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import type { Credentials } from './platform'
 
@@ -238,6 +238,8 @@ const historyShown = atom({ plugin: 'boomi-dashboard', key: 'historyShown' } as 
 
 /** The next step last suggested in the prompt box, so it isn't suggested after every turn. */
 const suggested = atom({ plugin: 'boomi-dashboard', key: 'suggested' } as const, '')
+/** The last text the prompt box showed dim as a suggestion, from Claude or a plugin, for Tab to take. */
+const shownSuggestion = atom({ plugin: 'boomi-dashboard', key: 'shownSuggestion' } as const, '')
 
 /** The latest checked prompt that had tips, masked, with its upgrade; null once a prompt needs none. */
 const promptTips = atom({ plugin: 'boomi-dashboard', key: 'promptTips' } as const, null as PromptTips | null)
@@ -366,6 +368,7 @@ type Settings = {
   promptCheck: 'off' | 'suggest' | 'confirm'
   promptModel: string
   promptRewrite: 'auto' | 'manual'
+  promptSuggested: 'skip' | 'check'
   promptSkip: ReadonlySet<string>
   promptView: 'auto' | 'manual' | 'off'
   seatBudgetUsd: number
@@ -405,6 +408,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   promptCheck: options.promptCheck === 'off' || options.promptCheck === 'suggest' ? options.promptCheck : 'confirm',
   promptModel: String(options.promptModel || 'haiku').trim() || 'haiku',
   promptRewrite: options.promptRewrite === 'manual' ? 'manual' : 'auto',
+  promptSuggested: options.promptSuggested === 'check' ? 'check' : 'skip',
   seatBudgetUsd: Math.max(0, Number(options.seatBudgetUsd ?? 0) || 0),
   isReadingBreakdown: options.usageBreakdown !== false,
   promptView: options.promptView === 'manual' || options.promptView === 'off' ? options.promptView : 'auto',
@@ -2090,6 +2094,18 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   if (!(await read($, isCompanionFolder)) && !((await read($, companionPlugins))?.length)) return undefined
   if (/^\s*>/.test(typed)) return { text: typed.replace(/^\s*>\s?/, '') }
   const hasSecret = findSecrets(typed).length > 0
+  // A suggestion taken with Tab and sent as it was isn't the person's own words: Claude's guess, or the dashboard's next step. Each is taken once, and a secret is still asked about.
+  const taken = isSuggestionTaken(typed, [await read($, shownSuggestion), await read($, suggested)])
+  if (taken) await update($, shownSuggestion, () => '')
+  if (taken && !hasSecret && settings.promptSuggested === 'skip') {
+    await update($, promptHeld, () => null)
+    await update($, promptCounts, c => ({ ...c, suggested: (c.suggested ?? 0) + 1 }))
+    await update($, promptTips, () => null)
+    await update($, promptNote, () => '')
+    await refreshStatus($, settings).catch(() => undefined)
+    await closePromptTab($, settings)
+    return undefined
+  }
   if (!hasSecret && !isCheckable(typed)) return undefined
   // A new prompt takes the place of one still held, and its cards start fitted to the pane.
   await update($, promptHeld, () => null)
@@ -3088,6 +3104,13 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'bc-dashboard' }, async ($, e) => {
     await ensureSession($, settings).catch(() => undefined)
     return { text: await runCommand($, settings, e.args) }
+  })
+
+  // Notes what the prompt box shows dim as a suggestion (Claude's guess after a turn, or a plugin's), so a prompt sent as it was can be told from one the person wrote. The suggestion goes on to the box untouched.
+  on('prompt.suggest', async ($, e, next) => {
+    const result = await next(e)
+    if (result.isShown) await update($, shownSuggestion, () => e.text)
+    return result
   })
 
   // A spent budget that pauses Companion changes: Claude hears it with the person's prompt, once and on a change.

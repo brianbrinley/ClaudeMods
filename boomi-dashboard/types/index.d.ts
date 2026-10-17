@@ -233,6 +233,8 @@ export type PromptCounts = {
   checked: number
   tipped: number
   followed: number
+  /** Prompts that were a suggestion from the prompt box taken as it was: never checked. */
+  suggested?: number
   byCode: Partial<Record<PromptCheckCode, { seen: number; followed: number }>>
 }
 
@@ -316,6 +318,6 @@ export type RuntimeSeen = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'boomi-dashboard': { budgetAllowed: boolean; budgetPaused: string; enforceNoted: string; dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; bandFrame: number; paneSize: { rows: number; columns: number } | null; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; companionPlugins: CompanionPlugin[] | null; updateAvailable: string | null; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; reviewing: string | null; historyShown: number; stepsShown: number; promptTips: PromptTips | null; promptCounts: PromptCounts; promptBusy: boolean; promptNote: string; promptHeld: string | null; promptNudgeHidden: number; promptNoteDraft: string; promptExpanded: boolean; isPastCollapsed: boolean; isThemeListOpen: boolean; usageBreakdown: { breakdown: UsageBreakdownSeen; checkedAt: number; days?: Record<string, number> } | null }
+    'boomi-dashboard': { budgetAllowed: boolean; budgetPaused: string; enforceNoted: string; dashboard: Dashboard; isBandHidden: boolean; ledger: Ledger; isWorking: boolean; theme: PaneTheme | null; frame: number; bandFrame: number; paneSize: { rows: number; columns: number } | null; tip: number; recap: SessionRecap | null; isCompanionFolder: boolean; companionPlugins: CompanionPlugin[] | null; updateAvailable: string | null; diagnoses: Record<string, DiagnosisState>; budgetAlert: number; limitAlerts: Record<string, number>; share: { days: Record<string, number>; baseline?: { resetsAt?: string; percent: number }; counted: number } | null; suggested: string; shownSuggestion: string; history: HistoryState; copied: { id: string; isCopied: boolean } | null; reviewing: string | null; historyShown: number; stepsShown: number; promptTips: PromptTips | null; promptCounts: PromptCounts; promptBusy: boolean; promptNote: string; promptHeld: string | null; promptNudgeHidden: number; promptNoteDraft: string; promptExpanded: boolean; isPastCollapsed: boolean; isThemeListOpen: boolean; usageBreakdown: { breakdown: UsageBreakdownSeen; checkedAt: number; days?: Record<string, number> } | null }
   }
 }

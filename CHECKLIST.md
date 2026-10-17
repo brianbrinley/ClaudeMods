@@ -331,7 +331,9 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **O29. Refresh drafts, never writes.** Run `/bc-dashboard prompt guide refresh`.
   **Pass:** it prints `ADD`, `CHANGE` or `REMOVE` lines (or `Nothing to change.`), each naming the changelog line or doc heading behind it, ends with `Nothing was changed.`, and no file changes (`git status` is clean). **Fail:** a line with no supporting note, or a changed file.
 
-## P. Usage breakdown and your Claude budget
+- [ ] **O30. A taken suggestion isn't checked.** *(0.58.0)* After Claude finishes a turn, the prompt box shows a dim suggestion. Take it with Tab and press Enter, as it is.
+  **Pass:** it goes to Claude with nothing held and no Prompt tab; `/bc-dashboard prompt` says `1 of Claude's suggestions taken as they were`. Then type a vague prompt yourself (`deploy it`): it is checked as usual. **Fail:** a suggestion taken as it was gets tips, is held, or isn't counted. If a vague suggestion you took was checked anyway, send the suggestion's text: the match may be failing on a character the box changes.
+ and your Claude budget
 
 *boomi-dashboard 0.47.0, on a Claude subscription login.*
 
