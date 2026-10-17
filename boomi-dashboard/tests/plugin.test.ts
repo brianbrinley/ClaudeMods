@@ -2739,6 +2739,126 @@ test('the Prompt tab’s Upgrade with a model rewrites the upgrade in place', as
   expect(await tab.find({ text: /Deploy Orders Sync to \[environment\], then test it with \[test data\]\./ })).toBeDefined()
 })
 
+const REWRITTEN = 'Deploy Orders Sync to [decide: which environment - Dev?], then test it with [decide: test data].\n---why---\n- Named the process: Claude cannot deploy "it".\n- Asked for the environment: a deploy needs one.'
+const answers = (requests: { system?: string; prompt?: string }[]) => (on: Parameters<typeof promptWorld>[1]) =>
+  on('model.complete', async (_$, e) => {
+    requests.push({ system: e.system, prompt: e.prompt })
+    return { value: { isAnswered: true, text: REWRITTEN, usage: { input_tokens: 900, output_tokens: 80, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } as never
+  })
+
+test('auto: a prompt with tips is rewritten in the background, the checks’ upgrade first and the model’s after, with why', async ($, on) => {
+  const requests: { system?: string; prompt?: string }[] = []
+  answers(requests)(on)
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  // Before the timer runs, the checks' upgrade is all there is.
+  expect(requests).toHaveLength(0)
+  expect(await tab.find({ text: /UPGRADED$/ })).toBeDefined()
+  await clock.advance(1)
+  expect(requests).toHaveLength(1)
+  expect(requests[0]!.system).toContain('[decide: question]')
+  expect(requests[0]!.prompt).toContain('<prompt>')
+  const after = tab
+  expect(await after.find({ text: /UPGRADED BY HAIKU/ })).toBeDefined()
+  expect(await after.find({ text: /Deploy Orders Sync to \[decide: which environment - Dev\?\]/ })).toBeDefined()
+  expect(await after.find({ text: /WHY IT CHANGED/ })).toBeDefined()
+  expect(await after.find({ text: /Asked for the environment: a deploy needs one\./ })).toBeDefined()
+  // The checks' upgrade stays one try back.
+  expect(await after.find({ text: /try 2 of 2/ })).toBeDefined()
+})
+
+test('auto: it never fills the prompt box, and a model that fails leaves the checks’ upgrade', async ($, on) => {
+  on('model.complete', async () => ({ value: { isAnswered: false, reason: 'api-error', status: 500, error: 'server', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }) as never)
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  await clock.advance(1)
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  expect(await tab.find({ text: /UPGRADED$/ })).toBeDefined()
+  expect(await tab.find({ text: /try 1 of/ })).toBeUndefined()
+  expect(await tab.find({ text: /couldn't rewrite it \(api-error\)/ })).toBeDefined()
+})
+
+test('manual: promptRewrite manual never calls the model on its own', { options: { promptRewrite: 'manual' } }, async ($, on) => {
+  const requests: { system?: string; prompt?: string }[] = []
+  answers(requests)(on)
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  await clock.advance(1)
+  expect(requests).toHaveLength(0)
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  await tab.press({ key: 'prompt-rewrite' })
+  expect(requests).toHaveLength(1)
+})
+
+test('auto: a prompt whose only tip is a secret is not sent to a model', async ($, on) => {
+  const requests: { system?: string; prompt?: string }[] = []
+  answers(requests)(on)
+  const { typed } = await promptWorld($, on)
+  await typed('deploy Orders Sync to dev with password=hunter22')
+  await clock.advance(1)
+  expect(requests).toHaveLength(0)
+})
+
+const COMPANION = 'companion/bc-integration/1.0.90'
+const DOC = `${COMPANION}/skills/boomi-integration/references/guides/boomi_error_reference.md`
+const DOC_TEXT = '# Errors\n\n## Debugging a failed deploy\n\nRead the execution log first; a deploy error names the environment extension that is missing.\n'
+const CHANGES = '# Changelog\n\n## 1.0.90\n\n- Deploys now need a package description.\n\n## 1.0.83\n\n- An older note.\n'
+
+/** Companion's bc-integration at 1.0.90 under /work, as the plugin cache lists it and `claude plugin list` reports it. */
+const companionInstalled = (on: On) =>
+  on('process.run', async (_$, e) => {
+    const line = e.argv.join(' ')
+    const stdout = line === 'claude plugin list --json'
+      ? JSON.stringify([{ id: 'bc-integration@boomi-companion', version: '1.0.90', enabled: true, scope: 'user', installPath: '/x' }])
+      : line.includes('bc-integration') ? `bc-integration=/work/${COMPANION}/\n` : ''
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+
+test('a rewrite reads Companion’s docs in subfolders through an index kept for the version, and says what it read', async ($, on) => {
+  const requests: { system?: string; prompt?: string }[] = []
+  answers(requests)(on)
+  companionInstalled(on)
+  const { store, typed } = await promptWorld($, on, () => undefined, { 'active-development': '', [DOC]: DOC_TEXT, [`${COMPANION}/CHANGELOG.md`]: CHANGES })
+  await typed('deploy it')
+  await clock.advance(1)
+  expect(requests).toHaveLength(1)
+  expect(requests[0]!.prompt).toContain('[bc-integration/guides/boomi_error_reference.md: Debugging a failed deploy]')
+  expect(requests[0]!.prompt).toContain('the environment extension that is missing')
+  // The index holds pointers, not Companion's text, and is kept for the next session.
+  const kept = JSON.stringify(store.docIndex)
+  expect(kept).toContain('Debugging a failed deploy')
+  expect(kept).not.toContain('the environment extension that is missing')
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  expect(await tab.find({ text: "Read Companion's guidance: bc-integration 1.0.90" })).toBeDefined()
+  // Companion has moved on from the guide's 1.0.83: the tab says so.
+  await clock.advance(1_000)
+  expect(await tab.find({ text: /The dashboard's guide was written for bc-integration 1\.0\.83 \(now 1\.0\.90\)/ })).toBeDefined()
+})
+
+test('/bc-dashboard prompt guide shows what Companion changed since the guide was written; refresh drafts edits and changes nothing', async ($, on) => {
+  const requests: { system?: string; prompt?: string }[] = []
+  on('model.complete', async (_$, e) => {
+    requests.push({ system: e.system, prompt: e.prompt })
+    return { value: { isAnswered: true, text: 'CHANGE | a deploy | the environment, and a package description | Deploys now need a package description.', usage: { input_tokens: 300, output_tokens: 40, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } as never
+  })
+  companionInstalled(on)
+  await promptWorld($, on, () => undefined, { 'active-development': '', [DOC]: DOC_TEXT, [`${COMPANION}/CHANGELOG.md`]: CHANGES })
+  await clock.advance(1_000)
+  const status = (await $.command.run(dashboard('prompt guide'))).text
+  expect(status).toContain('◐ bc-integration: written for 1.0.83, installed 1.0.90: Companion has moved on')
+  expect(status).toContain('- Deploys now need a package description.')
+  expect(status).not.toContain('An older note')
+  expect(requests).toHaveLength(0)
+  const draft = (await $.command.run(dashboard('prompt guide refresh'))).text
+  expect(requests).toHaveLength(1)
+  expect(requests[0]!.prompt).toContain('Deploys now need a package description.')
+  expect(requests[0]!.prompt).not.toContain('An older note')
+  expect(draft).toContain('Draft edits to the guide for bc-integration 1.0.90, by haiku')
+  expect(draft).toContain('CHANGE | a deploy | the environment, and a package description')
+  expect(draft).toContain('Nothing was changed.')
+})
+
 // --- After /clear ---
 
 test('after /clear the dashboard sets the new session up again: it sees the folder anew, checks prompts, and keeps what was saved', async ($, on) => {

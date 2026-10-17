@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.55.0",
+  "version": "0.57.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -229,10 +229,20 @@
       ],
       "default": "auto"
     },
+    "promptRewrite": {
+      "type": "string",
+      "title": "Rewrite prompts automatically",
+      "description": "auto has the prompt model polish a prompt that gets tips, in the background; manual rewrites only on request",
+      "options": [
+        "auto",
+        "manual"
+      ],
+      "default": "auto"
+    },
     "promptModel": {
       "type": "string",
       "title": "Prompt rewrite model",
-      "description": "The model /bc-dashboard prompt upgrade asks to rewrite a prompt, only when you run it: an alias such as haiku, or a full model ID",
+      "description": "The model that rewrites a prompt, automatically or on request: an alias such as haiku, or a full model ID",
       "default": "haiku"
     },
     "promptSkip": {

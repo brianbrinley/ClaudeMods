@@ -127,16 +127,17 @@ import type { Enforce } from './budget-gate'
 import { BOOMI_MARK_PNG, drawsPictures } from './boomi-mark'
 import { PALETTES, THEMES, THEME_NAMES, THEME_LABELS, THEME_OPTIONS, isDarkAppearance, markOf, resolveTheme, themeFromOptions, themeNamed } from './themes'
 import type { DrawnTheme, Family } from './themes'
-import { hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
-import { RESTART, asUpdateSeen, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
+import { COMPANION_PLUGINS, hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
+import { RESTART, asUpdateSeen, changelogBetween, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
-import { contextLines, folderComponentOf, relevantComponents, relevantSections, sectionsOf } from './retrieve'
-import type { FolderComponent, Section } from './retrieve'
+import { EMPTY_INDEX, contextLines, docName, folderComponentOf, indexFile, isCurrent, relevantComponents, relevantPlaces, relevantSections, sectionsOf } from './retrieve'
+import type { DocIndex, FolderComponent, Section } from './retrieve'
+import { GUIDE, GUIDE_STAMP, REFRESH_SYSTEM, driftNote, guideFor, guideStatus, guideText, refreshRequest, refreshText } from './prompt-guide'
 import { companionUseLine, isFresh, parseUsage, topHabit, usageArgv } from './usage-breakdown'
 import { paceOf, recordDay } from './spend-history'
 import type { SpendDays } from './spend-history'
-import { NO_COUNTS, NUDGE_ONLY, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
+import { NO_COUNTS, NUDGE_ONLY, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, maskPrompt, reportLines, rewriteParts, rewriteRequest, rewriteSystem, statusPart, tipsText, upgradePrompt } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import type { Credentials } from './platform'
 
@@ -364,6 +365,7 @@ type Settings = {
   reportStyle: ReportStyle
   promptCheck: 'off' | 'suggest' | 'confirm'
   promptModel: string
+  promptRewrite: 'auto' | 'manual'
   promptSkip: ReadonlySet<string>
   promptView: 'auto' | 'manual' | 'off'
   seatBudgetUsd: number
@@ -402,6 +404,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   reportStyle: options.reportStyle === 'expressive' ? 'expressive' : 'exosphere',
   promptCheck: options.promptCheck === 'off' || options.promptCheck === 'suggest' ? options.promptCheck : 'confirm',
   promptModel: String(options.promptModel || 'haiku').trim() || 'haiku',
+  promptRewrite: options.promptRewrite === 'manual' ? 'manual' : 'auto',
   seatBudgetUsd: Math.max(0, Number(options.seatBudgetUsd ?? 0) || 0),
   isReadingBreakdown: options.usageBreakdown !== false,
   promptView: options.promptView === 'manual' || options.promptView === 'off' ? options.promptView : 'auto',
@@ -415,6 +418,7 @@ const PANE = 'boomi-dashboard'
 const PROMPT_PANE = 'boomi-dashboard-prompt'
 const WATCH_KEY = 'watched'
 const SCRIPTS_KEY = 'scriptsDir'
+const DOCS_KEY = 'docIndex'
 const THEME_KEY = 'theme'
 const HISTORY_KEY = 'history'
 const UPGRADE_KEY = 'upgradeCheckedAt'
@@ -1927,7 +1931,7 @@ const USAGE = [
   '/bc-dashboard history         past Companion sessions on this machine and what each cost',
   '/bc-dashboard resume [n]      copy the command that reopens a past session in a new terminal',
   '/bc-dashboard review [n]      what made a past session cost what it did, and what to change next time',
-  '/bc-dashboard prompt [use|upgrade] your last Boomi prompt\'s tips and an upgraded prompt; use puts it in the prompt box, upgrade has a model rewrite it',
+  '/bc-dashboard prompt [use|upgrade|guide] your last Boomi prompt\'s tips and an upgraded prompt; use puts it in the prompt box, upgrade has a model rewrite it',
   '/bc-dashboard seen            mark watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: auto, exosphere-light, exosphere-dark, whimsical-light, whimsical-dark or terminal',
@@ -2106,6 +2110,8 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
     return undefined
   }
   if (settings.promptView === 'auto') await showPromptTab($, tips.length)
+  // A timer, not a bare call: the model call outlives this hook, which would abort it. A secret alone has nothing to rewrite.
+  if (settings.promptRewrite === 'auto' && tips.some(t => t.code !== 'secret')) $.clock.after(0, () => autoRewrite($, settings, at).catch(() => undefined))
 
   // A secret asks in any mode: once sent, it's in the transcript. No answer sends it masked.
   if (hasSecret) {
@@ -2206,13 +2212,13 @@ const discardHeld = async ($: Engine, settings: Settings) => {
   await refreshStatus($, settings).catch(() => undefined)
 }
 
-/** The folder's components and Companion's reference docs, read once a minute at most. */
-let retrieved: { at: number; components: FolderComponent[]; sections: Section[] } | undefined
+/** The folder's components, read once a minute at most. */
+let retrieved: { at: number; components: FolderComponent[] } | undefined
 
-/** Every component XML under the components folder (up to 200 files, three folders deep), and Companion's reference docs. */
-const gatherContext = async ($: Engine, settings: Settings) => {
+/** Every component XML under the components folder (up to 200 files, three folders deep). */
+const folderComponents = async ($: Engine, settings: Settings): Promise<FolderComponent[]> => {
   const now = await $.clock.now()
-  if (retrieved && now - retrieved.at < 60_000) return retrieved
+  if (retrieved && now - retrieved.at < 60_000) return retrieved.components
   const cwd = await $.session.cwd()
   const root = settings.componentsDir.startsWith('/') ? settings.componentsDir : `${cwd}/${settings.componentsDir}`
   const files: string[] = []
@@ -2229,16 +2235,85 @@ const gatherContext = async ($: Engine, settings: Settings) => {
     const found = folderComponentOf(String(await $.fs.read(file).catch(() => '')).slice(0, 4000))
     if (found && !components.some(c => c.name === found.name && c.type === found.type)) components.push(found)
   }
-  const sections: Section[] = []
-  const scripts = await findScripts($).catch(() => undefined)
-  if (scripts) {
-    const refs = scripts.replace(/\/scripts\/?$/, '/references')
-    for (const entry of (await $.fs.list(refs).catch(() => [])).filter(e => e.kind === 'file' && e.name.endsWith('.md')).slice(0, 30)) {
-      sections.push(...sectionsOf(entry.name, String(await $.fs.read(`${refs}/${entry.name}`).catch(() => ''))))
+  retrieved = { at: now, components }
+  return components
+}
+
+/** Each Companion plugin on this machine: its newest installed version and its folder (with a trailing slash), from Claude Code's plugin cache. */
+const installedCompanion = async ($: Engine): Promise<Record<string, { version: string; dir: string }>> => {
+  const names = COMPANION_PLUGINS.map(p => p.name).join(' ')
+  const found = await $.process
+    .run(['bash', '-c', `for n in ${names}; do d=$(ls -d "$HOME"/.claude/plugins/cache/*/$n/*/ 2>/dev/null | sort -V | tail -1); [ -n "$d" ] && echo "$n=$d"; done`], { timeoutMs: 10_000 })
+    .catch(() => undefined)
+  const out: Record<string, { version: string; dir: string }> = {}
+  for (const line of (found?.stdout ?? '').split('\n')) {
+    const [name, dir] = line.trim().split('=')
+    if (name && dir) out[name] = { version: dir.replace(/\/$/, '').split('/').pop() ?? '', dir }
+  }
+  return out
+}
+
+/** The index of Companion's reference docs, kept in memory and in the store. */
+let docIndex: DocIndex | undefined
+
+/** Every Markdown doc under a plugin's skills' references folders (up to 400, four folders deep), as paths from the plugin's folder. */
+const referenceDocs = async ($: Engine, dir: string): Promise<string[]> => {
+  const files: string[] = []
+  const walk = async (rel: string, depth: number) => {
+    if (depth > 4 || files.length >= 400) return
+    for (const entry of await $.fs.list(`${dir}${rel}`).catch(() => [])) {
+      if (entry.kind === 'dir') await walk(`${rel}/${entry.name}`, depth + 1)
+      else if (entry.kind === 'file' && entry.name.endsWith('.md') && files.length < 400) files.push(`${rel}/${entry.name}`)
     }
   }
-  retrieved = { at: now, components, sections }
-  return retrieved
+  for (const skill of await $.fs.list(`${dir}skills`).catch(() => [])) if (skill.kind === 'dir') await walk(`skills/${skill.name}/references`, 0)
+  return files
+}
+
+/**
+ * Companion's docs as an index of pointers (retrieve.ts): kept from the last
+ * session while every plugin's version is the one it was built for, and
+ * rebuilt when one changes, reading each doc again only to see whether it did.
+ */
+const companionDocs = async ($: Engine): Promise<{ index: DocIndex; installed: Record<string, { version: string; dir: string }> }> => {
+  const installed = await installedCompanion($)
+  let index = docIndex
+  if (!index) {
+    const stored = (await $.store.get(DOCS_KEY).catch(() => undefined)) as DocIndex | undefined
+    index = stored?.built === 1 ? stored : EMPTY_INDEX
+  }
+  if (!isCurrent(index, installed)) {
+    const files: DocIndex['files'] = {}
+    for (const [plugin, { dir }] of Object.entries(installed)) {
+      for (const rel of await referenceDocs($, dir)) {
+        const key = `${plugin}:${rel}`
+        files[key] = indexFile(plugin, rel, String(await $.fs.read(`${dir}${rel}`).catch(() => '')).slice(0, 150_000), index.files[key])
+      }
+    }
+    index = { built: 1, plugins: installed, files }
+    await $.store.set(DOCS_KEY, index).catch(() => undefined)
+  }
+  docIndex = index
+  return { index, installed }
+}
+
+/** The sections of Companion's docs that best match a prompt, read from the docs themselves, and the plugins (with versions) they came from. */
+const companionSections = async ($: Engine, prompt: string): Promise<{ sections: Section[]; guidedBy: string[] }> => {
+  const { index, installed } = await companionDocs($)
+  const read_: Section[] = []
+  const texts = new Map<string, Section[]>()
+  for (const place of relevantPlaces(index, prompt)) {
+    const dir = installed[place.file.plugin]?.dir
+    if (!dir) continue
+    const path = `${dir}${place.file.file}`
+    const all = texts.get(path) ?? sectionsOf(docName(place.file), String(await $.fs.read(path).catch(() => '')))
+    texts.set(path, all)
+    const found = all.find(s => s.heading === place.heading)
+    if (found) read_.push(found)
+  }
+  const sections = relevantSections(read_, prompt)
+  const guidedBy = [...new Set(sections.map(s => s.source.split('/')[0]!))].map(name => `${name} ${installed[name]?.version ?? ''}`.trim())
+  return { sections, guidedBy }
 }
 
 /** The Prompt tab's Upgrade with a model and Regenerate: the same rewrite as /bc-dashboard prompt upgrade, its first line kept as the note. */
@@ -2256,6 +2331,28 @@ const rewriteFromTab = async ($: Engine, settings: Settings, note?: string) => {
   }
 }
 
+/** The prompt whose automatic rewrite is running, so a newer prompt's takes its place. */
+let autoRewriting = 0
+
+/**
+ * With promptRewrite auto, the model's rewrite of a prompt that got tips, in
+ * the background: the checks' upgrade shows at once and this takes its place
+ * as the next try. It never fills the prompt box (the person may be editing
+ * there), and a failure leaves the checks' upgrade where it is.
+ */
+const autoRewrite = async ($: Engine, settings: Settings, at: number) => {
+  autoRewriting = at
+  await update($, promptBusy, () => true)
+  try {
+    const said = await rewritePrompt($, settings, undefined, false, at)
+    if (said && autoRewriting === at) await update($, promptNote, () => said.split('\n')[0] ?? '')
+  } catch (error) {
+    if (autoRewriting === at) await update($, promptNote, () => `The rewrite didn't work: ${messageOf(error)}. The upgrade from the checks is still there.`)
+  } finally {
+    if (autoRewriting === at) await update($, promptBusy, () => false)
+  }
+}
+
 /** Shows another try in the Prompt tab: the one before or after. */
 const showTry = async ($: Engine, step: number) =>
   update($, promptTips, t => {
@@ -2263,7 +2360,7 @@ const showTry = async ($: Engine, step: number) =>
     if (!t || tries.length < 2) return t
     const shown = Math.min(tries.length - 1, Math.max(0, (t.shown ?? tries.length - 1) + step))
     const pick = tries[shown]!
-    return { ...t, shown, upgrade: pick.text, rewrittenBy: pick.by === 'the checks' ? undefined : pick.by, tokens: pick.tokens }
+    return { ...t, shown, upgrade: pick.text, rewrittenBy: pick.by === 'the checks' ? undefined : pick.by, tokens: pick.tokens, why: pick.why }
   })
 
 /**
@@ -2272,35 +2369,74 @@ const showTry = async ($: Engine, step: number) =>
  * sections of Companion's reference docs that match the prompt, the person's
  * note, and the try before; never Companion's .env. Each try is kept.
  */
-const rewritePrompt = async ($: Engine, settings: Settings, note?: string, isFilling = true): Promise<string> => {
+const rewritePrompt = async ($: Engine, settings: Settings, note?: string, isFilling = true, onlyFor?: number): Promise<string> => {
   const tips = await read($, promptTips)
   if (!tips) return 'Nothing to upgrade yet: no Boomi prompt this session has had tips.'
   const facts = await promptFacts($, settings)
-  const found = await gatherContext($, settings).catch(() => ({ components: [] as FolderComponent[], sections: [] as Section[] }))
-  const components = relevantComponents(found.components, tips.masked)
-  const sections = relevantSections(found.sections, tips.masked)
+  const components = relevantComponents(await folderComponents($, settings).catch(() => [] as FolderComponent[]), tips.masked)
+  const { sections, guidedBy } = await companionSections($, tips.masked).catch(() => ({ sections: [] as Section[], guidedBy: [] as string[] }))
+  const guide = guideFor(((await read($, companionPlugins)) ?? []).map(p => p.name))
   const tries = tips.tries ?? [{ text: tips.upgrade, by: 'the checks' }]
   const previous = tries.length > 1 ? tips.upgrade : undefined
   const reply = await $.model.complete({
     model: settings.promptModel,
-    system: REWRITE_SYSTEM,
+    system: rewriteSystem([], guide),
     prompt: rewriteRequest(tips.masked, facts, tips.tips, tries[0]!.text, { context: contextLines(components, sections), note: note?.trim() || undefined, previous }),
-    maxTokens: 800,
+    maxTokens: 1000,
     effort: 'low',
   })
   if (!reply.isAnswered) {
     return `${settings.promptModel} couldn't rewrite it (${reply.reason}). Your prompt is safe, and the upgrade from the checks is still there: /bc-dashboard prompt use.`
   }
-  const text = rewriteFrom(reply.text)
-  if (!text) return `${settings.promptModel} gave back nothing. The upgrade from the checks is still there: /bc-dashboard prompt use.`
+  const parts = rewriteParts(reply.text)
+  if (!parts) return `${settings.promptModel} gave back nothing. The upgrade from the checks is still there: /bc-dashboard prompt use.`
+  const { text, why } = parts
   const tokens = reply.usage.input_tokens + reply.usage.output_tokens
-  const added: PromptTry = { text, by: settings.promptModel, tokens, ...(note?.trim() ? { note: note.trim() } : {}) }
-  await update($, promptTips, t => (t ? { ...t, upgrade: text, rewrittenBy: settings.promptModel, tokens, tries: [...(t.tries ?? tries), added], shown: (t.tries ?? tries).length } : t))
-  const read_ = [components.length > 0 ? `${components.length} of this folder's components` : '', sections.length > 0 ? `${sections.length} part${sections.length === 1 ? '' : 's'} of Companion's guidance` : '']
+  const added: PromptTry = { text, by: settings.promptModel, tokens, ...(why.length > 0 ? { why } : {}), ...(note?.trim() ? { note: note.trim() } : {}) }
+  // A newer prompt took this one's place while the model worked: its tips are not this rewrite's to change.
+  if (onlyFor !== undefined && (await read($, promptTips))?.at !== onlyFor) return ''
+  await update($, promptTips, t => (t ? { ...t, upgrade: text, rewrittenBy: settings.promptModel, tokens, why, guidedBy, tries: [...(t.tries ?? tries), added], shown: (t.tries ?? tries).length } : t))
+  const read_ = [components.length > 0 ? `${components.length} of this folder's components` : '', sections.length > 0 ? `${sections.length} part${sections.length === 1 ? '' : 's'} of Companion's guidance (${guidedBy.join(', ')})` : '']
     .filter(Boolean)
     .join(' and ')
   const where = isFilling && (await refill($, text)) ? " It's in the prompt box: fill in any [placeholder], then press Enter." : ''
   return `Rewritten by ${settings.promptModel} (${tokens} tokens${read_ ? `, reading ${read_}` : ''}).${where}\n\n${text}`
+}
+
+/**
+ * /bc-dashboard prompt guide: the dashboard's guide against each Companion
+ * plugin's installed version, with the changelog lines since the one it was
+ * written for. `refresh` has a model draft the edits for each plugin that has
+ * moved on or has none yet; it prints them and changes nothing.
+ */
+const guideCommand = async ($: Engine, settings: Settings, rest: string): Promise<string> => {
+  const plugins = (await read($, companionPlugins)) ?? []
+  const status = guideStatus(plugins)
+  const { index, installed } = await companionDocs($)
+  const stale = status.filter(s => s.state === 'drifted' || s.state === 'unwritten')
+  const notesOf = async (plugin: string): Promise<string[]> => {
+    const dir = installed[plugin]?.dir
+    return dir ? String(await $.fs.read(`${dir}CHANGELOG.md`).catch(() => '')).split('\n') : []
+  }
+  const changelogs: Record<string, string[]> = {}
+  for (const s of stale) changelogs[s.plugin] = await notesOf(s.plugin)
+  if (rest.split(/\s+/)[0] !== 'refresh') return guideText(status, changelogs)
+  if (stale.length === 0) return 'The dashboard\'s guide is up to date with every Companion plugin on in this session. Nothing to refresh.'
+  const drafts: string[] = []
+  for (const s of stale) {
+    const all = changelogs[s.plugin] ?? []
+    const notes = (s.stamped && s.installed ? changelogBetween(all, s.stamped, s.installed) : all.slice(0, 120)).slice(0, 120)
+    const headings = s.stamped ? [] : Object.values(index.files).filter(f => f.plugin === s.plugin).flatMap(f => f.sections.map(x => x.heading)).filter(Boolean).slice(0, 80)
+    const reply = await $.model.complete({
+      model: settings.promptModel,
+      system: REFRESH_SYSTEM,
+      prompt: refreshRequest(s.plugin, s.stamped, s.installed, GUIDE.filter(e => e.plugin === s.plugin), notes, headings),
+      maxTokens: 1500,
+      effort: 'low',
+    })
+    drafts.push(reply.isAnswered ? refreshText(s.plugin, s.installed, reply.text, settings.promptModel) : `${s.plugin}: ${settings.promptModel} couldn't draft it (${reply.reason}). Nothing was changed.`)
+  }
+  return drafts.join('\n\n')
 }
 
 /** /bc-dashboard prompt: the last prompt's tips; `use` puts the upgrade in the prompt box; `upgrade` has a model rewrite it. */
@@ -2321,8 +2457,9 @@ const promptCommand = async ($: Engine, settings: Settings, target: string): Pro
         ? 'The upgraded prompt is in the prompt box: fill in any [placeholder], then press Enter.'
         : `The prompt box couldn't take it here. The upgraded prompt:\n\n${tips.upgrade}`
     }
+    if (verb === 'guide') return await guideCommand($, settings, target.trim().slice('guide'.length).trim())
     if (verb === 'upgrade') return await rewritePrompt($, settings, target.trim().slice('upgrade'.length).trim() || undefined)
-    return 'Usage: /bc-dashboard prompt shows your last Boomi prompt\'s tips; prompt use puts the upgrade in the prompt box; prompt upgrade [a note] has a model rewrite it, following the note.'
+    return 'Usage: /bc-dashboard prompt shows your last Boomi prompt\'s tips; prompt use puts the upgrade in the prompt box; prompt upgrade [a note] has a model rewrite it, following the note; prompt guide [refresh] compares the dashboard\'s guide with the Companion plugins installed and, with refresh, has a model draft edits.'
   } catch (error) {
     return `The dashboard couldn't do that: ${messageOf(error)}. Your prompt is safe.`
   }
@@ -3182,6 +3319,7 @@ export const register: Register = (on, options) => {
     )
     const tries = tips?.tries ?? []
     const shown = tips?.shown ?? Math.max(0, tries.length - 1)
+    const guideDrift = driftNote(guideStatus((await read($, companionPlugins)) ?? []))
     const intro = held !== null
       ? "⏸ Held: Claude hasn't seen this prompt yet. Send it, or the upgrade, below."
       : 'The Boomi Dashboard suggests a clearer prompt. Your prompt went to Claude as typed; use the upgrade next time, or now.'
@@ -3191,7 +3329,7 @@ export const register: Register = (on, options) => {
     const tipRows = (tips?.tips ?? []).reduce((n, tip) => n + wrapLines(`  ${tip.text}`, width).length, 0)
     // The note's field wraps as it's typed, beside its Regenerate hint.
     const noteRows = Math.max(1, wrapLines(draft, width - 14).length) - 1
-    const fixedRows = 3 + wrapLines(intro, width).length + 2 + tipRows + 4 + 1 + (said ? wrapLines(said, width).length : 0) + 2 + 2 + noteRows + 1 + (tries[shown]?.note ? 1 : 0)
+    const fixedRows = 3 + wrapLines(intro, width).length + 2 + tipRows + 4 + 1 + (said ? wrapLines(said, width).length : 0) + 2 + 2 + noteRows + 1 + (tries[shown]?.note ? 1 : 0) + (tips?.guidedBy?.length ? 1 : 0) + (guideDrift ? wrapLines(guideDrift, width).length : 0) + ((tips?.why?.length ?? 0) > 0 ? 2 + (tips?.why ?? []).reduce((n, line) => n + wrapLines(`  ${line}`, width).length, 0) : 0)
     const textRows = Math.max(4, room - fixedRows - 1)
     // Side by side the cards share the rows; one above the other, your prompt takes up to a third.
     const promptRows = isWide ? textRows : Math.max(2, Math.min(Math.floor(textRows / 3), wrapLines(tips?.masked ?? '', cardColumns).length))
@@ -3286,6 +3424,10 @@ export const register: Register = (on, options) => {
               )}
             </Box>
             {said ? t(said, { color: p.muted }) : undefined}
+            {(tips.why?.length ?? 0) > 0 && heading('Why it changed')}
+            {(tips.why ?? []).map(line => t(`  ${line}`))}
+            {tips.guidedBy && tips.guidedBy.length > 0 ? t(`Read Companion's guidance: ${tips.guidedBy.join(', ')}`, { color: p.muted }) : undefined}
+            {guideDrift ? t(guideDrift, { color: STATUS.warning.color }) : undefined}
             <Box flexWrap="wrap" columnGap={1} marginTop={1}>
               <Button key="prompt-rewrite" label={busy ? '◐ Rewriting…' : tries.length > 1 ? 'Regenerate' : 'Upgrade with a model'} onPress={() => void rewriteFromTab($, settings)} />
               {tries.length > 1 ? (

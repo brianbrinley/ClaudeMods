@@ -315,6 +315,22 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **O22. Past sessions fold.** Open the dashboard pane with past sessions scanned.
   **Pass:** **Past Companion sessions** shows its totals and `N sessions listed`, with **▸ Show**. **Show** lists them; **Hide** folds them; in a new session the section stays as you left it. **Fail:** the list shows unfolded at first, a button does nothing, or the choice is forgotten.
 
+- [ ] **O23. The rewrite arrives on its own.** *(0.56.0)* With `promptRewrite` at `auto` (the default), type `deploy it` in a Companion folder.
+  **Pass:** the Prompt tab opens with the checks' upgrade; within a few seconds it becomes **UPGRADED BY HAIKU**, `try 2 of 2`, with `[decide: …]` placeholders where Claude would have asked (at least the environment) and nothing you didn't ask for. **Fail:** it stays on the checks' upgrade, or the prompt box fills by itself, or the rewrite adds an upsert, write-back or other logic you didn't ask for. Send the text of any `couldn't rewrite it` line.
+- [ ] **O24. Why it changed.** Same prompt.
+  **Pass:** under the upgrade a **Why it changed** section lists one to three short lines, each saying what was added or asked and why Boomi work needs it; `/bc-dashboard prompt` shows the same under `Why it changed:`. **Fail:** no section, or lines that restate the prompt without saying why.
+- [ ] **O25. Manual turns it off.** Run `/bc-dashboard config promptRewrite manual`, then type `deploy it` again.
+  **Pass:** the tab shows the checks' upgrade only, `Upgrade with a model` still works when pressed, and no rewrite arrives by itself. **Fail:** a rewrite arrives anyway.
+
+- [ ] **O26. The rewrite reads the subfolders.** *(0.57.0)* With Companion installed, type `deploy it`, and read the rewrite's note in the tab.
+  **Pass:** the tab says `Read Companion's guidance: bc-integration <your version>`, and a rewrite asking about something only a subfolder doc covers (try `fix the map, still failing` or `test the process`) leans on it. **Fail:** no `Read Companion's guidance` line, or a rewrite that ignores Companion's guides.
+- [ ] **O27. The index follows an upgrade.** Run a Companion upgrade (or change `bc-integration`'s version folder), start a new session, and type a prompt with tips.
+  **Pass:** the first rewrite after the upgrade takes a moment longer, later ones don't, and the tab names the new version. **Fail:** it still names the old version, or every rewrite is slow.
+- [ ] **O28. The guide notices drift.** With Companion newer than `GUIDE_STAMP` in `hooks/prompt-guide.ts`, open the Prompt tab, then run `/bc-dashboard prompt guide`.
+  **Pass:** the tab shows `The dashboard's guide was written for bc-integration … (now …)`; the command lists the changelog lines since that version. **Fail:** neither shows, or it lists lines from versions the guide already covers.
+- [ ] **O29. Refresh drafts, never writes.** Run `/bc-dashboard prompt guide refresh`.
+  **Pass:** it prints `ADD`, `CHANGE` or `REMOVE` lines (or `Nothing to change.`), each naming the changelog line or doc heading behind it, ends with `Nothing was changed.`, and no file changes (`git status` is clean). **Fail:** a line with no supporting note, or a changed file.
+
 ## P. Usage breakdown and your Claude budget
 
 *boomi-dashboard 0.47.0, on a Claude subscription login.*
