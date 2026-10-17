@@ -2,6 +2,11 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.55.0
+
+- **One theme picker, at the bottom of the pane.** The six theme buttons that overflowed the header are gone. Under the `session` line is a single **🎨 Theme** button showing the current theme; it opens a list of all six, each with an emoji and a word (`🏢 Exosphere · 🌙 Dark`, `🦩 Whimsical · ☀️ Light`, `🌓 Auto`, `⌨️ Terminal`), with ◆ on the current one. The list closes on a pick. `/config` and `/bc-dashboard theme` are unchanged.
+- **Buttons and the theme list read in dark mode.** A pane button's label took the terminal's own colors, so it was black on a dark pane. Labels, the theme button and its list now use the pane's accent color on its background, in every theme.
+
 ## 0.54.0
 
 - **Exosphere is the default theme.** The pane and banner now take Boomi's Exosphere colors, and **Auto** follows your system's light or dark (macOS; where it can't be read, light). The theme list is now `auto`, `exosphere-light`, `exosphere-dark`, `whimsical-light`, `whimsical-dark` and `terminal`: the buttons, `/bc-dashboard theme` and `/config` all take them. The Art Deco look is **Whimsical** now, light and dark, with its colors and the flamingo unchanged.

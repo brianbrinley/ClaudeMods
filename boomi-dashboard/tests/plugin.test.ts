@@ -311,7 +311,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     on('process.run', async (_$, e) => ({ value: { exitCode: 0, stdout: e.argv[0] === 'defaults' ? 'Dark\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
     const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
     expect(propsOf(await pane.drawn())).toMatchObject({ backgroundColor: '#1a1a1a' })
-    expect((await pane.find({ type: 'Button', key: 'theme-auto' }))?.props.label).toBe('◆ Auto')
+    expect((await pane.find({ type: 'Button', key: 'theme' }))?.props.label).toContain('Auto')
   })
 
   test(`on ${surface}, a flamingo banner icon from an earlier version lands in Whimsical`, { options: { bandIcon: 'flamingo' } }, async ($, on) => {
@@ -324,23 +324,24 @@ for (const surface of ['terminal', 'desktop'] as const) {
     world(on)
     const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
     expect(propsOf(await pane.drawn())).toMatchObject({ backgroundColor: '#161A2E' })
-    expect((await pane.find({ type: 'Button', key: 'theme-whimsical-dark' }))?.props.label).toBe('◆ Whimsical dark')
+    expect((await pane.find({ type: 'Button', key: 'theme' }))?.props.label).toContain('Whimsical · 🌙 Dark')
   })
 
-  test(`on ${surface}, the theme buttons switch the pane's colors and the choice is kept`, async ($, on) => {
+  test(`on ${surface}, the theme picker switches the pane's colors and the choice is kept`, async ($, on) => {
     world(on)
     mock.store(on)
     const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface, ...PANE })
-    expect(await pane.find({ type: 'Button', key: 'theme-auto' })).toBeDefined()
-    expect((await pane.find({ type: 'Button', key: 'theme-auto' }))?.props.label).toBe('◆ Auto')
-    await pane.press({ key: 'theme-whimsical-dark' })
+    expect((await pane.find({ type: 'Button', key: 'theme' }))?.props.label).toContain('Auto')
+    await pane.press({ key: 'theme' })
+  await pane.press({ key: 'theme-whimsical-dark' })
     expect(propsOf(await pane.drawn()).backgroundColor).toBe('#161A2E')
-    expect((await pane.find({ type: 'Button', key: 'theme-whimsical-dark' }))?.props.label).toBe('◆ Whimsical dark')
+    expect((await pane.find({ type: 'Button', key: 'theme' }))?.props.label).toContain('Whimsical · 🌙 Dark')
     const listed = await $.command.run(dashboard('theme'))
     expect(listed.text).toContain('◆ whimsical-dark')
     await $.command.run(dashboard('theme day'))
     expect(propsOf(await pane.drawn()).backgroundColor).toBe('#FBF6EE')
-    await pane.press({ key: 'theme-exosphere-dark' })
+    await pane.press({ key: 'theme' })
+  await pane.press({ key: 'theme-exosphere-dark' })
     expect(propsOf(await pane.drawn()).backgroundColor).toBe('#1a1a1a')
   })
 
@@ -2213,16 +2214,17 @@ const memoryStore = (on: On, store: Record<string, unknown>) => {
   })
 }
 
-test("the pane's theme buttons and /bc-dashboard theme save the theme in /config", async ($, on) => {
+test("the pane's theme picker and /bc-dashboard theme save the theme in /config", async ($, on) => {
   world(on)
   const store: Record<string, unknown> = {}
   memoryStore(on, store)
   const sets = configWriter(on)
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  await pane.press({ key: 'theme' })
   await pane.press({ key: 'theme-whimsical-dark' })
   expect(sets).toEqual([['boomi-dashboard.paneTheme', 'whimsical-dark']])
   expect(propsOf(await pane.drawn()).backgroundColor).toBe('#161A2E')
-  expect((await pane.find({ type: 'Button', key: 'theme-whimsical-dark' }))?.props.label).toBe('◆ Whimsical dark')
+  expect((await pane.find({ type: 'Button', key: 'theme' }))?.props.label).toContain('Whimsical · 🌙 Dark')
   expect(store.theme).toBeUndefined()
   await $.command.run(dashboard('theme day'))
   expect(sets.at(-1)).toEqual(['boomi-dashboard.paneTheme', 'whimsical-light'])
@@ -2235,6 +2237,7 @@ test('where /config refuses the theme, the dashboard keeps it in its own store',
   memoryStore(on, store)
   configWriter(on, true)
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  await pane.press({ key: 'theme' })
   await pane.press({ key: 'theme-whimsical-dark' })
   expect(store.theme).toBe('whimsical-dark')
   expect(propsOf(await pane.drawn()).backgroundColor).toBe('#161A2E')
@@ -3059,4 +3062,26 @@ test('the pane shows the monthly budget’s pace and what today came to, from th
   // The day's last figure is kept with the reading, for tomorrow's "today".
   const saved = kept.usageBreakdown as { days: Record<string, number> }
   expect(Object.values(saved.days)).toEqual([380.04])
+})
+
+test("the pane's buttons draw their labels in the pane's own colors, so they read in dark mode", async ($, on) => {
+  world(on)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  await pane.press({ key: 'theme' })
+  await pane.press({ key: 'theme-exosphere-dark' })
+  const label = await pane.find({ type: 'Text', text: 'Report ↗' })
+  expect(label?.props).toMatchObject({ color: '#66b6f6', backgroundColor: '#1a1a1a' })
+})
+
+test("the theme list opens under its button, marks the current theme, and closes on a pick", async ($, on) => {
+  world(on)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ type: 'Button', key: 'theme-exosphere-dark' })).toBeUndefined()
+  await pane.press({ key: 'theme' })
+  expect((await pane.find({ type: 'Button', key: 'theme-auto' }))?.props.label).toContain('◆')
+  expect((await pane.find({ type: 'Button', key: 'theme-exosphere-dark' }))?.props.label).toContain('◇')
+  await pane.press({ key: 'theme-whimsical-dark' })
+  expect(await pane.find({ type: 'Button', key: 'theme-auto' })).toBeUndefined()
+  // Its label reads in the pane's own colors, not the terminal's.
+  expect((await pane.find({ type: 'Text', text: /Whimsical · 🌙 Dark/ }))?.props).toMatchObject({ color: '#5EEAD4', backgroundColor: '#161A2E' })
 })
