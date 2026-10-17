@@ -26,10 +26,26 @@ PAGES = [
     ("README.md", "", "Home"),
     ("boomi-runtime/README.md", "boomi-runtime", "Boomi Runtime"),
     ("boomi-dashboard/README.md", "boomi-dashboard", "Companion Dashboard"),
+    ("site/architecture.md", "architecture", "Architecture"),
     ("site/style.md", "style", None),
 ]
+# Long READMEs become several pages on the site; GitHub keeps the one file. {page dir: [(sub-directory, title,
+# the README's h2 ids)]}. The first keeps the README's opening and the page's own address. The build stops if an h2
+# isn't listed, so a new section can't drop off the site.
+SPLITS = {
+    "boomi-dashboard": [
+        ("", "Overview", ["install", "what-you-see"]),
+        ("using", "Using it", ["stages-and-what-needs-attention", "companions-other-plugins", "watched-components",
+                               "companions-activity-log", "past-companion-sessions", "session-report"]),
+        ("spend", "Spend and budgets", ["tokens-and-spend"]),
+        ("prompts", "Prompt tips", ["prompt-tips"]),
+        ("reference", "Reference", ["commands-and-tools", "setup-and-settings", "limits"]),
+        ("internals", "How it works", ["how-it-works", "whats-coming-next", "development"]),
+    ],
+}
 # Copied verbatim to the same path on the site (only what the pages use)
-COPY_PATHS = ["brand/valence.css", "brand/assets", "boomi-runtime/assets", "boomi-dashboard/assets"]
+COPY_PATHS = ["brand/valence.css", "brand/assets", "boomi-runtime/assets", "boomi-dashboard/assets",
+              "docs/architecture/valence"]
 # Built files offered as downloads on a page: {page dir: [(source directory, filename regex)]}
 DOWNLOADS = {}
 
@@ -51,7 +67,7 @@ def rel(from_dir, target):
     return "" if r == "." else r
 
 
-def rewrite_links(body, src_dir, out_dir, page_dirs, site_files, page_sources):
+def rewrite_links(body, src_dir, out_dir, page_dirs, site_files, page_sources, anchor_dirs):
     def fix(match):
         attr, quote, url = match.group(1), match.group(2), match.group(3)
         if re.match(r"^([a-z][a-z0-9+.-]*:|#|//)", url, re.I):
@@ -64,6 +80,8 @@ def rewrite_links(body, src_dir, out_dir, page_dirs, site_files, page_sources):
             target = page_sources[target]
         elif target.endswith("README.md"):
             target = posixpath.dirname(target)
+        # A split page's section lives on the sub-page that holds it
+        target = anchor_dirs.get(target, {}).get(frag[1:], target)
         if target in page_dirs:
             new = rel(out_dir, target) + ("/" if target and rel(out_dir, target) else "")
             new = new or "./"
@@ -195,6 +213,70 @@ def flamingo_html():
             f'<path class="fl-water" d="M0 {height + 1} q1.5 -1 3 0 t3 0 t3 0 t3 0" fill="none" stroke-width="0.4"/></svg></div>')
 
 
+def split_page(body, out_dir, parts):
+    """A rendered README cut at its h2s into the sub-pages SPLITS lists: [(dir, title, body)], and {id: dir}."""
+    head, *sections = re.split(r"(?=<h2[ >])", body)
+    by_id = {re.match(r'<h2 id="([^"]+)"', s).group(1): s for s in sections}
+    listed = [i for _, _, ids in parts for i in ids]
+    if set(by_id) != set(listed) or len(listed) != len(set(listed)):
+        raise SystemExit(f"SPLITS[{out_dir!r}] must list each h2 once. Not listed: {sorted(set(by_id) - set(listed))}; "
+                         f"no such h2: {sorted(set(listed) - set(by_id))}")
+    pages, anchors = [], {}
+    for sub, title, ids in parts:
+        d = posixpath.join(out_dir, sub) if sub else out_dir
+        part = (head if not sub else f"<h1>{html.escape(title)}</h1>\n") + "".join(by_id[i] for i in ids)
+        for a in re.findall(r'\bid="([^"]+)"', part):
+            anchors.setdefault(a, d)
+        pages.append((d, title, part))
+    return pages, anchors
+
+
+def plain(fragment):
+    """Text of an HTML fragment, without heading permalinks or Mermaid sources."""
+    fragment = re.sub(r'<a class="anchor"[^>]*>.*?</a>|<pre class="mermaid">.*?</pre>|<style>.*?</style>|<figure.*?</figure>', " ",
+                      fragment, flags=re.S)
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", fragment))).strip()
+
+
+def first_paragraph(body, default):
+    m = re.search(r"<p>(.+?)</p>", body, re.S)
+    return plain(m.group(1))[:200] if m else default
+
+
+def subnav_html(label, out_dir, subpages):
+    links = "".join(f'<a href="{(rel(out_dir, d) or ".") + "/"}"' + (' aria-current="page"' if d == out_dir else "")
+                    + f">{html.escape(t)}</a>" for d, t in subpages)
+    return f'<nav class="subnav" aria-label="{html.escape(label)} pages">{links}</nav>\n'
+
+
+def toc_html(body):
+    """'On this page' links to a sub-page's h2s, when it has more than one."""
+    heads = re.findall(r'<h2 id="([^"]+)">(.*?)</h2>', body, re.S)
+    if len(heads) < 2:
+        return ""
+    links = "".join(f'<a href="#{i}">{html.escape(plain(h))}</a>' for i, h in heads)
+    return f'\n<nav class="toc" aria-label="On this page"><span>On this page</span>{links}</nav>'
+
+
+def pager_html(out_dir, subpages):
+    i = [d for d, _ in subpages].index(out_dir)
+    link = lambda j, rel_, arrow: (
+        f'<a rel="{rel_}" href="{(rel(out_dir, subpages[j][0]) or ".") + "/"}">'
+        + (f"← {html.escape(subpages[j][1])}" if arrow == "prev" else f"{html.escape(subpages[j][1])} →") + "</a>")
+    parts = ([link(i - 1, "prev", "prev")] if i > 0 else [""]) + ([link(i + 1, "next", "next")] if i + 1 < len(subpages) else [])
+    return '\n<nav class="pager" aria-label="More pages">' + "".join(parts) + "</nav>"
+
+
+def search_entries(body, out_dir, page_title):
+    """One entry per heading with an id, for the header's search: page, heading, address and the section's text."""
+    entries = []
+    for m in re.finditer(r'<h([123]) id="([^"]+)">(.*?)</h\1>(.*?)(?=<h[123][ >]|$)', body, re.S):
+        level, anchor, heading, section = m.groups()
+        url = page_url(out_dir) + ("" if level == "1" else "#" + anchor)
+        entries.append({"p": page_title, "h": plain(heading), "u": url, "x": plain(section)[:600]})
+    return entries
+
+
 def first_text(pattern, text, default):
     m = re.search(pattern, text, re.M)
     return re.sub(r"[*_`\[\]]|\(.*?\)", "", m.group(1)).strip() if m else default
@@ -231,7 +313,6 @@ def main():
     for base, _, files in os.walk(out):
         for f in files:
             site_files.add(posixpath.relpath(os.path.join(base, f), out).replace(os.sep, "/"))
-    page_dirs = {d for _, d, _ in PAGES}
     page_sources = {s: d for s, d, _ in PAGES}
 
     template = open(os.path.join(ROOT, "site", "template.html"), encoding="utf-8").read()
@@ -243,11 +324,13 @@ def main():
     sha = git("rev-parse", "HEAD") or "main"
     built = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
+    # Render every README first, so a link to a split page's section can find the sub-page that holds it.
+    units = []  # (source, page dir, output dir, title, description, body, sub-pages of a split page)
+    anchor_dirs = {}
     for src, out_dir, label in PAGES:
         text = open(os.path.join(ROOT, src), encoding="utf-8").read()
         text = (text.replace("%%MERMAID_INIT%%", mermaid_init)
                 .replace("%%MERMAID_CLASSES%%", mermaid_classes.rstrip("\n")))
-        src_dir = posixpath.dirname(src)
         body = render(text)
         body = re.sub(r'<div data-swatches="(\w+)"></div>',
                       lambda m: swatches_html(m.group(1), tokens["themes"][m.group(1)]), body)
@@ -266,17 +349,46 @@ def main():
                      "connector group.</small></p>")
             # After the first heading
             body = re.sub(r"(</h1>)", r"\1" + block.replace("\\", "\\\\"), body, count=1)
-        body = rewrite_links(body, src_dir, out_dir, page_dirs, site_files, page_sources)
+        title = first_text(r"^#\s+(.+)$", text, label or out_dir)
+        description = first_text(r"^(?![#<|`!\s-])(.{20,}?)$", text, label or out_dir)[:200]
+        if out_dir in SPLITS:
+            parts, anchors = split_page(body, out_dir, SPLITS[out_dir])
+            anchor_dirs[out_dir] = anchors
+            subpages = [(d, t) for d, t, _ in parts]
+            for i, (d, sub_title, sub_body) in enumerate(parts):
+                units.append((src, out_dir, d, title if i == 0 else f"{sub_title} · {label}",
+                              description if i == 0 else first_paragraph(sub_body, description), sub_body, subpages))
+        else:
+            units.append((src, out_dir, out_dir, title, description, body, None))
+    page_dirs = {d for _, _, d, *_ in units}
+
+    search = []
+    for src, page_dir, out_dir, title, description, body, subpages in units:
+        src_dir = posixpath.dirname(src)
+        label = next(l for _, d, l in PAGES if d == page_dir)
+        if subpages:
+            here = dict(subpages)[out_dir]
+            # A same-page link to a section that now lives on another sub-page goes through the README, like any other
+            body = re.sub(r'href="#([^"]+)"', lambda m: (
+                m.group(0) if anchor_dirs[page_dir].get(m.group(1), out_dir) == out_dir
+                else f'href="{posixpath.basename(src)}#{m.group(1)}"'), body)
+            if out_dir != page_dir:
+                body = re.sub(r"(</h1>)", lambda m: m.group(1) + toc_html(body), body, count=1)
+        body = rewrite_links(body, src_dir, out_dir, page_dirs, site_files, page_sources, anchor_dirs)
+        if subpages:
+            body = subnav_html(label, out_dir, subpages) + body + pager_html(out_dir, subpages)
+        search += search_entries(body, out_dir, (label or title) + (f" › {here}" if subpages and out_dir != page_dir else ""))
 
         nav = "\n".join(
             f'    <a href="{rel(out_dir, d) + "/" if rel(out_dir, d) else "./"}"'
-            + (' aria-current="page"' if d == out_dir else "") + f">{html.escape(l)}</a>"
+            + (' aria-current="page"' if d == out_dir or (d and out_dir.startswith(d + "/")) else "")
+            + f">{html.escape(l)}</a>"
             for _, d, l in PAGES if l)
         root_prefix = rel(out_dir, "")
         root_prefix = root_prefix + "/" if root_prefix else ""
         page = (template
-                .replace("{{title}}", html.escape(first_text(r"^#\s+(.+)$", text, label or out_dir)))
-                .replace("{{description}}", html.escape(first_text(r"^(?![#<|`!\s-])(.{20,}?)$", text, label or out_dir)[:200]))
+                .replace("{{title}}", html.escape(title))
+                .replace("{{description}}", html.escape(description))
                 .replace("{{nav}}", nav)
                 .replace("{{root}}", root_prefix)
                 .replace("{{night_init}}", json.dumps(night_init))
@@ -291,6 +403,8 @@ def main():
         open(dest, "w", encoding="utf-8").write(page)
         print(f"built {posixpath.join(out_dir, 'index.html')} from {src}")
 
+    with open(os.path.join(out, "search.json"), "w", encoding="utf-8") as fh:
+        json.dump(search, fh, ensure_ascii=False, separators=(",", ":"))
     open(os.path.join(out, ".nojekyll"), "w").close()
 
 

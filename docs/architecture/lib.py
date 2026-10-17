@@ -37,6 +37,8 @@ THEMES = {
         "eyebrow": "'Josefin Sans', system-ui, sans-serif",
         "title_weight": 400,
         "callout": "'Josefin Sans', system-ui, sans-serif",
+        # On the docs site, follow the Day or Night the reader picked there (same origin, so the same storage)
+        "head_script": "try { var t = localStorage.getItem('valence-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {}",
         "light": dict(paper="#FBF6EE", paper2="#f1eadd", ink="#0B0B0B", ink_rgb="11 11 11", muted="#52514E", muted_rgb="82 81 78",
                       soft="#52514E", rule_solid="#9A7B3F", accent="#C2185B", accent_rgb="194 24 91", link="#0F766E", node="#ffffff"),
         "dark": dict(paper="#161A2E", paper2="#1F2440", ink="#FFFFFF", ink_rgb="255 255 255", muted="#C9CBE0", muted_rgb="201 203 224",
@@ -131,7 +133,7 @@ def page(theme_key: str, *, slug: str, eyebrow: str, title: str, desc: str, view
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{escape(title)}</title>
   <link href="{theme['fonts']}" rel="stylesheet">
-  <style>{_css(theme, w)}</style>
+  <style>{_css(theme, w)}</style>{f"{chr(10)}  <script>{theme['head_script']}</script>" if theme.get('head_script') else ""}
 </head>
 <body>
   <div class="frame">

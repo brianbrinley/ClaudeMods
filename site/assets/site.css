@@ -121,3 +121,61 @@ pre:has(> code.language-text), pre:has(> code.language-prompt) { white-space: pr
   .site-header { position: static; }
   html { scroll-padding-top: 0; }
 }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Search, in the header: headings and their sections across the site (search.json) */
+.search { position: relative; margin-left: 4px; }
+.search input {
+  width: 160px; min-height: 44px; padding: 8px 14px; border-radius: 999px; font: inherit; font-size: 15px;
+  background: var(--valence-surface); color: var(--valence-text); border: 1px solid var(--valence-line);
+}
+.search input:focus { width: 240px; outline: 2px solid var(--valence-secondary); outline-offset: 1px; }
+.search-results {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; width: min(440px, calc(100vw - 32px)); max-height: 70vh; overflow-y: auto;
+  margin: 0; padding: 6px; list-style: none; background: var(--valence-bg); border: 1px solid var(--valence-line); border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .18);
+}
+.site-header .search-results a {
+  display: block; padding: 10px 12px; border-radius: 10px; text-decoration: none; color: var(--valence-text);
+  font-family: inherit; font-weight: 400; font-size: 15px; letter-spacing: normal; text-transform: none; line-height: 1.45;
+}
+.site-header .search-results a:hover, .site-header .search-results a:focus { background: var(--valence-surface); outline: 2px solid var(--valence-secondary); outline-offset: -2px; }
+.search-results strong { display: block; font-family: var(--valence-font-heading); font-weight: 600; font-size: 16px; }
+.search-results .where { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--valence-secondary); }
+.search-results .snippet { display: block; font-size: 14px; color: var(--valence-text-muted); }
+.search-results mark { background: var(--valence-highlight); color: #0B0B0B; border-radius: 3px; }
+.search-results .empty { padding: 10px 12px; color: var(--valence-text-muted); }
+
+/* A long README split into pages: its pages, what's on this one, and the next and previous */
+.subnav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 24px; padding-bottom: 12px; border-bottom: 1px solid var(--valence-line); }
+.subnav a {
+  font-family: var(--valence-font-heading); font-weight: 600; font-size: 14px; letter-spacing: .04em; text-decoration: none;
+  color: var(--valence-text); padding: 8px 14px; min-height: 40px; display: inline-flex; align-items: center;
+  border: 1px solid color-mix(in srgb, var(--valence-line) 60%, transparent); border-radius: 999px;
+}
+.subnav a:hover { color: var(--valence-secondary); border-color: var(--valence-secondary); }
+.subnav a[aria-current="page"] { background: var(--valence-primary); border-color: var(--valence-primary); color: var(--valence-bg); }
+.toc { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 0 0 8px; font-size: 15px; }
+.toc span { font-family: var(--valence-font-heading); font-size: 12px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: var(--valence-text-muted); }
+.pager { display: flex; justify-content: space-between; gap: 16px; margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--valence-line); clear: both; }
+.pager a { font-family: var(--valence-font-heading); font-weight: 600; text-decoration: none; color: var(--valence-secondary); padding: 10px 0; }
+.pager a:hover { color: var(--valence-secondary-hover); }
+
+/* Architecture page: each diagram's own page, scaled down to the column (site.js), opening full size */
+.diagram { margin: 16px 0; }
+.diagram-frame { position: relative; overflow: hidden; aspect-ratio: 1344 / 860; border: 1px solid color-mix(in srgb, var(--valence-line) 50%, transparent); border-radius: 16px; background: var(--valence-surface); }
+.diagram-frame iframe { position: absolute; top: 0; left: 0; width: 1344px; height: 860px; border: 0; transform-origin: 0 0; pointer-events: none; }
+.diagram-frame.fitted { aspect-ratio: auto; }
+.diagram-open { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: flex-end; padding: 12px; text-decoration: none; }
+.diagram-open > span:first-child {
+  font-family: var(--valence-font-heading); font-weight: 600; font-size: 13px; letter-spacing: .06em; padding: 8px 14px; border-radius: 999px;
+  background: var(--valence-bg); color: var(--valence-secondary); border: 1px solid var(--valence-line);
+}
+.diagram-open:hover > span:first-child, .diagram-open:focus > span:first-child { color: var(--valence-secondary-hover); border-color: var(--valence-secondary); }
+.diagram-open:focus-visible { outline: 3px solid var(--valence-secondary); outline-offset: -3px; border-radius: 16px; }
+
+@media (max-width: 860px) {
+  .search input, .search input:focus { width: 100%; }
+  .search { flex-basis: 100%; margin: 4px 0 0; }
+}

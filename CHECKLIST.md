@@ -368,3 +368,18 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** the pane opens in Whimsical dark (or, for `bandIcon flamingo` with no theme picked, in Whimsical in your system's mode), not in Exosphere. **Fail:** it opens in Exosphere, or `/config` shows an error for the saved value.
 - [ ] **Q8. The web report.** Run `/bc-dashboard report html` with the system set to Light, then Dark.
   **Pass:** the page opens in the matching Exosphere mode, the Boomi logo sits before `Boomi Companion` in the top bar and in the footer, and the sun/moon button switches it. With `--style expressive`, the footer shows the small flamingo, not the logo. **Fail:** the logo is missing, stretched or the wrong colors.
+
+## R. Docs site: Architecture page and the split dashboard pages
+
+*After the merge to `main` publishes https://brianbrinley.github.io/ClaudeMods/. In a desktop browser, then on a phone.*
+
+- [ ] **R1. Architecture page.** Open **Architecture** in the top nav.
+  **Pass:** five diagrams, each fitting the column with no side scrolling, and **Open full size** opens that diagram on its own page. **Fail:** an empty or cut-off box, or the link goes nowhere.
+- [ ] **R2. Diagrams follow the theme.** Press the moon button on the Architecture page, then open one diagram full size.
+  **Pass:** the diagrams turn Night with the page, and the full-size diagram opens in Night too. **Fail:** a Day diagram on a Night page, or the other way round.
+- [ ] **R3. Dashboard pages.** Open **Companion Dashboard**, then each pill: Overview, Using it, Spend and budgets, Prompt tips, Reference, How it works.
+  **Pass:** each is a short page with its own sections, and ← / → at the bottom go to the neighbouring pages. **Fail:** a page is empty or repeats another.
+- [ ] **R4. Links across pages.** On **Reference**, follow the **Budget enforcement** link in the settings table.
+  **Pass:** it lands on **Spend and budgets** at that section. **Fail:** it stays on Reference or lands at the top of a page.
+- [ ] **R5. Search.** Type `budget enforce` in the header's search box, press ↓ then Enter.
+  **Pass:** results list headings with the page they're on, and Enter opens **Budget enforcement**. **Fail:** no results, or the wrong page.
