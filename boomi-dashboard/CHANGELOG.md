@@ -2,6 +2,13 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.56.0
+
+- **A better prompt upgrade, written by a model.** When a prompt gets tips, the checks' upgrade shows at once and, a moment later, the prompt model (`promptModel`, haiku by default) writes a better one in the background as the next try. It polishes your request, fills in what's vague from the session, and turns what Claude would have stopped to ask into `[decide: which environment - Dev?]` placeholders, with a suggested default only where the session or Companion's guidance supports one. It still never invents names or adds work you didn't ask for.
+- **Why it changed.** The Prompt tab and `/bc-dashboard prompt` list up to three notes under the upgrade (`Named the environment: Claude can't deploy without one`), so each upgrade teaches what a good prompt holds.
+- **`promptRewrite` setting.** `auto` (the default) rewrites by itself, a few cents at most per prompt; `manual` rewrites only when you press **Upgrade with a model** or run `/bc-dashboard prompt upgrade`. It never fills the prompt box on its own, and a prompt whose only tip is a secret is never sent to a model.
+- **Ready for your own rules.** What Claude asks before each kind of work is one table (`TASK_QUESTIONS`), and the model's instructions take a list of extra guidance (`rewriteSystem`), so a team's own niche can be added later without touching the rest. Nothing reads such a list yet.
+
 ## 0.55.0
 
 - **One theme picker, at the bottom of the pane.** The six theme buttons that overflowed the header are gone. Under the `session` line is a single **🎨 Theme** button showing the current theme; it opens a list of all six, each with an emoji and a word (`🏢 Exosphere · 🌙 Dark`, `🦩 Whimsical · ☀️ Light`, `🌓 Auto`, `⌨️ Terminal`), with ◆ on the current one. The list closes on a pick. `/config` and `/bc-dashboard theme` are unchanged.

@@ -315,6 +315,13 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **O22. Past sessions fold.** Open the dashboard pane with past sessions scanned.
   **Pass:** **Past Companion sessions** shows its totals and `N sessions listed`, with **▸ Show**. **Show** lists them; **Hide** folds them; in a new session the section stays as you left it. **Fail:** the list shows unfolded at first, a button does nothing, or the choice is forgotten.
 
+- [ ] **O23. The rewrite arrives on its own.** *(0.56.0)* With `promptRewrite` at `auto` (the default), type `deploy it` in a Companion folder.
+  **Pass:** the Prompt tab opens with the checks' upgrade; within a few seconds it becomes **UPGRADED BY HAIKU**, `try 2 of 2`, with `[decide: …]` placeholders where Claude would have asked (at least the environment) and nothing you didn't ask for. **Fail:** it stays on the checks' upgrade, or the prompt box fills by itself, or the rewrite adds an upsert, write-back or other logic you didn't ask for. Send the text of any `couldn't rewrite it` line.
+- [ ] **O24. Why it changed.** Same prompt.
+  **Pass:** under the upgrade a **Why it changed** section lists one to three short lines, each saying what was added or asked and why Boomi work needs it; `/bc-dashboard prompt` shows the same under `Why it changed:`. **Fail:** no section, or lines that restate the prompt without saying why.
+- [ ] **O25. Manual turns it off.** Run `/bc-dashboard config promptRewrite manual`, then type `deploy it` again.
+  **Pass:** the tab shows the checks' upgrade only, `Upgrade with a model` still works when pressed, and no rewrite arrives by itself. **Fail:** a rewrite arrives anyway.
+
 ## P. Usage breakdown and your Claude budget
 
 *boomi-dashboard 0.47.0, on a Claude subscription login.*

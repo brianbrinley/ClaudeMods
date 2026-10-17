@@ -138,6 +138,7 @@ quadrantChart
   - Whether `manual` can add the tab without taking focus, and how the tab row looks beside the banner on a narrow pane.
   - Whether the `confirm` question and the refilled prompt box work on the web as in the terminal.
   - How often the checks flag real Companion prompts by mistake; that decides which checks are on by default.
+  - Later: let a team add its own niche to the rewrite. The seams are in place (0.56.0): what Claude asks before each kind of work is one table (`TASK_QUESTIONS`), and `rewriteSystem()` takes extra guidance lines. Still to decide: where a team keeps them (a file in the Companion folder, or a section in Companion's own docs that retrieval prefers), whether a team can add checks of its own beside the rewrite's guidance, and how a shared rule file is reviewed. Also later: a short "what Claude asks before X" section per task in Companion's docs, so the rewrite's questions grow with the skill.
   - Later: checks for the other Companion plugins (a BDI flow or a Data Hub model named as "it").
 
 ### Process test harness

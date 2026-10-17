@@ -206,17 +206,43 @@ export const upgradePrompt = (text: string, facts: PromptFacts, tips: readonly P
   return details.length > 0 ? `${said}\n\nDetails:\n${details.map(d => `- ${d}`).join('\n')}` : said
 }
 
-// --- A model's rewrite, on demand -------------------------------------------------
+// --- A model's rewrite ------------------------------------------------------------
 
-export const REWRITE_SYSTEM = [
-  "You rewrite a person's prompt to Claude Code for Boomi integration work done with Boomi Companion.",
-  'Keep exactly what they meant and asked for. Add only what the notes, facts, components and guidance below give.',
-  'Never invent component names, IDs, environments, systems, fields, data or numbers. Use a listed component only where the prompt clearly means it. Where something is unknown, leave a [placeholder] in square brackets.',
-  "When the person adds a note for this try, follow it. When an earlier try is given, write a different one that follows the note.",
-  'Never add features, steps, systems, logic or requirements the person did not ask for (no upserts, write-backs, subprocesses or error handling they did not mention). The components and guidance below only tell you which existing names fit and what to ask the person about: turn a gap into a question or a [placeholder], never into a decision.',
-  'Write one request in plain language and the first person, as the person would type it, about as long as it needs to be and no longer. Ask Claude to stop and show results between big steps.',
-  'Reply with the rewritten prompt only: no preamble, no quotes, no list of changes.',
-].join('\n')
+/** The line between a rewrite and its notes on what changed. */
+export const WHY_MARK = '---why---'
+
+/**
+ * What Claude would stop and ask before each kind of Boomi work: the questions
+ * a better prompt answers up front. Built in for now; `rewriteSystem` takes
+ * more, so a team's own niche (its naming rules, its environments, its
+ * approval steps) can join them without touching the rest.
+ */
+export const TASK_QUESTIONS: readonly string[] = [
+  'a new process: the source and target systems, what starts it, the data format, and what happens to a record that fails',
+  'a deploy: the environment, and whether to test after',
+  'a fix: the error or execution ID, and what correct looks like',
+  'a map: the source and target profiles, and any field rules',
+  'a test: the data to use, and what a pass is',
+  'anything in production: whether Claude may change or run it',
+]
+
+/** The model's instructions: polish the request, fill in what is vague, ask the rest as [decide: …] placeholders, and say why. `extraGuidance` is a team's own lines, added last. */
+export const rewriteSystem = (extraGuidance: readonly string[] = []): string =>
+  [
+    "You turn a person's prompt to Claude Code into a better prompt for Boomi integration work done with Boomi Companion. Their prompt is often short and leans on context only they have. The goal is a prompt they could send as it is, and a person who learns what a good one holds.",
+    'Do three things:',
+    '1. Polish the request: say what they asked for plainly and specifically, in the first person, as they would type it, in your own words where theirs is vague or rambling. Keep exactly what they meant and asked for.',
+    '2. Fill in what is vague from the facts, components and guidance below: the component "it" means, the environment, the last failure. Use a listed component or fact only where the prompt clearly means it.',
+    `3. Where Claude would have to stop and ask the person something before acting, put that question in the prompt as a [decide: question] placeholder, with a suggested default after a dash where the facts or guidance support one: [decide: which environment - Dev?]. The usual gaps are, for ${TASK_QUESTIONS.join('; for ')}.`,
+    'Never invent component names, IDs, environments, systems, fields, data or numbers. Where something is unknown, leave a [decide: …] placeholder.',
+    'Never add features, steps, systems, logic or requirements the person did not ask for (no upserts, write-backs, subprocesses or error handling they did not mention). The components and guidance below only tell you which existing names fit and what to ask the person about: turn a gap into a [decide: …] question, never into a decision made for them.',
+    'When the person adds a note for this try, follow it. When an earlier try is given, write a different one that follows the note.',
+    'Write one request, about as long as it needs to be and no longer. Ask Claude to stop and show results between big steps.',
+    ...(extraGuidance.length > 0 ? ["This person's own guidance, which also applies:", ...extraGuidance.map(line => `- ${line}`)] : []),
+    `Reply with the prompt, then a line holding only ${WHY_MARK}, then up to three short lines starting with "- " saying what you changed or asked and why it matters for Boomi work, as a tip for their next prompt, for example "- Named the environment: Claude can't deploy without one." No preamble, no quotes, no list of changes before the marker.`,
+  ].join('\n')
+
+export const REWRITE_SYSTEM = rewriteSystem()
 
 /** What else a rewrite reads: the folder's components and Companion's guidance (retrieve.ts), the person's note, the try before. */
 export type RewriteExtras = { context?: readonly string[]; note?: string; previous?: string }
@@ -293,6 +319,20 @@ export const rewriteFrom = (reply: string): string | undefined => {
   return text ? maskPrompt(text) : undefined
 }
 
+/** A rewrite and what it says it changed: the text, and up to three short notes, masked. Undefined when it gave no text. */
+export const rewriteParts = (reply: string): { text: string; why: string[] } | undefined => {
+  const at = reply.search(/^[ \t]*-{2,}\s*why\s*-{2,}[ \t]*$/im)
+  const text = rewriteFrom(at < 0 ? reply : reply.slice(0, at))
+  if (!text) return undefined
+  const tail = at < 0 ? '' : reply.slice(at).split('\n').slice(1)
+  const why = (Array.isArray(tail) ? tail : [])
+    .map(line => line.trim())
+    .filter(line => /^[-*•]\s+\S/.test(line))
+    .map(line => maskPrompt(line.replace(/^[-*•]\s+/, '')).slice(0, 200))
+    .slice(0, 3)
+  return { text, why }
+}
+
 // --- Counting and saying it -------------------------------------------------------
 
 export const NO_COUNTS: PromptCounts = { checked: 0, tipped: 0, followed: 0, byCode: {} }
@@ -361,6 +401,7 @@ export const tipsText = (tips: PromptTips | null, counts: PromptCounts, mode: st
     lines.push('', `Your last prompt: ${tips.masked}`, '')
     for (const t of tips.tips) lines.push(`  ${STATUS[t.level].icon} ${t.text}`)
     lines.push('', tips.rewrittenBy ? `Upgraded by ${tips.rewrittenBy}${tips.tokens ? ` (${tips.tokens} tokens)` : ''}:` : 'Upgraded:', `  ${tips.upgrade}`, '')
+    if (tips.why && tips.why.length > 0) lines.push('Why it changed:', ...tips.why.map(w => `  - ${w}`), '')
     lines.push('/bc-dashboard prompt use puts it in the prompt box. /bc-dashboard prompt upgrade has a model rewrite it.')
   }
   if (counts.checked > 0) {

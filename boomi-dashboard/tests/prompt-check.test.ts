@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { NO_COUNTS, REWRITE_SYSTEM, checkPrompt, countsAfter, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt, wrapLines } from '../hooks/prompt-check'
+import { NO_COUNTS, REWRITE_SYSTEM, checkPrompt, countsAfter, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteParts, rewriteRequest, rewriteSystem, TASK_QUESTIONS, WHY_MARK, statusPart, tipsText, upgradePrompt, wrapLines } from '../hooks/prompt-check'
 import type { PromptFacts } from '../hooks/prompt-check'
 import { contextLines, folderComponentOf, keywords, relevantComponents, relevantSections, sectionsOf } from '../hooks/retrieve'
 
@@ -172,4 +172,32 @@ test('a look around with nothing named to find gets a nudge; one that names what
   expect(checkPrompt('explore the environment', NONE).map(t => t.code)).toEqual(['aim'])
   expect(checkPrompt('check out the failed executions in my account', NONE)).toEqual([])
   expect(checkPrompt('look at the deployed processes in my account', NONE)).toEqual([])
+})
+
+test('the rewrite is told to polish, fill in, ask what Claude would ask as [decide: …], and say why', () => {
+  expect(REWRITE_SYSTEM).toContain('Polish the request')
+  expect(REWRITE_SYSTEM).toContain('[decide: question]')
+  expect(REWRITE_SYSTEM).toContain(WHY_MARK)
+  // What Claude would stop and ask comes from one table, so a team can add to it.
+  for (const q of TASK_QUESTIONS) expect(REWRITE_SYSTEM).toContain(q)
+  expect(REWRITE_SYSTEM).not.toContain("This person's own guidance")
+  const own = rewriteSystem(['Every process name starts with the team code.', 'Deploy to Dev first, always.'])
+  expect(own).toContain("This person's own guidance, which also applies:\n- Every process name starts with the team code.\n- Deploy to Dev first, always.")
+  expect(own.indexOf('own guidance')).toBeLessThan(own.indexOf(WHY_MARK))
+})
+
+test('a rewrite comes apart into the prompt and up to three notes on what changed, both masked', () => {
+  const reply = `Deploy Orders Sync to [decide: which environment - Dev?], then test it with [decide: test data].\n${WHY_MARK}\n- Named the process: Claude can't deploy "it".\n- Asked for the environment, token=abcd1234.\n* Asked for test data.\n- A fourth note is dropped.`
+  expect(rewriteParts(reply)).toEqual({
+    text: 'Deploy Orders Sync to [decide: which environment - Dev?], then test it with [decide: test data].',
+    why: ["Named the process: Claude can't deploy \"it\".", 'Asked for the environment, token=****', 'Asked for test data.'],
+  })
+  expect(rewriteParts('Deploy it.')).toEqual({ text: 'Deploy it.', why: [] })
+  expect(rewriteParts(`${WHY_MARK}\n- nothing before it`)).toBeUndefined()
+  expect(rewriteParts('```\nDeploy Orders Sync.\n---why---\n- Named it.\n```')).toEqual({ text: 'Deploy Orders Sync.', why: ['Named it.'] })
+})
+
+test('/bc-dashboard prompt says why an upgrade changed', () => {
+  const tips = { at: 1, masked: 'deploy it', tips: checkPrompt('deploy it', FACTS), upgrade: 'Deploy Orders Sync to [decide: environment].', rewrittenBy: 'haiku', why: ['Named the process.'] }
+  expect(tipsText(tips, NO_COUNTS, 'confirm')).toContain('Why it changed:\n  - Named the process.')
 })

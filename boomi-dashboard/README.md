@@ -16,7 +16,7 @@
 - **Pick up where you left off.** A new session opens with what the last one did and left to fix, and **Past Companion sessions** shows what earlier work cost.
 - **Every Companion plugin, not only integration.** Data Hub deploys, BDI flow runs, Agentstudio agents, custom connector releases and Marketplace recipes show up as steps too, with their failures under **Needs attention** and each product's share of the spend.
 - **Catch what happens outside the chat.** Companion's activity log adds script runs from a terminal, and watched components flag changes someone else makes in Boomi.
-- **Better prompts for Boomi work.** Each prompt you type is checked for what Boomi work needs and it leaves out (which component "it" is, the environment, test data, the error), with an upgraded prompt built from what the session already knows. It never blocks, except to ask before a password or token goes into the transcript.
+- **Better prompts for Boomi work.** Each prompt you type is checked for what Boomi work needs and it leaves out (which component "it" is, the environment, test data, the error), with an upgraded prompt: built at once from what the session already knows, then polished by a model in the background, with the questions Claude would have asked left as `[decide: …]` placeholders and a note on why each change matters. It never blocks, except to ask before a password or token goes into the transcript.
 - **Hand it off.** `/bc-dashboard report` writes the session up as Markdown for a pull request, a ticket or the next person. `report html` makes it a web page with charts that you can send to anyone.
 
 ## Install
@@ -276,7 +276,7 @@ Numbers go in without quotes. The period is `"day"`, `"week"` or `"month"`. Leav
 
 ## Prompt tips
 
-The dashboard checks each prompt you type in a Companion folder for what Boomi work needs and the prompt leaves out, and suggests a better one. The checks are plain rules, with no model call, so they cost nothing.
+The dashboard checks each prompt you type in a Companion folder for what Boomi work needs and the prompt leaves out, and suggests a better one. The checks are plain rules, with no model call, so they cost nothing. The upgrade starts the same way, from rules, and then a model (`promptModel`, haiku by default) rewrites it in the background, a few cents at most per prompt; `promptRewrite manual` turns that off.
 
 | Check | Fires on | The tip names |
 |---|---|---|
@@ -317,16 +317,16 @@ The upgrade adds only what the session knows, as sentences. What it doesn't know
 
 - **Use the upgrade** puts it in the prompt box. **Copy** copies it. **Dismiss** closes the tab.
 - A long prompt or upgrade is fitted to the pane so the buttons stay in view: `▼ 14 more lines` and **Show all**, then **Jump to the buttons** and **Fit to the pane**.
-- **Upgrade with a model**, then **Regenerate**, has `promptModel` rewrite it. Type a note under them (`shorter`, `ask for a listener`, `split into steps`) and press Enter to regenerate following it; a long note wraps in the field. Every try is kept: **◀** and **▶** step through them, each with the note it followed.
+- **The model's rewrite** arrives on its own a moment after the tips (`promptRewrite auto`, the default), as the next try, with a **Why it changed** note under it: up to three lines saying what it added or asked and why that matters for Boomi work. **Upgrade with a model**, then **Regenerate**, asks for another. With `promptRewrite manual` it runs only when you press the button or run `/bc-dashboard prompt upgrade`. Type a note under them (`shorter`, `ask for a listener`, `split into steps`) and press Enter to regenerate following it; a long note wraps in the field. Every try is kept: **◀** and **▶** step through them, each with the note it followed.
 
 **What a rewrite reads,** besides your masked prompt and the session's facts:
 - **This folder's components** whose names share words with the prompt (up to 8, from the component XML under `componentsDir`), so "the Salesforce connection" can name the one you have. It uses a name only where the prompt clearly means it.
 - **Companion's own guidance:** the sections of bc-integration's reference docs (such as `BOOMI_THINKING.md`) that best match the prompt's words, up to 3, so the rewrite asks for what Companion needs for a listener, a map or a connection.
 - **Your note** and **the try before**, so each regenerate is different.
 
-The rewrite never adds features, steps or logic you didn't ask for: the components and guidance only decide which existing names fit and what to ask you, and a gap becomes a question or a `[placeholder]`. It reads only the facts a tip needs, such as the last failure only for a fix.
+The rewrite polishes your wording, fills in what's vague from the session, and turns what Claude would have stopped to ask (the environment for a deploy, the source and target of a new process, what a passing test is) into a `[decide: which environment - Dev?]` placeholder, with a suggested default only where the session or Companion's guidance supports one. It never adds features, steps or logic you didn't ask for: the components and guidance only decide which existing names fit and what to ask you, and a gap becomes a question, never a decision made for you. It never fills the prompt box by itself, and a prompt whose only tip is a secret is never sent to a model. It reads only the facts a tip needs, such as the last failure only for a fix.
 
-The tab says how much of each it read. It's a plain word match, with no index or embeddings to set up. A rewrite reads a few thousand tokens, and only when you press the button.
+The tab says how much of each it read. It's a plain word match, with no index or embeddings to set up. A rewrite reads a few thousand tokens in a separate call, so it adds nothing to your session's context; only the prompt you send does.
 
 The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Prompt tips** button. `promptView` decides when the tab opens by itself: `auto` (default) when a prompt gets tips, `manual` only when you ask, `off` never.
 
@@ -498,7 +498,8 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask "what's left to fix
 | `historyDays` | `90` | How far back **Past Companion sessions** reads. |
 | `promptCheck` | `confirm` | [Prompt tips](#prompt-tips): `confirm` holds a flagged prompt until you send it or the upgrade; `suggest` shows tips and sends the prompt; `off` never checks. A secret in a prompt asks unless this is `off`. |
 | `promptView` | `auto` | When the [Prompt tab](#prompt-tips) opens: `auto` when a prompt gets tips, `manual` only when you ask, `off` never. |
-| `promptModel` | `haiku` | The model `/bc-dashboard prompt upgrade` asks, only when you run it. |
+| `promptRewrite` | `auto` | Whether the model rewrites a prompt that gets tips by itself, in the background (`auto`), or only when you ask (`manual`). |
+| `promptModel` | `haiku` | The model that rewrites a prompt, by itself or when you ask. |
 | `promptSkip` | (none) | Prompt checks to leave out, separated by commas. |
 
 ## Limits

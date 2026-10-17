@@ -2739,6 +2739,67 @@ test('the Prompt tab’s Upgrade with a model rewrites the upgrade in place', as
   expect(await tab.find({ text: /Deploy Orders Sync to \[environment\], then test it with \[test data\]\./ })).toBeDefined()
 })
 
+const REWRITTEN = 'Deploy Orders Sync to [decide: which environment - Dev?], then test it with [decide: test data].\n---why---\n- Named the process: Claude cannot deploy "it".\n- Asked for the environment: a deploy needs one.'
+const answers = (requests: { system?: string; prompt?: string }[]) => (on: Parameters<typeof promptWorld>[1]) =>
+  on('model.complete', async (_$, e) => {
+    requests.push({ system: e.system, prompt: e.prompt })
+    return { value: { isAnswered: true, text: REWRITTEN, usage: { input_tokens: 900, output_tokens: 80, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } as never
+  })
+
+test('auto: a prompt with tips is rewritten in the background, the checks’ upgrade first and the model’s after, with why', async ($, on) => {
+  const requests: { system?: string; prompt?: string }[] = []
+  answers(requests)(on)
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  // Before the timer runs, the checks' upgrade is all there is.
+  expect(requests).toHaveLength(0)
+  expect(await tab.find({ text: /UPGRADED$/ })).toBeDefined()
+  await clock.advance(1)
+  expect(requests).toHaveLength(1)
+  expect(requests[0]!.system).toContain('[decide: question]')
+  expect(requests[0]!.prompt).toContain('<prompt>')
+  const after = tab
+  expect(await after.find({ text: /UPGRADED BY HAIKU/ })).toBeDefined()
+  expect(await after.find({ text: /Deploy Orders Sync to \[decide: which environment - Dev\?\]/ })).toBeDefined()
+  expect(await after.find({ text: /WHY IT CHANGED/ })).toBeDefined()
+  expect(await after.find({ text: /Asked for the environment: a deploy needs one\./ })).toBeDefined()
+  // The checks' upgrade stays one try back.
+  expect(await after.find({ text: /try 2 of 2/ })).toBeDefined()
+})
+
+test('auto: it never fills the prompt box, and a model that fails leaves the checks’ upgrade', async ($, on) => {
+  on('model.complete', async () => ({ value: { isAnswered: false, reason: 'api-error', status: 500, error: 'server', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }) as never)
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  await clock.advance(1)
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  expect(await tab.find({ text: /UPGRADED$/ })).toBeDefined()
+  expect(await tab.find({ text: /try 1 of/ })).toBeUndefined()
+  expect(await tab.find({ text: /couldn't rewrite it \(api-error\)/ })).toBeDefined()
+})
+
+test('manual: promptRewrite manual never calls the model on its own', { options: { promptRewrite: 'manual' } }, async ($, on) => {
+  const requests: { system?: string; prompt?: string }[] = []
+  answers(requests)(on)
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  await clock.advance(1)
+  expect(requests).toHaveLength(0)
+  const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  await tab.press({ key: 'prompt-rewrite' })
+  expect(requests).toHaveLength(1)
+})
+
+test('auto: a prompt whose only tip is a secret is not sent to a model', async ($, on) => {
+  const requests: { system?: string; prompt?: string }[] = []
+  answers(requests)(on)
+  const { typed } = await promptWorld($, on)
+  await typed('deploy Orders Sync to dev with password=hunter22')
+  await clock.advance(1)
+  expect(requests).toHaveLength(0)
+})
+
 // --- After /clear ---
 
 test('after /clear the dashboard sets the new session up again: it sees the folder anew, checks prompts, and keeps what was saved', async ($, on) => {

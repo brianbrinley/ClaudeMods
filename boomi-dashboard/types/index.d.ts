@@ -219,10 +219,12 @@ export type PromptTips = {
   /** Every upgrade so far, the checks' first; `shown` is the one in `upgrade`. */
   tries?: PromptTry[]
   shown?: number
+  /** What the shown rewrite says it changed and why, up to three notes. */
+  why?: string[]
 }
 
 /** One upgrade of a prompt: by the checks, or by a model with the person's note. */
-export type PromptTry = { text: string; by: string; note?: string; tokens?: number }
+export type PromptTry = { text: string; by: string; note?: string; tokens?: number; why?: string[] }
 
 /** How many prompts were checked and had tips this session, and how many tips the next prompt followed, per check. */
 export type PromptCounts = {

@@ -136,7 +136,7 @@ import type { FolderComponent, Section } from './retrieve'
 import { companionUseLine, isFresh, parseUsage, topHabit, usageArgv } from './usage-breakdown'
 import { paceOf, recordDay } from './spend-history'
 import type { SpendDays } from './spend-history'
-import { NO_COUNTS, NUDGE_ONLY, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, maskPrompt, reportLines, rewriteFrom, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
+import { NO_COUNTS, NUDGE_ONLY, REWRITE_SYSTEM, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, maskPrompt, reportLines, rewriteParts, rewriteRequest, statusPart, tipsText, upgradePrompt } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import type { Credentials } from './platform'
 
@@ -364,6 +364,7 @@ type Settings = {
   reportStyle: ReportStyle
   promptCheck: 'off' | 'suggest' | 'confirm'
   promptModel: string
+  promptRewrite: 'auto' | 'manual'
   promptSkip: ReadonlySet<string>
   promptView: 'auto' | 'manual' | 'off'
   seatBudgetUsd: number
@@ -402,6 +403,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   reportStyle: options.reportStyle === 'expressive' ? 'expressive' : 'exosphere',
   promptCheck: options.promptCheck === 'off' || options.promptCheck === 'suggest' ? options.promptCheck : 'confirm',
   promptModel: String(options.promptModel || 'haiku').trim() || 'haiku',
+  promptRewrite: options.promptRewrite === 'manual' ? 'manual' : 'auto',
   seatBudgetUsd: Math.max(0, Number(options.seatBudgetUsd ?? 0) || 0),
   isReadingBreakdown: options.usageBreakdown !== false,
   promptView: options.promptView === 'manual' || options.promptView === 'off' ? options.promptView : 'auto',
@@ -2106,6 +2108,8 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
     return undefined
   }
   if (settings.promptView === 'auto') await showPromptTab($, tips.length)
+  // A timer, not a bare call: the model call outlives this hook, which would abort it. A secret alone has nothing to rewrite.
+  if (settings.promptRewrite === 'auto' && tips.some(t => t.code !== 'secret')) $.clock.after(0, () => autoRewrite($, settings, at).catch(() => undefined))
 
   // A secret asks in any mode: once sent, it's in the transcript. No answer sends it masked.
   if (hasSecret) {
@@ -2256,6 +2260,28 @@ const rewriteFromTab = async ($: Engine, settings: Settings, note?: string) => {
   }
 }
 
+/** The prompt whose automatic rewrite is running, so a newer prompt's takes its place. */
+let autoRewriting = 0
+
+/**
+ * With promptRewrite auto, the model's rewrite of a prompt that got tips, in
+ * the background: the checks' upgrade shows at once and this takes its place
+ * as the next try. It never fills the prompt box (the person may be editing
+ * there), and a failure leaves the checks' upgrade where it is.
+ */
+const autoRewrite = async ($: Engine, settings: Settings, at: number) => {
+  autoRewriting = at
+  await update($, promptBusy, () => true)
+  try {
+    const said = await rewritePrompt($, settings, undefined, false, at)
+    if (said && autoRewriting === at) await update($, promptNote, () => said.split('\n')[0] ?? '')
+  } catch (error) {
+    if (autoRewriting === at) await update($, promptNote, () => `The rewrite didn't work: ${messageOf(error)}. The upgrade from the checks is still there.`)
+  } finally {
+    if (autoRewriting === at) await update($, promptBusy, () => false)
+  }
+}
+
 /** Shows another try in the Prompt tab: the one before or after. */
 const showTry = async ($: Engine, step: number) =>
   update($, promptTips, t => {
@@ -2263,7 +2289,7 @@ const showTry = async ($: Engine, step: number) =>
     if (!t || tries.length < 2) return t
     const shown = Math.min(tries.length - 1, Math.max(0, (t.shown ?? tries.length - 1) + step))
     const pick = tries[shown]!
-    return { ...t, shown, upgrade: pick.text, rewrittenBy: pick.by === 'the checks' ? undefined : pick.by, tokens: pick.tokens }
+    return { ...t, shown, upgrade: pick.text, rewrittenBy: pick.by === 'the checks' ? undefined : pick.by, tokens: pick.tokens, why: pick.why }
   })
 
 /**
@@ -2272,7 +2298,7 @@ const showTry = async ($: Engine, step: number) =>
  * sections of Companion's reference docs that match the prompt, the person's
  * note, and the try before; never Companion's .env. Each try is kept.
  */
-const rewritePrompt = async ($: Engine, settings: Settings, note?: string, isFilling = true): Promise<string> => {
+const rewritePrompt = async ($: Engine, settings: Settings, note?: string, isFilling = true, onlyFor?: number): Promise<string> => {
   const tips = await read($, promptTips)
   if (!tips) return 'Nothing to upgrade yet: no Boomi prompt this session has had tips.'
   const facts = await promptFacts($, settings)
@@ -2285,17 +2311,20 @@ const rewritePrompt = async ($: Engine, settings: Settings, note?: string, isFil
     model: settings.promptModel,
     system: REWRITE_SYSTEM,
     prompt: rewriteRequest(tips.masked, facts, tips.tips, tries[0]!.text, { context: contextLines(components, sections), note: note?.trim() || undefined, previous }),
-    maxTokens: 800,
+    maxTokens: 1000,
     effort: 'low',
   })
   if (!reply.isAnswered) {
     return `${settings.promptModel} couldn't rewrite it (${reply.reason}). Your prompt is safe, and the upgrade from the checks is still there: /bc-dashboard prompt use.`
   }
-  const text = rewriteFrom(reply.text)
-  if (!text) return `${settings.promptModel} gave back nothing. The upgrade from the checks is still there: /bc-dashboard prompt use.`
+  const parts = rewriteParts(reply.text)
+  if (!parts) return `${settings.promptModel} gave back nothing. The upgrade from the checks is still there: /bc-dashboard prompt use.`
+  const { text, why } = parts
   const tokens = reply.usage.input_tokens + reply.usage.output_tokens
-  const added: PromptTry = { text, by: settings.promptModel, tokens, ...(note?.trim() ? { note: note.trim() } : {}) }
-  await update($, promptTips, t => (t ? { ...t, upgrade: text, rewrittenBy: settings.promptModel, tokens, tries: [...(t.tries ?? tries), added], shown: (t.tries ?? tries).length } : t))
+  const added: PromptTry = { text, by: settings.promptModel, tokens, ...(why.length > 0 ? { why } : {}), ...(note?.trim() ? { note: note.trim() } : {}) }
+  // A newer prompt took this one's place while the model worked: its tips are not this rewrite's to change.
+  if (onlyFor !== undefined && (await read($, promptTips))?.at !== onlyFor) return ''
+  await update($, promptTips, t => (t ? { ...t, upgrade: text, rewrittenBy: settings.promptModel, tokens, why, tries: [...(t.tries ?? tries), added], shown: (t.tries ?? tries).length } : t))
   const read_ = [components.length > 0 ? `${components.length} of this folder's components` : '', sections.length > 0 ? `${sections.length} part${sections.length === 1 ? '' : 's'} of Companion's guidance` : '']
     .filter(Boolean)
     .join(' and ')
@@ -3191,7 +3220,7 @@ export const register: Register = (on, options) => {
     const tipRows = (tips?.tips ?? []).reduce((n, tip) => n + wrapLines(`  ${tip.text}`, width).length, 0)
     // The note's field wraps as it's typed, beside its Regenerate hint.
     const noteRows = Math.max(1, wrapLines(draft, width - 14).length) - 1
-    const fixedRows = 3 + wrapLines(intro, width).length + 2 + tipRows + 4 + 1 + (said ? wrapLines(said, width).length : 0) + 2 + 2 + noteRows + 1 + (tries[shown]?.note ? 1 : 0)
+    const fixedRows = 3 + wrapLines(intro, width).length + 2 + tipRows + 4 + 1 + (said ? wrapLines(said, width).length : 0) + 2 + 2 + noteRows + 1 + (tries[shown]?.note ? 1 : 0) + ((tips?.why?.length ?? 0) > 0 ? 2 + (tips?.why ?? []).reduce((n, line) => n + wrapLines(`  ${line}`, width).length, 0) : 0)
     const textRows = Math.max(4, room - fixedRows - 1)
     // Side by side the cards share the rows; one above the other, your prompt takes up to a third.
     const promptRows = isWide ? textRows : Math.max(2, Math.min(Math.floor(textRows / 3), wrapLines(tips?.masked ?? '', cardColumns).length))
@@ -3286,6 +3315,8 @@ export const register: Register = (on, options) => {
               )}
             </Box>
             {said ? t(said, { color: p.muted }) : undefined}
+            {(tips.why?.length ?? 0) > 0 && heading('Why it changed')}
+            {(tips.why ?? []).map(line => t(`  ${line}`))}
             <Box flexWrap="wrap" columnGap={1} marginTop={1}>
               <Button key="prompt-rewrite" label={busy ? '◐ Rewriting…' : tries.length > 1 ? 'Regenerate' : 'Upgrade with a model'} onPress={() => void rewriteFromTab($, settings)} />
               {tries.length > 1 ? (
