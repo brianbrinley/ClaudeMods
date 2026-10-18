@@ -121,3 +121,15 @@ pre:has(> code.language-text), pre:has(> code.language-prompt) { white-space: pr
   .site-header { position: static; }
   html { scroll-padding-top: 0; }
 }
+
+/* Architecture page: diagrams run wider than the reading column, and hold their designed size (they scroll sideways on a narrow screen). */
+.jump { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 20px 0 8px; font-family: var(--valence-font-heading); font-weight: 600; font-size: 15px; letter-spacing: .06em; }
+.jump a { text-underline-offset: 5px; text-decoration-thickness: 1px; }
+.jump a:focus-visible, .arch-downloads a:focus-visible, .diagram-scroll:focus-visible { outline: 2px solid var(--valence-secondary); outline-offset: 3px; border-radius: 6px; }
+.diagram { margin: 24px 0 16px; width: min(1320px, calc(100vw - 32px)); position: relative; left: 50%; transform: translateX(-50%); }
+.diagram-scroll { overflow-x: auto; background: var(--valence-bg); border: 1px solid color-mix(in srgb, var(--valence-line) 50%, transparent); border-radius: 16px; padding: 16px; scrollbar-width: thin; scrollbar-color: var(--valence-line) transparent; }
+.diagram svg { display: block; width: 100%; min-width: 1280px; height: auto; }
+.diagram-notes { max-width: 60ch; }
+.arch-downloads { margin: 8px 0 0; }
+.diagram-hint { margin: 0 0 8px; font-size: 14px; color: var(--valence-text-muted); }
+@media (min-width: 1352px) { .diagram-hint { display: none; } }

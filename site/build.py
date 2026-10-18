@@ -26,10 +26,13 @@ PAGES = [
     ("README.md", "", "Home"),
     ("boomi-runtime/README.md", "boomi-runtime", "Boomi Runtime"),
     ("boomi-dashboard/README.md", "boomi-dashboard", "Companion Dashboard"),
+    ("site/architecture.md", "architecture", "Architecture"),
     ("site/style.md", "style", None),
 ]
 # Copied verbatim to the same path on the site (only what the pages use)
 COPY_PATHS = ["brand/valence.css", "brand/assets", "boomi-runtime/assets", "boomi-dashboard/assets"]
+# The Architecture page's standalone Exosphere files, which it links to under each diagram
+COPY_PATHS += [f"docs/architecture/{name}.html" for name in ("d1-overview", "d2-prompt-lifecycle", "d3-companion-awareness", "d4-budget-gate", "d5-mods")]
 # Built files offered as downloads on a page: {page dir: [(source directory, filename regex)]}
 DOWNLOADS = {}
 
@@ -249,6 +252,9 @@ def main():
                 .replace("%%MERMAID_CLASSES%%", mermaid_classes.rstrip("\n")))
         src_dir = posixpath.dirname(src)
         body = render(text)
+        # A diagram and its notes, from the fragments docs/architecture/build.py generates
+        body = re.sub(r"<!-- diagram:([\w-]+) -->",
+                      lambda m: open(os.path.join(ROOT, "docs", "architecture", "embed", m.group(1) + ".html"), encoding="utf-8").read(), body)
         body = re.sub(r'<div data-swatches="(\w+)"></div>',
                       lambda m: swatches_html(m.group(1), tokens["themes"][m.group(1)]), body)
         body = body.replace("<div data-status></div>", status_html(tokens["status"]))

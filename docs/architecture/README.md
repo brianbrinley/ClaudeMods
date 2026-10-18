@@ -26,6 +26,10 @@ Two choices differ from the skill's defaults, on purpose: the fonts are the them
 
 That completes the planned set; the docs site's Architecture page is next (see `tasks/todo.md`).
 
+## On the docs site
+
+The docs site's [Architecture page](https://brianbrinley.github.io/ClaudeMods/architecture/) (`site/architecture.md`) shows the five diagrams inline, in the Valence look and bound to the site's own variables so its Day/Night toggle restyles them, with the notes as prose and a link to each standalone Exosphere file. `build.py` writes what the site needs: a fragment per diagram in `embed/` and `site/assets/diagrams.css`, which is derived from the same rules as the standalone pages and shouldn't be edited by hand. The site build (`site/build.py`) includes the fragments and copies the Exosphere files.
+
 ## Building them
 
 The HTML files are generated, so the two themes can't drift apart:

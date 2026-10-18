@@ -1,0 +1,57 @@
+<figure class="diagram">
+<p class="diagram-hint">Scroll sideways to see the whole diagram.</p>
+<div class="diagram-scroll" role="region" tabindex="0" aria-label="What happens to a prompt you type (a diagram; it scrolls sideways on a narrow screen)">
+<svg viewBox="0 48 1280 732" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="d2-prompt-lifecycle-title d2-prompt-lifecycle-desc">
+<title id="d2-prompt-lifecycle-title">What happens to a prompt you type</title>
+<desc id="d2-prompt-lifecycle-desc">Sequence of a prompt in a Companion session: a suggestion taken with Tab passes straight through; any other Boomi prompt is checked by rules, shown with tips and a quick upgrade in the Prompt tab and held, while a model writes a better upgrade in the background and swaps it in, and the upgrade you send goes in unchecked.</desc>
+<defs>
+<marker id="d2-prompt-lifecycle-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-muted" points="0 0, 8 3, 0 6"/></marker>
+<marker id="d2-prompt-lifecycle-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-accent" points="0 0, 8 3, 0 6"/></marker>
+<marker id="d2-prompt-lifecycle-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="m-link" points="0 0, 8 3, 0 6"/></marker>
+</defs>
+<rect class="paper" x="0" y="48" width="1280" height="732"/>
+<rect class="seq-frame" x="332" y="252" width="828" height="344" rx="4"/><rect class="frame-tab" x="332" y="252" width="40" height="16" rx="2"/><text class="t-op" x="352" y="264">ALT</text>
+        <text class="t-guard" x="412" y="280">[taken with Tab, sent as it was]</text>
+        <line class="divider" x1="340" y1="340" x2="1152" y2="340"/>
+        <text class="t-guard" x="412" y="356">[any other Boomi prompt]</text>
+        <line class="lifeline" x1="160" y1="152" x2="160" y2="704"/>
+        <line class="lifeline" x1="400" y1="152" x2="400" y2="704"/>
+        <line class="lifeline" x1="640" y1="152" x2="640" y2="704"/>
+        <line class="lifeline" x1="880" y1="152" x2="880" y2="704"/>
+        <line class="lifeline" x1="1120" y1="152" x2="1120" y2="704"/>
+        <rect class="bar" x="396" y="192" width="8" height="280"/>
+        <rect class="bar" x="636" y="228" width="8" height="244"/>
+        <rect class="bar" x="636" y="492" width="8" height="88"/>
+        <rect class="bar" x="1116" y="500" width="8" height="40"/>
+        <line class="a" x1="160" y1="192" x2="396" y2="192" marker-end="url(#d2-prompt-lifecycle-arrow)"/>
+        <rect class="paper" x="256" y="172" width="44" height="12" rx="2"/><text class="t-arrow" x="278" y="181">SUBMIT</text>
+        <line class="a" x1="404" y1="228" x2="636" y2="228" marker-end="url(#d2-prompt-lifecycle-arrow)"/>
+        <rect class="paper" x="480" y="208" width="80" height="12" rx="2"/><text class="t-arrow" x="520" y="217">PROMPT.SUBMIT</text>
+        <line class="a dash" x1="636" y1="316" x2="404" y2="316" marker-end="url(#d2-prompt-lifecycle-arrow)"/>
+        <rect class="paper" x="482" y="296" width="76" height="12" rx="2"/><text class="t-arrow" x="520" y="305">PASS THROUGH</text>
+        <path class="a" d="M644,380 H668 Q676,380 676,388 V396 Q676,404 668,404 H644" marker-end="url(#d2-prompt-lifecycle-arrow)"/><rect class="paper" x="688" y="386" width="68" height="12" rx="2"/><text class="t-arrow" x="722" y="395">RULE CHECKS</text>
+        <line class="a" x1="644" y1="428" x2="880" y2="428" marker-end="url(#d2-prompt-lifecycle-arrow)"/>
+        <rect class="paper" x="716" y="408" width="88" height="12" rx="2"/><text class="t-arrow" x="760" y="417">TIPS + UPGRADE</text>
+        <line class="a dash" x1="636" y1="464" x2="404" y2="464" marker-end="url(#d2-prompt-lifecycle-arrow)"/>
+        <rect class="paper" x="486" y="444" width="68" height="12" rx="2"/><text class="t-arrow" x="520" y="453">DROP · HELD</text>
+        <text class="t-guard" x="652" y="486">a timer starts it, with Companion&#x27;s guidance</text>
+        <line class="a" x1="644" y1="500" x2="1116" y2="500" marker-end="url(#d2-prompt-lifecycle-arrow)"/>
+        <rect class="paper" x="976" y="480" width="48" height="12" rx="2"/><text class="t-arrow" x="1000" y="489">REWRITE</text>
+        <line class="a dash" x1="1116" y1="536" x2="644" y2="536" marker-end="url(#d2-prompt-lifecycle-arrow)"/>
+        <rect class="paper" x="960" y="516" width="80" height="12" rx="2"/><text class="t-arrow" x="1000" y="525">UPGRADE + WHY</text>
+        <line class="a" x1="644" y1="572" x2="880" y2="572" marker-end="url(#d2-prompt-lifecycle-arrow)"/>
+        <rect class="paper" x="736" y="552" width="48" height="12" rx="2"/><text class="t-arrow" x="760" y="561">SWAP IN</text>
+        <line class="a" x1="160" y1="644" x2="880" y2="644" marker-end="url(#d2-prompt-lifecycle-arrow)"/>
+        <rect class="paper" x="482" y="624" width="76" height="12" rx="2"/><text class="t-arrow" x="520" y="633">SEND UPGRADE</text>
+        <line class="a-accent" x1="880" y1="680" x2="400" y2="680" marker-end="url(#d2-prompt-lifecycle-arrow-accent)"/>
+        <rect class="paper" x="726" y="660" width="68" height="12" rx="2"/><text class="t-arrow" x="760" y="669">SENT AS YOU</text>
+        <rect class="paper" x="72" y="88" width="176" height="64" rx="6"/><rect class="n-input" x="72" y="88" width="176" height="64" rx="6"/><rect class="tag" x="80" y="94" width="36" height="12" rx="2"/><text class="t-tag" x="98" y="103">INPUT</text><text class="t-name" x="160" y="118">You</text><text class="t-sub" x="160" y="134">the prompt box</text>
+        <rect class="paper" x="312" y="88" width="176" height="64" rx="6"/><rect class="n-backend" x="312" y="88" width="176" height="64" rx="6"/><rect class="tag" x="320" y="94" width="32" height="12" rx="2"/><text class="t-tag" x="336" y="103">HOST</text><text class="t-name" x="400" y="118">Claude Code</text><text class="t-sub" x="400" y="134">raises prompt.submit</text>
+        <rect class="paper" x="552" y="88" width="176" height="64" rx="6"/><rect class="n-focal" x="552" y="88" width="176" height="64" rx="6"/><rect class="tag" x="560" y="94" width="28" height="12" rx="2"/><text class="t-tag" x="574" y="103">MOD</text><text class="t-name" x="640" y="118">Hooks module</text><text class="t-sub" x="640" y="134">register.tsx</text>
+        <rect class="paper" x="792" y="88" width="176" height="64" rx="6"/><rect class="n-backend" x="792" y="88" width="176" height="64" rx="6"/><rect class="tag" x="800" y="94" width="20" height="12" rx="2"/><text class="t-tag" x="810" y="103">UI</text><text class="t-name" x="880" y="118">Prompt tab</text><text class="t-sub" x="880" y="134">in the pane&#x27;s place</text>
+        <rect class="paper" x="1032" y="88" width="176" height="64" rx="6"/><rect class="n-external" x="1032" y="88" width="176" height="64" rx="6"/><rect class="tag" x="1040" y="94" width="36" height="12" rx="2"/><text class="t-tag" x="1058" y="103">MODEL</text><text class="t-name" x="1120" y="118">Prompt model</text><text class="t-sub" x="1120" y="134">haiku, in the background</text>
+        <line class="rule" x1="40" y1="724" x2="1240" y2="724"/><text class="t-legend" x="40" y="744">LEGEND</text><rect class="n-focal" x="120" y="734" width="24" height="12" rx="2"/><text class="t-legend" x="156" y="744">THE MOD</text><line class="a" x1="336" y1="740" x2="360" y2="740" marker-end="url(#d2-prompt-lifecycle-arrow)"/><text class="t-legend" x="372" y="744">CALL</text><line class="a dash" x1="552" y1="740" x2="576" y2="740" marker-end="url(#d2-prompt-lifecycle-arrow)"/><text class="t-legend" x="588" y="744">RETURN</text><line class="a-accent" x1="768" y1="740" x2="792" y2="740" marker-end="url(#d2-prompt-lifecycle-arrow-accent)"/><text class="t-legend" x="804" y="744">THE UPGRADE IS SENT</text>
+</svg>
+</div>
+</figure>
+<div class="diagram-notes"><p><strong>Quick first, better second.</strong> The rules check every Boomi prompt, with no model call, so a quick upgrade is ready at once. A model then writes a better one in the background and swaps it in, with a few notes on why it changed.</p><p><strong>Held, not blocked.</strong> In <code>confirm</code> mode (the default) the prompt waits in the Prompt tab: send it as typed, send the upgrade, or edit it. Claude sees nothing until you choose. A suggestion taken with Tab skips all of this.</p><p><strong>Never checked twice.</strong> What the dashboard sends from the Prompt tab goes in as your own words, unchecked, so it can't loop back. A secret in a prompt is asked about first, unless the checks are off.</p></div>
