@@ -43,6 +43,16 @@ SPLITS = {
         ("internals", "How it works", ["how-it-works", "whats-coming-next", "development"]),
     ],
 }
+# One line on what each sub-page holds, for the first page's "Where to go next" list: {page dir: {sub-page dir: line}}
+SPLIT_BLURBS = {
+    "boomi-dashboard": {
+        "using": "what the pane shows as Claude works",
+        "spend": "what a session costs, and how to cap it",
+        "prompts": "checks and upgrades for your prompts",
+        "reference": "commands, settings and limits",
+        "internals": "the design, and how to build on it",
+    },
+}
 # Copied verbatim to the same path on the site (only what the pages use)
 COPY_PATHS = ["brand/valence.css", "brand/assets", "boomi-runtime/assets", "boomi-dashboard/assets",
               "docs/architecture/valence"]
@@ -244,9 +254,30 @@ def first_paragraph(body, default):
 
 
 def subnav_html(label, out_dir, subpages):
-    links = "".join(f'<a href="{(rel(out_dir, d) or ".") + "/"}"' + (' aria-current="page"' if d == out_dir else "")
-                    + f">{html.escape(t)}</a>" for d, t in subpages)
-    return f'<nav class="subnav" aria-label="{html.escape(label)} pages">{links}</nav>\n'
+    """The pages of a split README as a quiet line of links, the current one in bold, and a Next button on every page after the
+    first (the first has a "Where to go next" list instead)."""
+    href = lambda d: (rel(out_dir, d) or ".") + "/"
+    links = "".join(f'<span class="here" aria-current="page">{html.escape(t)}</span>' if d == out_dir
+                    else f'<a href="{href(d)}">{html.escape(t)}</a>' for d, t in subpages)
+    i = [d for d, _ in subpages].index(out_dir)
+    nxt = (f'<a class="button next-top" rel="next" href="{href(subpages[i + 1][0])}">Next: {html.escape(subpages[i + 1][1])} →</a>'
+           if 0 < i and i + 1 < len(subpages) else "")
+    return (f'<div class="subnav-row"><nav class="subnav" aria-label="{html.escape(label)} pages">'
+            f'<span class="subnav-label">In this guide</span>{links}</nav>{nxt}</div>\n')
+
+
+def where_next_html(out_dir, subpages):
+    """A split README's first page ends its introduction with where to go next: one button on the first stop, and each other page
+    with a line on what it holds."""
+    blurbs = SPLIT_BLURBS.get(out_dir, {})
+    href = lambda d: (rel(out_dir, d) or ".") + "/"
+    line = lambda d: blurbs.get(posixpath.basename(d), "")
+    (first_dir, first_title), rest = subpages[1], subpages[2:]
+    first = (f'<p class="where-first"><a class="button" href="{href(first_dir)}">Start with {html.escape(first_title)} →</a>'
+             + (f"<span>{html.escape(line(first_dir))}</span>" if line(first_dir) else "") + "</p>")
+    rows = "".join(f'<div><dt><a href="{href(d)}">{html.escape(t)}</a></dt><dd>{html.escape(line(d))}</dd></div>' for d, t in rest)
+    return (f'<section class="where-next" aria-labelledby="where-next"><h2 id="where-next">Where to go next</h2>\n'
+            f'{first}\n<dl class="where-list">{rows}</dl></section>\n')
 
 
 def toc_html(body):
@@ -376,6 +407,9 @@ def main():
                 body = re.sub(r"(</h1>)", lambda m: m.group(1) + toc_html(body), body, count=1)
         body = rewrite_links(body, src_dir, out_dir, page_dirs, site_files, page_sources, anchor_dirs)
         if subpages:
+            if out_dir == page_dir and len(subpages) > 1:
+                # The first page: where to go next, right after its introduction
+                body = re.sub(r"(?=<h2[ >])", lambda m: where_next_html(out_dir, subpages), body, count=1)
             body = subnav_html(label, out_dir, subpages) + body + pager_html(out_dir, subpages)
         search += search_entries(body, out_dir, (label or title) + (f" › {here}" if subpages and out_dir != page_dir else ""))
 

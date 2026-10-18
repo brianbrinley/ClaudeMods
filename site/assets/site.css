@@ -148,14 +148,20 @@ pre:has(> code.language-text), pre:has(> code.language-prompt) { white-space: pr
 .search-results .empty { padding: 10px 12px; color: var(--valence-text-muted); }
 
 /* A long README split into pages: its pages, what's on this one, and the next and previous */
-.subnav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 24px; padding-bottom: 12px; border-bottom: 1px solid var(--valence-line); }
-.subnav a {
-  font-family: var(--valence-font-heading); font-weight: 600; font-size: 14px; letter-spacing: .04em; text-decoration: none;
-  color: var(--valence-text); padding: 8px 14px; min-height: 40px; display: inline-flex; align-items: center;
-  border: 1px solid color-mix(in srgb, var(--valence-line) 60%, transparent); border-radius: 999px;
-}
-.subnav a:hover { color: var(--valence-secondary); border-color: var(--valence-secondary); }
-.subnav a[aria-current="page"] { background: var(--valence-primary); border-color: var(--valence-primary); color: var(--valence-bg); }
+.subnav-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; margin: 0 0 24px; padding-bottom: 12px; border-bottom: 1px solid var(--valence-line); }
+.subnav { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 20px; font-size: 15px; }
+.subnav-label { color: var(--valence-text-muted); }
+.subnav a { text-underline-offset: 5px; text-decoration-thickness: 1px; }
+.subnav .here { font-weight: 700; }
+.button.next-top { min-height: 40px; padding: 6px 16px; font-size: 14px; }
+.where-first { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 16px 0 24px; }
+.where-first span { color: var(--valence-text-muted); }
+.where-list { margin: 0; max-width: 720px; border-top: 1px solid color-mix(in srgb, var(--valence-line) 30%, transparent); }
+.where-list > div { display: grid; grid-template-columns: 11rem 1fr; gap: 4px 20px; padding: 12px 0; border-bottom: 1px solid color-mix(in srgb, var(--valence-line) 30%, transparent); }
+.where-list dt { font-family: var(--valence-font-heading); font-weight: 600; }
+.where-list dd { margin: 0; color: var(--valence-text-muted); }
+.subnav a:focus-visible, .where-list a:focus-visible, .button:focus-visible { outline: 2px solid var(--valence-secondary); outline-offset: 3px; border-radius: 6px; }
+@media (max-width: 600px) { .where-list > div { grid-template-columns: 1fr; } }
 .toc { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 0 0 8px; font-size: 15px; }
 .toc span { font-family: var(--valence-font-heading); font-size: 12px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: var(--valence-text-muted); }
 .pager { display: flex; justify-content: space-between; gap: 16px; margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--valence-line); clear: both; }
