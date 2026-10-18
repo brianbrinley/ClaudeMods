@@ -23,7 +23,7 @@ Two choices differ from the skill's defaults, on purpose: the fonts are the them
 | [`d4-budget-gate.html`](d4-budget-gate.html) (Valence: [`valence/`](valence/d4-budget-gate.html)) | What the dashboard does with each shell command: the budget gate (warn, ask or refuse), then note, run, read, record and show |
 | [`d5-mods.html`](d5-mods.html) (Valence: [`valence/`](valence/d5-mods.html)) | How the repository's mods and Companion fit together: the runtime hand-off, what the dashboard reads, and the set-aside standards mod |
 
-The Valence copies are published on the docs site's [Architecture](../../site/architecture.md) page, which `site/build.py` builds from `site/architecture.md`. Each is shown scaled to the page and opens full size, in the site's Day or Night theme.
+The Valence versions are on the docs site's [Architecture](../../site/architecture.md) page (built from `site/architecture.md`). They're shrunk to fit the page, and clicking one opens it full size.
 
 ## Building them
 

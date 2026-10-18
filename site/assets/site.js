@@ -172,10 +172,10 @@ async function runSearch() {
   if (!hits.length) {
     const li = document.createElement('li');
     li.className = 'empty';
-    li.textContent = 'Nothing found';
+    li.textContent = 'No matches';
     searchList.append(li);
   }
-  searchStatus.textContent = hits.length ? `${hits.length} results` : 'Nothing found';
+  searchStatus.textContent = hits.length ? `${hits.length} ${hits.length === 1 ? 'match' : 'matches'}` : 'No matches';
   searchList.hidden = false;
   searchInput.setAttribute('aria-expanded', 'true');
 }

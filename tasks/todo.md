@@ -42,7 +42,7 @@ Status: PLAN, awaiting review. Nothing below is built.
 
 ## Docs site: the boomi-dashboard page is too big
 - [x] The single boomi-dashboard page on https://brianbrinley.github.io/ClaudeMods/ is overwhelming. Split it into sections or pages (front door, what it does, settings, prompt tips, reference) and add a way to find things.
-  Done 2026-10-17: `SPLITS` in `site/build.py` makes it six pages (Overview, Using it, Spend and budgets, Prompt tips, Reference, How it works) with a sub-nav, "On this page" links and previous/next; the README stays one file on GitHub. A search box in the site header searches every heading and its section (`search.json`).
+  Done 2026-10-17: `SPLITS` in `site/build.py` makes it six pages (Overview, Day to day, Cost and budgets, Prompt tips, Reference, How it works) with a sub-nav, "On this page" links and previous/next; the README stays one file on GitHub. A search box in the site header searches every heading and its section (`search.json`).
 - [ ] Per the global CLAUDE.md: invoke `impeccable` (and `boomi-branding` where it applies) before changing markup or CSS; Pages access rules apply (state who can see the site before changing anything about publishing).
 
 ## Visual architecture reference (decided 2026-10-17)
