@@ -12,7 +12,8 @@ claude plugin test . > "$work/test.out" 2>&1 || { tail -40 "$work/test.out"; exi
 python3 -I - "$work" <<'PY'
 import re, sys
 for line in open(f'{sys.argv[1]}/test.out'):
-    m = re.match(r'\s*PANE-TREE (\S+) (.*)$', line)
+    # The name becomes a file name: letters, digits, - and _ only, so it can't leave the work folder.
+    m = re.match(r'\s*PANE-TREE ([A-Za-z0-9_-]+) (.*)$', line)
     if m:
         open(f'{sys.argv[1]}/{m.group(1)}.json', 'w').write(m.group(2))
 PY

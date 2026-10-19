@@ -3548,6 +3548,8 @@ test("the theme list opens under its button, marks the current theme, and closes
   expect((await pane.find({ type: 'Text', text: /Whimsical · 🌙 Dark/ }))?.props).toMatchObject({ color: '#5EEAD4', backgroundColor: '#161A2E' })
 })
 
+declare const console: { log: (text: string) => void }
+
 // The README's pane screenshots: a sample session (an invented component, no customer data) drawn in each Exosphere theme and printed as JSON, which scripts/pane-shots.sh turns into assets/pane-exosphere-*.png.
 for (const theme of ['exosphere-light', 'exosphere-dark'] as const) {
   test(`the sample session's pane draws in ${theme}, for the README's screenshots`, { options: { paneTheme: theme } }, async ($, on) => {
