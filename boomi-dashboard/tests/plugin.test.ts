@@ -29,6 +29,8 @@ type WorldOptions = {
   remote?: string | null
   /** The seat's usage limits, read each time the session's usage is. */
   limits?: () => { kind: string; percentUsed: number; resetsAt?: string }[]
+  /** When the session started, as the engine reports it: epoch milliseconds. */
+  startedAt?: number
 }
 
 /** The panes the plugin asked to open in the test running now. */
@@ -63,7 +65,7 @@ const world = (on: On, files: Record<string, string> = {}, options: WorldOptions
     return { value: undefined }
   })
   on('session.usage', async () => ({
-    value: { startedAt: 0, context: { window: 200_000, percent: 12 }, rateLimits: options.limits?.() ?? [], cost: { usd: 1.25 } },
+    value: { startedAt: options.startedAt ?? 0, context: { window: 200_000, percent: 12 }, rateLimits: options.limits?.() ?? [], cost: { usd: 1.25 } },
   }))
   return toasts
 }
@@ -2651,6 +2653,188 @@ test('short replies, prompts typed mid-turn, other sessions’ messages and “>
   expect((await $.command.run(dashboard('prompt'))).text).toContain('No Boomi prompt checked yet this session.')
 })
 
+test('confirm: closing out is never held, and /exit or /handoff lets go of a prompt that was', { options: { promptCheck: 'confirm' } }, async ($, on) => {
+  const { asked, sent, typed } = await promptWorld($, on, () => 'Use the upgrade')
+  // A wrap-up that names a process goes straight through.
+  const wrap = 'wrap up and write a handoff for the Orders Sync process, deploy and test status included'
+  await typed(wrap)
+  await typed('handoff')
+  expect(asked).toEqual([])
+  expect(sent).toEqual([wrap, 'handoff'])
+  // A secret in one still asks.
+  await typed('write a handoff for the process, BOOMI_API_TOKEN=abcd1234efgh')
+  expect(asked).toHaveLength(1)
+  // A prompt held, then /exit: the hold is let go of.
+  await typed(VAGUE)
+  expect((await $.command.run(dashboard('prompt'))).text).not.toContain('had nothing to add')
+  await typed('/exit', { command: { name: 'exit', args: '' } })
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('had nothing to add')
+})
+
+// --- Companion's activity log: the offer to add BOOMI_COMPANION_LOG_ACTIVITY=1 to its env file ---
+
+const LOG_LINE = 'BOOMI_COMPANION_LOG_ACTIVITY=1'
+const CREDS = 'BOOMI_USERNAME=me\nBOOMI_API_TOKEN=secret-token-value\n'
+
+const logWorld = async (
+  $: Engine,
+  on: On,
+  env: string | null = CREDS,
+  answers: Record<string, string> = {},
+  folder: Record<string, string> = { 'active-development': '' },
+  options: WorldOptions = {},
+) => {
+  const files: Record<string, string> = { ...folder, ...(env === null ? {} : { '.env': env }) }
+  const toasts = world(on, files, options)
+  const written: { path: string; text: string }[] = []
+  let isRefusing = false
+  on('fs.write', async (_$, e) => {
+    if (isRefusing) return { deny: 'permission denied' }
+    written.push({ path: e.path, text: e.text })
+    files['.env'] = e.text
+    return { value: undefined }
+  })
+  const asked: string[] = []
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e) => {
+    const q = e.questions[0] as unknown as Question
+    asked.push(q.question)
+    const picked = answers[q.header ?? '']
+    return picked === undefined ? { deny: 'dismissed' } : { result: { questions: [q], answers: { [q.question]: picked } } as never }
+  })
+  const store: Record<string, unknown> = {}
+  await startSession($, on, store)
+  return { files, written, asked, toasts, store, refuse: () => void (isRefusing = true), run: async (args: string) => (await $.command.run(dashboard(args))).text }
+}
+
+test('activity-log on adds one line and keeps every other, status says so, and none of the credentials reach the reply', async ($, on) => {
+  const { written, run } = await logWorld($, on)
+  const off = await run('activity-log')
+  expect(off).toContain('The activity log is off')
+  const on1 = await run('activity-log on')
+  expect(on1).toContain(`Added ${LOG_LINE} to /work/.env`)
+  expect(written).toEqual([{ path: '/work/.env', text: `${CREDS}${LOG_LINE}\n` }])
+  expect(await run('activity-log status')).toContain('The activity log is on')
+  expect(await run('activity-log on')).toContain('already on')
+  expect(written).toHaveLength(1)
+  for (const text of [off, on1]) expect(text).not.toContain('secret-token-value')
+})
+
+test('activity-log off asks first and removes only that line', async ($, on) => {
+  const { files, written, asked, run } = await logWorld($, on, `${CREDS}${LOG_LINE}\n`, { 'Activity log': 'Yes, remove it' })
+  expect(await run('activity-log off')).toContain('Removed the activity log line')
+  expect(asked[0]).toContain('Remove the activity log line from /work/.env?')
+  expect(files['.env']).toBe(CREDS)
+  expect(written).toHaveLength(1)
+})
+
+test('activity-log off leaves the file alone unless the answer is yes', async ($, on) => {
+  const { written, run } = await logWorld($, on, `${CREDS}${LOG_LINE}\n`, { 'Activity log': 'Keep it' })
+  expect(await run('activity-log off')).toBe('Left /work/.env as it was.')
+  expect(written).toEqual([])
+})
+
+test('a write that is refused says so, and shows the line and where it goes', async ($, on) => {
+  const { refuse, written, run } = await logWorld($, on)
+  refuse()
+  const text = await run('activity-log on')
+  expect(text).toContain("Couldn't change /work/.env")
+  expect(text).toContain(`Add this line to /work/.env yourself:\n  ${LOG_LINE}`)
+  expect(text).toContain(`echo '${LOG_LINE}' >> .env`)
+  expect(text).not.toContain('secret-token-value')
+  expect(written).toEqual([])
+})
+
+test('with no env file there is nothing to write, and nothing is created', async ($, on) => {
+  const { written, run } = await logWorld($, on, null)
+  expect(await run('activity-log')).toContain('There is no env file at /work/.env')
+  expect(await run('activity-log on')).toContain('There is no readable env file at /work/.env')
+  expect(written).toEqual([])
+})
+
+test('a value other than 1 leaves Companion with no log, and on sets it to 1 in place', async ($, on) => {
+  const { files, run } = await logWorld($, on, `BOOMI_USERNAME=me\nBOOMI_COMPANION_LOG_ACTIVITY=true\nBOOMI_API_TOKEN=secret-token-value\n`)
+  expect(await run('activity-log')).toContain('something other than 1')
+  await run('activity-log on')
+  expect(files['.env']).toBe(`BOOMI_USERNAME=me\n${LOG_LINE}\nBOOMI_API_TOKEN=secret-token-value\n`)
+})
+
+test('the offer: at session start the dashboard asks, and Yes adds the line and says so', async ($, on) => {
+  const { files, asked, toasts } = await logWorld($, on, CREDS, { 'Activity log': 'Yes, add it' })
+  expect(asked).toEqual([])
+  await clock.advance(3_100)
+  expect(asked).toHaveLength(1)
+  expect(asked[0]).toContain(`adds one line, ${LOG_LINE}, to /work/.env and changes nothing else`)
+  expect(files['.env']).toBe(`${CREDS}${LOG_LINE}\n`)
+  expect(toasts.some(t => t.includes('Activity log on'))).toBe(true)
+})
+
+test('the offer: Not now writes nothing and asks again only in the next session', async ($, on) => {
+  const { files, asked } = await logWorld($, on, CREDS, { 'Activity log': 'Not now' })
+  await clock.advance(3_100)
+  expect(asked).toHaveLength(1)
+  expect(files['.env']).toBe(CREDS)
+  // No answer at all (the dialog dismissed) counts as Not now.
+  await clock.advance(10_000)
+  expect(asked).toHaveLength(1)
+})
+
+test('the offer: Never ask again stops it, in the setting or, where /config refuses, in the store', async ($, on) => {
+  const { files, asked, run } = await logWorld($, on, CREDS, { 'Activity log': 'Never ask again' })
+  await clock.advance(3_100)
+  expect(asked).toHaveLength(1)
+  expect(files['.env']).toBe(CREDS)
+  expect(await run('activity-log')).toContain('The offer to turn it on is off')
+})
+
+test('while the log is off the pane says so with Turn it on; the button writes the line and the row goes', async ($, on) => {
+  const { files, run } = await logWorld($, on, CREDS, { 'Activity log': 'Not now' })
+  await clock.advance(3_100)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /activity log is off/ })).toBeDefined()
+  await pane.press({ key: 'log-on' })
+  expect(files['.env']).toBe(`${CREDS}${LOG_LINE}\n`)
+  expect(await pane.find({ text: /activity log is off/ })).toBeUndefined()
+  expect(await run('activity-log')).toContain('The activity log is on')
+})
+
+test("the pane's Don't ask stops the offer and takes the row away", async ($, on) => {
+  const { files, run } = await logWorld($, on, CREDS, { 'Activity log': 'Not now' })
+  await clock.advance(3_100)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  await pane.press({ key: 'log-never' })
+  expect(await pane.find({ text: /activity log is off/ })).toBeUndefined()
+  expect(files['.env']).toBe(CREDS)
+  expect(await run('activity-log')).toContain('The offer to turn it on is off')
+})
+
+test('the pane says nothing of the log where it is on, or outside a Companion folder', async ($, on) => {
+  const { } = await logWorld($, on, `${CREDS}${LOG_LINE}\n`)
+  await clock.advance(3_100)
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /activity log is off/ })).toBeUndefined()
+})
+
+test('the offer is made only where it applies', async ($, on) => {
+  // Already on: nothing to offer.
+  const on1 = await logWorld($, on, `${CREDS}${LOG_LINE}\n`, { 'Activity log': 'Yes, add it' })
+  await clock.advance(3_100)
+  expect(on1.asked).toEqual([])
+})
+
+test('the offer is not made outside a Companion folder, or when the setting says never', async ($, on) => {
+  const outside = await logWorld($, on, CREDS, { 'Activity log': 'Yes, add it' }, {})
+  await clock.advance(3_100)
+  expect(outside.asked).toEqual([])
+  expect(outside.written).toEqual([])
+})
+
+test('activityLogPrompt never: no offer', { options: { activityLogPrompt: 'never' } }, async ($, on) => {
+  const { asked, written } = await logWorld($, on, CREDS, { 'Activity log': 'Yes, add it' })
+  await clock.advance(3_100)
+  expect(asked).toEqual([])
+  expect(written).toEqual([])
+})
+
 test('outside a Companion folder, prompts are not checked', async ($, on) => {
   const { sent, typed } = await promptWorld($, on, () => undefined, {})
   await typed(VAGUE)
@@ -3363,3 +3547,23 @@ test("the theme list opens under its button, marks the current theme, and closes
   // Its label reads in the pane's own colors, not the terminal's.
   expect((await pane.find({ type: 'Text', text: /Whimsical · 🌙 Dark/ }))?.props).toMatchObject({ color: '#5EEAD4', backgroundColor: '#161A2E' })
 })
+
+// The README's pane screenshots: a sample session (an invented component, no customer data) drawn in each Exosphere theme and printed as JSON, which scripts/pane-shots.sh turns into assets/pane-exosphere-*.png.
+for (const theme of ['exosphere-light', 'exosphere-dark'] as const) {
+  test(`the sample session's pane draws in ${theme}, for the README's screenshots`, { options: { paneTheme: theme } }, async ($, on) => {
+    world(on, { [FILE]: ORDERS, 'active-development': '' }, { startedAt: NOW - 47 * 60_000 })
+    scriptedShell(on, { [PUSH]: "SUCCESS: Pushed component 'Orders Sync' \u2014 now version 4", [TEST_RUN]: 'Execution completed: status=ERROR, executionId=execution-aaaa1111' })
+    on('turn.step', async function* () {
+      return { turnId: 't1', index: 0, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude', input_tokens: 3000, output_tokens: 3000, cache_read_input_tokens: 6000, cache_creation_input_tokens: 0 } } as never
+    })
+    await startSession($, on, {})
+    const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude', messageCount: 1 })
+    for await (const _ of stream) void _
+    await $.tool.call({ tool: 'Bash', command: PUSH })
+    await $.tool.call({ tool: 'Bash', command: TEST_RUN })
+    await $.command.run(dashboard('text'))
+    const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+    expect(await pane.find({ text: /Test of Orders Sync ended ERROR/ })).toBeDefined()
+    console.log(`PANE-TREE ${theme} ${JSON.stringify(await pane.drawn())}`)
+  })
+}

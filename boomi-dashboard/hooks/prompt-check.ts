@@ -33,10 +33,20 @@ const SHORT_REPLY =
 const BOOMI =
   /\b(boomi|companion|process(es)?|components?|(un|re)?deploy\w*|(re-?)?test\w*|execut\w*|maps?|mapping|profiles?|connectors?|connections?|operations?|environments?|atoms?|runtimes?|listeners?|schedul\w*|integrations?|data ?hub|bdi|flows?|agents?|recipes?|push|pull)\b/i
 
-/** Whether a prompt is worth checking: not a short reply ("yes", "keep going") and not one word. */
+/** A closer typed on its own ("exit", "/handoff"), or a wrap-up said in words, which may name a Boomi process and so look like work. */
+const CLOSER = /^\/?(exit|quit|bye|goodbye|handoff|hand off)[.!]*$/i
+const WRAP_UP = /\b(hand-?off|hand off|wrap(ping)? (it |this |things )?up|end (the |this )?session|clos(e|ing) (out|the session|this session)|sign(ing)? off|call it a day|that'?s all for (today|now))\b/i
+
+/** Whether a prompt is a person closing out the session: it is never held, tipped or rewritten. */
+export const isClosingOut = (text: string): boolean => {
+  const trimmed = text.trim().replace(/[’]/g, "'")
+  return CLOSER.test(trimmed) || WRAP_UP.test(trimmed)
+}
+
+/** Whether a prompt is worth checking: not a short reply ("yes", "keep going"), not one word, and not closing out the session. */
 export const isCheckable = (text: string): boolean => {
   const trimmed = text.trim()
-  if (!trimmed || SHORT_REPLY.test(trimmed)) return false
+  if (!trimmed || SHORT_REPLY.test(trimmed) || isClosingOut(trimmed)) return false
   return trimmed.split(/\s+/).length >= 2 && BOOMI.test(trimmed)
 }
 

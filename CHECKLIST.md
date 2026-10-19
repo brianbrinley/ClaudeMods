@@ -383,3 +383,28 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** it lands on **Cost and budgets** at that section. **Fail:** it stays on Reference or lands at the top of a page.
 - [ ] **R5. Search.** Type `budget enforce` in the header's search box, press ↓ then Enter.
   **Pass:** results list headings with the page they're on, and Enter opens **Budget enforcement**. **Fail:** no results, or the wrong page.
+
+## S. Activity log offer (boomi-dashboard 0.61.0)
+
+*In a real Claude Code session in a Companion folder whose `.env` does not mention `BOOMI_COMPANION_LOG_ACTIVITY`. Work on a copy of the `.env`, or note its contents first: step S2 changes it by one line.*
+
+- [ ] **S1. The offer.** Start a session in the folder and wait a few seconds.
+  **Pass:** a question "Turn on Companion's activity log?" with **Yes, add it**, **Not now** and **Never ask again**, naming the `.env` path and saying it adds one line. **Fail:** no question, or one that doesn't name the file.
+- [ ] **S2. Yes.** Answer **Yes, add it**.
+  **Pass:** a toast says the line was added; the `.env` ends with `BOOMI_COMPANION_LOG_ACTIVITY=1` and its other lines are unchanged; the dashboard pane's "activity log is off" row is gone. **Fail:** any other line changed, a second copy of the line, or the row stays.
+- [ ] **S3. The log fills.** In a terminal outside Claude Code, run a Companion script (for example `boomi-component-push.sh` on a component), then wait 15 seconds.
+  **Pass:** the dashboard shows the step marked **log**, with no restart. **Fail:** nothing appears.
+- [ ] **S4. Not now.** Take the line out of the `.env` and start a new session; answer **Not now**.
+  **Pass:** the `.env` is unchanged, the pane shows "activity log is off" with **Turn it on** and **Don't ask**, and no second question this session. A new session asks again. **Fail:** the file changed, or it asks twice in one session.
+- [ ] **S5. Turn it on from the pane.** Press **Turn it on**.
+  **Pass:** the line is added and the row goes. **Fail:** nothing happens, or an error.
+- [ ] **S6. Never.** Take the line out again, start a new session and answer **Never ask again**.
+  **Pass:** the `.env` is unchanged, the row is gone, and the next session asks nothing. `/config` shows `activityLogPrompt` as `never`. **Fail:** it asks again, or the row stays.
+- [ ] **S7. The command.** Run `/bc-dashboard activity-log`, then `on`, then `off`.
+  **Pass:** `status` says off; `on` adds the line; `off` asks first, and **Yes, remove it** removes only that line. **Fail:** `off` removes without asking, or another line changes.
+- [ ] **S8. A refused write.** Make the `.env` read-only (`chmod 444 .env`), then run `/bc-dashboard activity-log on`. Restore it with `chmod 644 .env`.
+  **Pass:** a message says it couldn't change the file, and shows the exact line, the file path and an `echo` command. **Fail:** a silent failure, or a claim that it worked.
+- [ ] **S9. No credentials in the conversation.** Look through the offer, the toasts and the command replies above.
+  **Pass:** none shows any other line of the `.env`, nor your token. **Fail:** any value from the file appears.
+- [ ] **S10. Closing out.** With a prompt held (confirm mode), type `/handoff`, then a prompt such as "wrap it up and write a handoff for the process we deployed".
+  **Pass:** neither is held or tipped, and the held prompt is let go of. **Fail:** the dashboard holds or rewrites either.

@@ -40,7 +40,7 @@ Never read, print or copy my .env or any Boomi credentials. The mod reads them i
 
 **After the restart,** `/bc-dashboard` should open the pane with nothing under **Needs attention**. Perl is only needed for **Past Companion sessions**, and macOS and Linux already have it.
 
-**Optional:** add `BOOMI_COMPANION_LOG_ACTIVITY=1` to Companion's `.env`. Companion's scripts then keep an activity log, which the dashboard reads as a [second source](#companions-activity-log).
+**Recommended:** turn on Companion's activity log. At the start of a session in a Companion folder the dashboard offers to add `BOOMI_COMPANION_LOG_ACTIVITY=1` to Companion's `.env`, and asks first. Companion's scripts then keep an activity log, which the dashboard reads as a [second source](#companions-activity-log).
 
 ### How it's installed, and how to update it
 
@@ -74,7 +74,7 @@ To do it all by hand: `git -C ~/ClaudeMods pull --ff-only`, then `claude plugin 
 
 **Resizing it:** drag the pane's edge, and Claude Code remembers the size. To set a size up front, use `/bc-dashboard size <rows> [columns]`, or `size` on its own to go back to the default. That saves the `paneRows` and `paneColumns` settings, which you'll also find in `/config` and `/bc-dashboard config pane`. Rows set its height above the prompt. Columns set its width when it's docked beside a fullscreen transcript.
 
-<img alt="The dashboard pane in the Day theme: title band, gauges for tokens, spend and context beside an 8-bit flamingo, then Needs attention with a failed test's log lines, Components this session, Claude's latest steps and Past Companion sessions" src="assets/pane-day.png" width="420"> <img alt="The same pane in the Night theme" src="assets/pane-night.png" width="420">
+<img alt="The dashboard pane in the Exosphere light theme: a navy title band, gauges for tokens, spend and context, then Needs attention with a failed test and its Why? and Run again buttons, Components this session, Claude's latest steps and Past Companion sessions" src="assets/pane-exosphere-light.png" width="420"> <img alt="The same pane in the Exosphere dark theme" src="assets/pane-exosphere-dark.png" width="420">
 
 - **Gauges** for tokens, spend and how full the context is, with the last step's share of each.
 - **Needs attention** lists what's still broken, each with a next step.
@@ -349,6 +349,8 @@ The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Promp
 
 **What's left alone:** slash commands, prompts you type while Claude is working, messages from other sessions and background tasks, short replies ("yes", "keep going"), prompts without any Boomi words in them, and anything outside a Companion folder. Start a prompt with `>` to send it unchecked (the `>` gets removed).
 
+**Closing out.** Ending the session is never held, tipped or rewritten. `/exit`, `/quit`, `/clear` and `/handoff` go straight through, and they let go of a prompt the dashboard was holding. So does a wrap-up in your own words, such as "write a handoff for the Orders Sync process" or "wrap it up", even though it names a process. A secret in one still asks first.
+
 **Suggestions you take.** Sometimes the prompt box shows a dim suggestion, either Claude's own guess after a turn or the dashboard's next step. If you take it with Tab and send it as it is, it isn't your wording, so it isn't checked: no tips, no hold, no rewrite and no model call. If you edit a suggestion, it's checked like any other prompt, and a secret in one still gets a question. Each suggestion only counts once. The count shows in `/bc-dashboard prompt` and the session report (`2 of Claude's suggestions taken as they were`). `promptSuggested check` treats them like any other prompt. Claude Code doesn't say where a prompt came from, so the dashboard recognizes a taken suggestion by matching the words.
 
 **Privacy:** your prompt is masked before it's kept, it's only kept in this session's state, and it's never logged or saved across sessions. A held prompt is kept as typed, in this session only, until you send or discard it. The model rewrite reads the masked prompt, the session's facts, matching component names and Companion's docs. It never reads Companion's `.env` or its token. The dashboard only reads `BOOMI_ENVIRONMENT_ID` from it, for the tips.
@@ -367,7 +369,13 @@ Up to 0.10.0 the dashboard also checked the environment's process runs. That's b
 
 ## Companion's activity log
 
-If you add `BOOMI_COMPANION_LOG_ACTIVITY=1` to Companion's `.env`, its scripts write each operation to `.activity-log/activity.jsonl` in the workspace, on this machine only. While that file is changing, the dashboard reads it every 10 seconds and adds anything Claude's tool calls didn't show, such as a script run from a terminal, run by another tool, or run before the mod loaded. Those steps are marked **log** in the pane and "from Companion's log" in `/bc-dashboard text`.
+**Turning it on.** At the start of each session in a Companion folder, until you answer, the dashboard asks whether to add `BOOMI_COMPANION_LOG_ACTIVITY=1` to Companion's `.env`: **Yes, add it**, **Not now** (it asks again next session) or **Never ask again**. While the log is off the pane says so, with **Turn it on** and **Don't ask** buttons. `/bc-dashboard activity-log` does the same by command: `on`, `off` (asks first), `status` and `never`.
+
+The dashboard does the write itself, so `.env` never goes through Claude or into the conversation. It adds that one line and changes nothing else, or removes only that line, keeps your line endings, and reads the file back to check. It reads `.env` for that one key and never shows or keeps anything else in it. Companion reads `.env` each time a script runs, so the log starts with the next script and needs no restart. Only the value `1` turns it on; `true` doesn't.
+
+If the write is refused, the dashboard shows the exact line and the file to put it in, with a one-line `echo` for a terminal. Set `activityLogPrompt` to `never` under `/config` to stop the offer.
+
+If `BOOMI_COMPANION_LOG_ACTIVITY=1` is in Companion's `.env`, its scripts write each operation to `.activity-log/activity.jsonl` in the workspace, on this machine only. While that file is changing, the dashboard reads it every 10 seconds and adds anything Claude's tool calls didn't show, such as a script run from a terminal, run by another tool, or run before the mod loaded. Those steps are marked **log** in the pane and "from Companion's log" in `/bc-dashboard text`.
 
 - Creates, pushes, pulls, deploys, undeploys and tests become steps, with the same stages and **Needs attention** items as Claude's own. Searches, folder listings and the like are left out.
 - A script Claude ran shows up in both places, but its log entry is matched to the step from Claude's tool call, so you only see it once.
@@ -486,6 +494,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to 
 | `componentsDir` | `active-development` | Where Companion keeps component XML. |
 | `pollSeconds` | `60` | How often to check the watched components. `0` turns it off. |
 | `activityLog` | `true` | Read [Companion's activity log](#companions-activity-log) as a second source. |
+| `activityLogPrompt` | `ask` | Whether to offer, at the start of a session in a Companion folder, to add `BOOMI_COMPANION_LOG_ACTIVITY=1` to its `.env`. `ask` offers until you say yes or never; `never` stops the offer. |
 | `toasts` | `true` | Toasts for failures, finished deploys and tests, and watched changes. |
 | `banner` | `true` | The banner above the prompt, plus a new session's recap and tips. |
 | `budgetUsd` | `0` | The session's spend budget, in US dollars. `0` turns it off. |

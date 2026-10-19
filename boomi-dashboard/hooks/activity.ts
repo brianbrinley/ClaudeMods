@@ -2302,7 +2302,7 @@ const TIP_LIST: readonly Tip[] = [
   { text: 'Tip: /bc-dashboard config budget sets a spend budget, with figures from your past sessions' },
   { text: 'Tip: Scan under Past Companion sessions shows what earlier sessions cost' },
   { text: 'Tip: /bc-dashboard watch <component> flags changes someone else makes in Boomi', plugin: 'bc-integration' },
-  { text: "Tip: BOOMI_COMPANION_LOG_ACTIVITY=1 in Companion's .env adds its activity log as a second source", plugin: 'bc-integration' },
+  { text: "Tip: /bc-dashboard activity-log on adds BOOMI_COMPANION_LOG_ACTIVITY=1 to Companion's .env, which adds its activity log as a second source", plugin: 'bc-integration' },
   { text: 'Tip: the Day, Night and Terminal buttons in the pane change its colors' },
 ]
 

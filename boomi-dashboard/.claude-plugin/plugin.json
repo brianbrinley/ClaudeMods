@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.60.0",
+  "version": "0.61.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -90,6 +90,16 @@
       "title": "Read Companion's activity log",
       "description": "Also read .activity-log/activity.jsonl, which Companion writes when BOOMI_COMPANION_LOG_ACTIVITY=1 is in its .env, for script runs Claude's tool calls didn't show",
       "default": true
+    },
+    "activityLogPrompt": {
+      "type": "string",
+      "title": "Offer to turn on Companion's activity log",
+      "description": "ask offers, at the start of a session in Companion's folder, to add BOOMI_COMPANION_LOG_ACTIVITY=1 to its .env, until you say yes or never; never stops offering",
+      "options": [
+        "ask",
+        "never"
+      ],
+      "default": "ask"
     },
     "pollSeconds": {
       "type": "number",
