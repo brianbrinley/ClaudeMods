@@ -2,6 +2,15 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.61.0
+
+- **The dashboard offers to turn on Companion's activity log.** At the start of a session in a Companion folder, where the `.env` doesn't mention the log, it asks whether to add `BOOMI_COMPANION_LOG_ACTIVITY=1`: **Yes, add it**, **Not now** (asks again next session) or **Never ask again**. While the log is off, the pane says so, with **Turn it on** and **Don't ask** buttons.
+- **The dashboard makes the change, not Claude.** It appends that one line and leaves every other byte of the file alone (line endings kept), reads it back to check, and never shows or keeps another line of it, so `.env` stays out of the conversation. If the write is refused, it shows the exact line and the file to put it in, with a one-line `echo` for a terminal. Companion reads `.env` on each script run, so no restart is needed. Only the value `1` turns the log on; `true` doesn't, and `on` sets such a line to `1`.
+- **`/bc-dashboard activity-log [on|off|status|never]`.** `off` asks first and removes only that line; `never` stops the offer.
+- **`activityLogPrompt` setting.** `ask` (default) or `never`, in `/config` under Data and reports.
+- **Closing out is never held.** A prompt that ends the session is never tipped, held or rewritten: `/exit`, `/quit`, `/clear` and `/handoff` let go of a prompt the dashboard was holding, and a wrap-up in words ("write a handoff for the Orders Sync process", "wrap it up") goes straight through even when it names a process. A secret in one still asks.
+- **Exosphere screenshots.** The README's pane pictures show the Exosphere light and dark themes, redrawn from the test kit's sample session with `scripts/pane-shots.sh`.
+
 ## 0.60.0
 
 - **A test that runs long is no longer shown as "result not waited for".** Claude Code moves a Bash command to the background when it outlasts its timeout (120 seconds by default), and a test that polls for a slow process does. What comes back to the dashboard is then only that notice, with none of the script's output, so a test that was still polling looked like one submitted with `--no-wait`, and stayed that way. Such a step now shows `◐ testing…` and `Testing X… (running in the background)`.

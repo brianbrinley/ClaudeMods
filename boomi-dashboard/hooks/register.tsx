@@ -139,8 +139,9 @@ import { GUIDE, GUIDE_STAMP, REFRESH_SYSTEM, driftNote, guideFor, guideStatus, g
 import { companionUseLine, isFresh, parseUsage, topHabit, usageArgv } from './usage-breakdown'
 import { paceOf, recordDay } from './spend-history'
 import type { SpendDays } from './spend-history'
-import { NO_COUNTS, NUDGE_ONLY, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, isSuggestionTaken, maskPrompt, reportLines, rewriteParts, rewriteRequest, rewriteSystem, statusPart, tipsText, upgradePrompt } from './prompt-check'
+import { NO_COUNTS, NUDGE_ONLY, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, isClosingOut, isSuggestionTaken, maskPrompt, reportLines, rewriteParts, rewriteRequest, rewriteSystem, statusPart, tipsText, upgradePrompt } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
+import { ACTIVITY_LOG_LINE, activityLogSetting, turnOffActivityLog, turnOnActivityLog } from './activity-env'
 import type { Credentials } from './platform'
 
 type Engine = EngineInterface
@@ -340,6 +341,12 @@ const promptExpanded = atom({ plugin: 'boomi-dashboard', key: 'promptExpanded' }
 /** The tips (by their time) whose nudge the person closed in the banner. */
 const promptNudgeHidden = atom({ plugin: 'boomi-dashboard', key: 'promptNudgeHidden' } as const, 0)
 
+/** The offer to turn on Companion's activity log was put off ("Not now") for this session. */
+const isLogOfferDeclined = atom({ plugin: 'boomi-dashboard', key: 'isLogOfferDeclined' } as const, false)
+
+/** What Companion's env file says about the activity log, as last read; `unknown` before the first look. Never its text. */
+const logState = atom({ plugin: 'boomi-dashboard', key: 'logState' } as const, 'unknown' as 'on' | 'off' | 'absent' | 'no-file' | 'unreadable' | 'unknown')
+
 type Settings = {
   envFile: string
   componentsDir: string
@@ -373,6 +380,7 @@ type Settings = {
   promptModel: string
   promptRewrite: 'auto' | 'manual'
   promptSuggested: 'skip' | 'check'
+  activityLogPrompt: 'ask' | 'never'
   promptSkip: ReadonlySet<string>
   promptView: 'auto' | 'manual' | 'off'
   seatBudgetUsd: number
@@ -413,6 +421,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   promptModel: String(options.promptModel || 'haiku').trim() || 'haiku',
   promptRewrite: options.promptRewrite === 'manual' ? 'manual' : 'auto',
   promptSuggested: options.promptSuggested === 'check' ? 'check' : 'skip',
+  activityLogPrompt: options.activityLogPrompt === 'never' ? 'never' : 'ask',
   seatBudgetUsd: Math.max(0, Number(options.seatBudgetUsd ?? 0) || 0),
   isReadingBreakdown: options.usageBreakdown !== false,
   promptView: options.promptView === 'manual' || options.promptView === 'off' ? options.promptView : 'auto',
@@ -1981,6 +1990,7 @@ const USAGE = [
   '/bc-dashboard resume [n]      copy the command that reopens a past session in a new terminal',
   '/bc-dashboard review [n]      what made a past session cost what it did, and what to change next time',
   '/bc-dashboard prompt [use|upgrade|guide] your last Boomi prompt\'s tips and an upgraded prompt; use puts it in the prompt box, upgrade has a model rewrite it',
+  '/bc-dashboard activity-log [on|off|status|never] turn Companion\'s activity log on or off in its env file (one line, asked first), or stop the offer',
   '/bc-dashboard seen            mark watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: auto, exosphere-light, exosphere-dark, whimsical-light, whimsical-dark or terminal',
@@ -2078,6 +2088,8 @@ const runCommand = async ($: Engine, settings: Settings, args: string): Promise<
       return configCommand($, settings, target)
     case 'prompt':
       return promptCommand($, settings, target)
+    case 'activity-log':
+      return activityLogCommand($, settings, target)
     case 'banner':
       await update($, isBandHidden, () => false)
       return 'The dashboard banner is back above the prompt.'
@@ -2128,17 +2140,39 @@ const promptFacts = async ($: Engine, settings: Settings): Promise<PromptFacts> 
 /** Puts text in the prompt box; false where no box could take it, so nothing typed is ever dropped. */
 const refill = async ($: Engine, text: string) => (await $.prompt.fill({ text, mode: 'replace' }).catch(() => undefined))?.isFilled === true
 
+/** The commands that close a session out, or save what it did for the next. */
+const CLOSING_COMMANDS: ReadonlySet<string> = new Set(['exit', 'quit', 'clear', 'handoff'])
+
+/** Lets go of a prompt the dashboard was holding or tipping about: its tips, its note, the Prompt tab. */
+const clearPromptCheck = async ($: Engine, settings: Settings) => {
+  await update($, promptHeld, () => null)
+  await update($, promptTips, () => null)
+  await update($, promptNote, () => '')
+  await refreshStatus($, settings).catch(() => undefined)
+  await closePromptTab($, settings)
+}
+
 /**
  * Checks a prompt the person typed in a Companion folder. Undefined lets it
  * through as typed; `text` sends another text (the `>` taken off, or the
  * secret masked); `drop` holds it, its text already back in the prompt box.
  */
 const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInput): Promise<{ text?: string; drop?: string } | undefined> => {
+  // Closing out comes first: whatever the dashboard was holding or tipping about is let go of, so nothing stands between the person and the way out.
+  if (e.command && CLOSING_COMMANDS.has(e.command.name)) {
+    await clearPromptCheck($, settings)
+    return undefined
+  }
   if (settings.promptCheck === 'off' || e.command || e.isMeta || e.turnId || !isTyped(e.origin)) return undefined
   const typed = e.text
   if (!(await read($, isCompanionFolder)) && !((await read($, companionPlugins))?.length)) return undefined
   if (/^\s*>/.test(typed)) return { text: typed.replace(/^\s*>\s?/, '') }
   const hasSecret = findSecrets(typed).length > 0
+  // A wrap-up in words ("write a handoff for the Orders Sync process") is not work to check, whatever Boomi word it holds; a secret in one still asks.
+  if (!hasSecret && isClosingOut(typed)) {
+    await clearPromptCheck($, settings)
+    return undefined
+  }
   // A suggestion taken with Tab and sent as it was isn't the person's own words: Claude's guess, or the dashboard's next step. Each is taken once, and a secret is still asked about.
   const taken = isSuggestionTaken(typed, [await read($, shownSuggestion), await read($, suggested)])
   if (taken) await update($, shownSuggestion, () => '')
@@ -2928,6 +2962,134 @@ const decoRule = (width: number): string => {
   return `${'═'.repeat(side)}◇◆◇${'═'.repeat(Math.max(2, width - 3 - side))}`
 }
 
+// --- Companion's activity log -------------------------------------------------------
+// Companion's scripts keep .activity-log/activity.jsonl only when its env file says
+// BOOMI_COMPANION_LOG_ACTIVITY=1. The dashboard offers to add that one line, asks
+// first, and does the write itself, so the file never enters the conversation. It
+// reads the file for that one key and says nothing of the rest. Where the write is
+// refused, it shows the line and where it goes.
+
+const LOG_NEVER_KEY = 'activityLogNever'
+const LOG_YES = 'Yes, add it'
+const LOG_LATER = 'Not now'
+const LOG_NEVER = 'Never ask again'
+
+/** What Companion's env file says about the log. `no-file` and `unreadable` where it can't be read. */
+const readLogSetting = async ($: Engine, settings: Settings): Promise<'on' | 'off' | 'absent' | 'no-file' | 'unreadable'> => {
+  const path = await envPath($, settings)
+  if (!(await $.fs.exists(path).catch(() => false))) return 'no-file'
+  const text = await $.fs.read(path).catch(() => undefined)
+  const state = text === undefined ? 'unreadable' : activityLogSetting(text)
+  await update($, logState, () => state)
+  return state
+}
+
+/** Where to put the line by hand, for a write that was refused. */
+const logByHand = (settings: Settings, path: string): string =>
+  `Add this line to ${path} yourself:\n  ${ACTIVITY_LOG_LINE}\nFrom a terminal in this folder: echo '${ACTIVITY_LOG_LINE}' >> ${settings.envFile}`
+
+/**
+ * Puts the log on or off in Companion's env file: one line, appended or removed
+ * and every other byte kept. Checks by reading it back, and says plainly when the
+ * write was refused.
+ */
+const switchLog = async ($: Engine, settings: Settings, isOn: boolean): Promise<{ isDone: boolean; text: string }> => {
+  const path = await envPath($, settings)
+  const before = await $.fs.read(path).catch(() => undefined)
+  if (before === undefined) return { isDone: false, text: `There is no readable env file at ${path}. Companion's setup creates it; then run this again, or add the line yourself:\n  ${ACTIVITY_LOG_LINE}` }
+  const after = isOn ? turnOnActivityLog(before) : turnOffActivityLog(before)
+  if (after === undefined) return { isDone: true, text: isOn ? `The activity log is already on in ${path}.` : `${path} has no activity log line to remove.` }
+  try {
+    await $.fs.write(path, after)
+  } catch (error) {
+    return { isDone: false, text: `Couldn't change ${path}: ${messageOf(error)}\n${logByHand(settings, path)}` }
+  }
+  const state = await readLogSetting($, settings)
+  if (isOn ? state !== 'on' : state !== 'absent') return { isDone: false, text: `${path} didn't take the change.\n${logByHand(settings, path)}` }
+  return { isDone: true, text: isOn ? `Added ${ACTIVITY_LOG_LINE} to ${path}. Companion's scripts keep the log from their next run, and the dashboard reads it.` : `Removed the activity log line from ${path}. Companion's scripts stop keeping the log from their next run.` }
+}
+
+/** Stops the offer for good: the setting where /config takes it, the store where it doesn't. */
+const neverOfferLog = async ($: Engine, settings: Settings) => {
+  if (!(await saveSetting($, settings, 'activityLogPrompt', 'never'))) await $.store.set(LOG_NEVER_KEY, true).catch(() => undefined)
+  // Unseen again until read: the pane's advisory row goes, and the pane redraws.
+  await update($, logState, () => 'unknown')
+}
+
+const isLogOfferOff = async ($: Engine, settings: Settings): Promise<boolean> =>
+  settings.activityLogPrompt === 'never' || (await $.store.get(LOG_NEVER_KEY).catch(() => undefined)) === true
+
+/**
+ * At the start of a session in Companion's folder: where the env file says nothing
+ * about the log, asks once whether to add the line. Yes adds it; Not now asks again
+ * next session; Never ask stops the offer.
+ */
+const offerActivityLog = async ($: Engine, settings: Settings) => {
+  if ((await isLogOfferOff($, settings)) || (await read($, isLogOfferDeclined)) || !(await read($, isCompanionFolder))) return
+  if ((await readLogSetting($, settings)) !== 'absent') return
+  const path = await envPath($, settings)
+  const answer = await $.ui
+    .ask(`Turn on Companion's activity log? This adds one line, ${ACTIVITY_LOG_LINE}, to ${path} and changes nothing else. Companion's scripts then record each operation in .activity-log/activity.jsonl on this machine, and the dashboard shows the runs Claude's tool calls didn't.`, {
+      header: 'Activity log',
+      options: [LOG_YES, LOG_LATER, LOG_NEVER],
+    })
+    .catch(() => undefined)
+  if (answer === LOG_YES) {
+    await turnOnLogFromPane($, settings)
+    return
+  }
+  if (answer === LOG_NEVER) {
+    await neverOfferLog($, settings)
+    return
+  }
+  await update($, isLogOfferDeclined, () => true)
+}
+
+/** The pane's Turn it on button: the same write as the command, said in a toast. */
+const turnOnLogFromPane = async ($: Engine, settings: Settings) => {
+  const done = await switchLog($, settings, true)
+  toast($, settings, done.isDone ? `Activity log on: added ${ACTIVITY_LOG_LINE} to ${settings.envFile}.` : `Couldn't turn the activity log on. /bc-dashboard activity-log says how to add the line yourself.`)
+}
+
+const activityLogStatus = async ($: Engine, settings: Settings): Promise<string> => {
+  const path = await envPath($, settings)
+  const state = await readLogSetting($, settings)
+  const offer = (await isLogOfferOff($, settings)) ? 'The offer to turn it on is off.' : 'The dashboard offers to turn it on at the start of a session, until you say yes or never.'
+  switch (state) {
+    case 'on':
+      return `The activity log is on: ${path} has ${ACTIVITY_LOG_LINE}. Companion's scripts write each operation to .activity-log/activity.jsonl, and the dashboard reads it.`
+    case 'off':
+      return `${path} sets the activity log to something other than 1, so Companion keeps none (only exactly 1 counts). /bc-dashboard activity-log on sets it to 1.`
+    case 'absent':
+      return `The activity log is off: ${path} doesn't set it. /bc-dashboard activity-log on adds ${ACTIVITY_LOG_LINE} to it. ${offer}`
+    case 'no-file':
+      return `There is no env file at ${path}, so there is nothing to turn on yet.`
+    default:
+      return `Couldn't read ${path}.`
+  }
+}
+
+const activityLogCommand = async ($: Engine, settings: Settings, target: string): Promise<string> => {
+  const verb = target.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
+  switch (verb) {
+    case '':
+    case 'status':
+      return activityLogStatus($, settings)
+    case 'on':
+      return (await switchLog($, settings, true)).text
+    case 'off': {
+      const path = await envPath($, settings)
+      const answer = await $.ui.ask(`Remove the activity log line from ${path}? Nothing else in it changes.`, { header: 'Activity log', options: ['Yes, remove it', 'Keep it'] }).catch(() => undefined)
+      return answer === 'Yes, remove it' ? (await switchLog($, settings, false)).text : `Left ${path} as it was.`
+    }
+    case 'never':
+      await neverOfferLog($, settings)
+      return 'The dashboard will not offer to turn the activity log on. /bc-dashboard activity-log on still does it.'
+    default:
+      return 'Usage: /bc-dashboard activity-log [on|off|status|never]'
+  }
+}
+
 /**
  * The session's values the dashboard sets up from the store and the folder:
  * the folder's earlier steps, past sessions, the watch list, and whether this
@@ -3005,7 +3167,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'bc-dashboard',
       description: 'Boomi Companion at a glance: what needs attention, each component, the live environment, cost',
-      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | components [csv] [save] | resume [n] | review [n] | report [save|html [session|all] [--no-open] [--style exosphere|expressive]] | close <n|all> | reopen | watch <id|file> | unwatch <id> | prompt [use|upgrade] | seen | banner | theme [day|night|terminal] | config [budget|pane|data|list|<setting> <value>] | upgrade [--check] [--yes] [--rollback]',
+      argumentHint: 'text | poll | earlier | size <rows> [columns] | why [n] | rerun [n] | history | components [csv] [save] | resume [n] | review [n] | report [save|html [session|all] [--no-open] [--style exosphere|expressive]] | close <n|all> | reopen | watch <id|file> | unwatch <id> | prompt [use|upgrade] | activity-log [on|off|status|never] | seen | banner | theme [day|night|terminal] | config [budget|pane|data|list|<setting> <value>] | upgrade [--check] [--yes] [--rollback]',
     })
     await $.tool.register({
       name: 'summary',
@@ -3034,6 +3196,8 @@ export const register: Register = (on, options) => {
     })
 
     await setUpSession($, settings)
+    // Offered on a timer, not here: the question must not hold the session's start up. Every interactive session, until the answer is yes or never.
+    if (e.isInteractive) $.clock.after(3_000, () => offerActivityLog($, settings).catch(() => undefined))
 
     $.clock.every(5_000, () => refreshStatus($, settings))
     // Claude Code's /usage breakdown: Companion's share of all usage. Only in an interactive session, so the headless run it starts never starts another.
@@ -3567,6 +3731,9 @@ export const register: Register = (on, options) => {
     const newer = await read($, updateAvailable)
     const stepsLimit = await read($, stepsShown)
     const lastTips = settings.promptCheck === 'off' ? null : await read($, promptTips)
+    // Companion's activity log is off in its env file: said until it is on, or the offer is stopped.
+    const logNow = await read($, logState)
+    const isLogAdvised = (logNow === 'absent' || logNow === 'off') && (await read($, isCompanionFolder)) && !(await isLogOfferOff($, settings))
     const steps = current.activity.filter(a => !a.recipe).reverse()
     const feed = steps.slice(0, stepsLimit)
     const all = spends(current.activity)
@@ -3678,6 +3845,16 @@ export const register: Register = (on, options) => {
               {t(` ${lastTips.tips.length} prompt tip${lastTips.tips.length === 1 ? '' : 's'} for your last prompt${promptWorking ? ` · ${SPINNER[spinNow % SPINNER.length]} upgrading it…` : ''}  `)}
             </Text>
             <Button key="prompt-open" label="Prompt tips" onPress={() => showPromptTab($, lastTips.tips.length)} />
+          </Box>
+        ) : undefined}
+        {isLogAdvised ? (
+          <Box flexWrap="wrap" columnGap={1}>
+            <Text backgroundColor={p.bg}>
+              {icon('warning')}
+              {t(" Companion's activity log is off, so runs outside Claude's tool calls go unseen. ")}
+            </Text>
+            <Button key="log-on" label="Turn it on" onPress={() => void turnOnLogFromPane($, settings)} />
+            <Button key="log-never" label="Don't ask" onPress={() => void neverOfferLog($, settings)} />
           </Box>
         ) : undefined}
 

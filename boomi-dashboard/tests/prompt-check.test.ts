@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { NO_COUNTS, countsLine, REWRITE_SYSTEM, checkPrompt, countsAfter, findSecrets, isCheckable, maskPrompt, reportLines, isSuggestionTaken, rewriteFrom, rewriteParts, rewriteRequest, rewriteSystem, TASK_QUESTIONS, WHY_MARK, statusPart, tipsText, upgradePrompt, wrapLines } from '../hooks/prompt-check'
+import { NO_COUNTS, countsLine, REWRITE_SYSTEM, checkPrompt, countsAfter, findSecrets, isCheckable, isClosingOut, maskPrompt, reportLines, isSuggestionTaken, rewriteFrom, rewriteParts, rewriteRequest, rewriteSystem, TASK_QUESTIONS, WHY_MARK, statusPart, tipsText, upgradePrompt, wrapLines } from '../hooks/prompt-check'
 import type { PromptFacts } from '../hooks/prompt-check'
 import { contextLines, folderComponentOf, keywords, relevantComponents, relevantSections, sectionsOf } from '../hooks/retrieve'
 
@@ -13,6 +13,14 @@ const FACTS: PromptFacts = {
 }
 const NONE: PromptFacts = { names: [] }
 const codes = (text: string, facts = FACTS) => checkPrompt(text, facts).map(t => t.code)
+
+test('closing out the session is never checked, even with a Boomi word in it', () => {
+  for (const text of ['exit', '/exit', 'quit', 'bye', 'handoff', '/handoff', 'hand off', 'wrap up and write a handoff for the Orders Sync process', 'Let’s wrap it up, the deploy and test are done', 'end the session, the component is saved', 'I’m signing off: summarize the process status for the next session', 'call it a day']) {
+    expect(isClosingOut(text)).toBe(true)
+    expect(isCheckable(text)).toBe(false)
+  }
+  for (const text of ['deploy it', 'test the process', 'fix the map', 'exit code 1 on the deploy, why', 'wrap the response in a map', 'clear the cache document for the process']) expect(isClosingOut(text)).toBe(false)
+})
 
 test('short replies, one word and prompts that are not Boomi work are not checked', () => {
   for (const text of ['yes', 'keep going', 'Go ahead.', 'deploy', 'what time is it', 'rename this variable']) expect(isCheckable(text)).toBe(false)
