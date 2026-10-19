@@ -29,15 +29,22 @@ To publish a new mod's README, add it to `PAGES`, its `assets/` folder to `COPY_
 
 Check locally with `pip install -r site/requirements.txt && python site/build.py --out _site`, then open `_site/index.html` through a local web server.
 
-## Default theme: Valence — Miami Deco
+## Default theme: Exosphere
 
-Every visual in this repository uses the Valence theme unless the user says otherwise. The source of truth is [`brand/`](brand/):
+Every visual a mod or tool produces uses Boomi's [Exosphere](https://exosphere.boomi.com/) design system unless the user says otherwise: the dashboard's pane, banner and `report html`, standalone HTML files, and diagrams outside the docs site. That is the dashboard's default theme too, with Valence as its Whimsical option.
+
+- Colors and tokens: Exosphere's Exo III tokens, light and dark (`https://exosphere.boomi.com/dist/styles.css`; the dashboard's `hooks/themes.ts` and `hooks/report-html.ts` hold the ones in use). Follow the system's light or dark. Don't invent new colors.
+- **Type:** Poppins for headings, Noto Sans for text, Fira Mono for code.
+- **Status** (healthy / warning / serious / critical) uses Exosphere's success, warning and danger colors, never brand colors, and never color alone: always with an icon and a label. This covers a mod's status line and panes too.
+- Standalone architecture diagrams under `docs/architecture/` are Exosphere.
+
+### Valence — Miami Deco: the docs site and the Whimsical theme
+
+The docs site (GitHub Pages) stays Valence-themed (decided 2026-10-18), and so does what it renders: the READMEs' banners and Mermaid diagrams, and the Valence copies of the architecture diagrams. The dashboard's Whimsical theme is Valence too. The source of truth is [`brand/`](brand/):
 
 - Colors come from `brand/tokens.json`. Don't invent new colors.
-- **Status** (healthy / warning / serious / critical) uses the fixed status colors, never brand colors, and never color alone: always with an icon and a label. This covers a mod's status line and panes too.
+- **Status** in Valence uses its fixed status colors, never brand colors, and never color alone: always with an icon and a label.
 - **Mermaid:** the first line of every diagram is `brand/mermaid-init.txt`. Flowcharts end with `brand/mermaid-classes.txt` and tag nodes `focus`, `decision`, `highlight`, `external` and `error` (error paths, always with "error" in the label). Wrap sequence diagrams in `rect rgb(251, 246, 238)` … `end`.
 - **HTML / UI:** use `brand/valence.css` (Miami Day by default, Miami Night for dark).
 - **Type:** Poiret One for the wordmark and display only; Josefin Sans for headings and labels; system UI sans for body text and data.
 - **New README:** start it with a Valence banner rendered from `brand/banner.html` into the mod's `assets/` folder, with Day and Night versions in a `<picture>` element.
-
-**The exception, Boomi's Exosphere:** what a mod produces for Boomi people to read outside Claude Code, such as the dashboard's `report html`, follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system instead: its Exo III tokens (light and dark), Poppins for headings, Noto Sans for text and Fira Mono for code. Status still always shows an icon and a label.

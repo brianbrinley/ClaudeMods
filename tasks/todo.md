@@ -1,40 +1,12 @@
 # boomi-dashboard themes: Exosphere first, Whimsical second
 
-Status: PLAN, awaiting review. Nothing below is built.
+Status: DONE. Shipped as boomi-dashboard 0.54.0 (see its CHANGELOG), after 0.53.1.
 
-## Decisions so far (from the user, 2026-10-16)
-- Exosphere is the primary (default) theme. Light and dark.
-- Second theme is "Whimsical": the Valence Miami Deco palette, Day and Night, with the flamingo.
-- The flamingo setting becomes a `logo` on/off setting. In Exosphere the mark is the Boomi logo; in Whimsical it is the flamingo.
-- Logo source: `~/Downloads/freepng-digital-file-609169404de938af2/boomi-logo-vector-png.svg` (stock-site copy, not an official Boomi download; check against the brand portal before anything customer-facing).
-
-## Prerequisite: finish 0.53.1 (branch claude/band-no-fallback-mark)
-- [ ] Run `scratchpad/apply-no-fallback.py` (register.tsx block + tests/boomi-mark.test.ts)
-- [ ] `claude plugin test boomi-dashboard` passes; `tsc -p boomi-dashboard` clean; `claude plugin validate`
-- [ ] Commit (sole author Brian Brinley, no Claude trailer), PR, merge, `/bc-dashboard upgrade`
-
-## 0.54.0: the theme setting
-- [ ] Theme table in one module (`hooks/themes.ts`): name, light/dark, hex per role (brand, page, panel, text, link, selected, border, success, warning, danger, coral accent), mark kind (`logo` | `flamingo`)
-- [ ] Exosphere values from https://exosphere.boomi.com/dist/styles.css (read 100k of 151k chars so far; read the rest before relying on it)
-- [ ] Whimsical values from `brand/tokens.json` (Valence), unchanged
-- [ ] New setting `theme`: `exosphere-light` | `exosphere-dark` | `whimsical-light` | `whimsical-dark`; default follows the OS: `exosphere-light` or `exosphere-dark` (decided 2026-10-16)
-- [ ] `logo` on/off replaces `bandIcon`, `bandAnimation`, `flamingo`. Migrate old values (do not silently reset): `bandIcon flamingo` -> theme whimsical; `bandAnimation` kept for the flamingo
-- [ ] `paneTheme` (day/night/terminal) folds into `theme`; keep a `terminal` option
-- [ ] Banner, pane, status line, toasts read colours from the theme, not literals
-- [ ] HTML `report html` uses `.ex-theme-light/.ex-theme-dark` + Exosphere tokens (already the stated exception in CLAUDE.md); logo as inline SVG
-- [ ] Logo: rasterize the SVG to the small PNG for kitty/Ghostty; inline SVG for HTML; no mark in other terminals (0.53.1)
-- [ ] Status always icon + label
-- [ ] Tests: theme table complete for every role in every theme; setting migration; contrast of text on page >= 4.5:1 for each theme
-- [ ] README settings table, `types/`, CHANGELOG 0.54.0, plugin.json version, root README Mods row
-- [ ] Hand-checks into CHECKLIST.md with pass/fail per step (live terminal, Apple Terminal and Ghostty, each theme)
-
-## Later (separate change, different rules)
-- [ ] Update root `CLAUDE.md`: "Default theme: Valence" becomes Exosphere; Valence becomes the Whimsical option
-- [ ] Docs site (`brand/valence.css`, `site/`): Exosphere-first, Boomi-branded; invoke `boomi-branding` + `impeccable` first; Pages access rules apply
-
-## Decisions on the open questions (2026-10-16)
-1. Default theme follows the OS light/dark.
-2. Existing flamingo users land on Whimsical after the update; Exosphere users and new installs get Exosphere.
+- Exosphere is the default theme, light and dark; `auto` follows the system. Whimsical (Valence Miami Deco, Day and Night, with the flamingo) is the second.
+- The `logo` setting replaced the flamingo, `bandIcon` and `bandAnimation` settings; saved values carry over.
+- The root `CLAUDE.md` now makes Exosphere the default theme for new visuals (2026-10-18).
+- Decision 2026-10-18: the docs site stays Valence-themed. The old "docs site Exosphere-first" item is dropped.
+- Logo source for reference: the Boomi logo SVG is a stock-site copy, not an official Boomi download; check it against the brand portal before anything customer-facing.
 
 ---
 
@@ -57,3 +29,39 @@ Audience: very technical people the project was shared with, who want a detailed
 - [x] D5 How the two mods and Companion fit together (boomi-standards is set aside, so it is drawn dashed; there are two live mods, not three)
 - [x] Standalone files under `docs/architecture/` (Exosphere); Valence copies built into the site via `site/build.py` (`PAGES`, `COPY_PATHS`, workflow `paths`): the Architecture page, `site/architecture.md`
 - [ ] Check each in a real browser, light and dark; no customer names
+
+---
+
+# Added 2026-10-18
+
+## boomi-dashboard 0.61.0: offer to turn on Companion's activity log
+
+Status: PLAN, awaiting review. Nothing below is built.
+
+Today `BOOMI_COMPANION_LOG_ACTIVITY=1` is only advice (README, a rotating tip, CHECKLIST F4). Goal: the dashboard offers to add that one line to Companion's `.env`, with the user's consent, and keeps advising until it is on.
+
+Design rules
+- The mod writes it, not Claude. Claude never edits `.env`, so the credentials file never enters the conversation and no model permission prompt is involved.
+- Append one line only, and only when the key is absent. Never rewrite the file, never read other lines into a result, toast or log. Companion's `.env` path is the `envFile` setting.
+- Consent first: Yes / Not now / Never ask. Offered only in Companion's workspace (`isCompanionFolder`).
+- If the write is refused (engine, permission rule, auto mode), show the exact line and path to add by hand. That fallback is a first-class path, not an afterthought.
+
+Open check (decides how prominent the fallback is)
+- [ ] Run `/envtest` (throwaway mod in the dev-mods folder): does the mod's `$.fs.write` get through to a `.env`? Then delete the mod and `boomi-dashboard/.tmp-envtest/`.
+
+Build (all under `boomi-dashboard/`; line numbers from the 0.60.0 map)
+- [ ] `hooks/activity-env.ts` (plain functions, unit-testable): `withActivityLog(text)` returns the new text, or `undefined` when the key is already set (any value, comments ignored); keeps line endings and adds a trailing newline if missing.
+- [ ] `register.tsx`: `activityLogCommand($, settings, target)` for `/bc-dashboard activity-log on|off|status`, wired into the verb switch (~2030-2085) and `USAGE` (~1965). `status` says on, off or can't tell, never printing file contents. `off` removes only that line, after asking.
+- [ ] Consent: `$.ui.ask(...)` (pattern at ~2181, ~2605) at session start when the log file is absent, `isCompanionFolder` is true and the setting allows it. Answer `undefined` counts as Not now.
+- [ ] Remembering: Not now = per-session atom (declare in `types/index.d.ts`); Never = `saveSetting(..., 'activityLogPrompt', 'never')`, falling back to `$.store` where /config refuses (the pattern at ~2945).
+- [ ] Setting `activityLogPrompt` (`ask` | `never`, default `ask`) in all six places: `Settings` type (~375), `settingsFrom` (~415), `hooks/config.ts` next to `activityLog`, `plugin.json` userConfig, `tests/config.test.ts` MANIFEST_KEYS, README settings table.
+- [ ] Advice until on: a "log: off" row in the pane near the steps heading and a one-line nudge in the banner (model: the prompt nudge row ~3295), the session report says what the log would have added, and the tip at `activity.ts:2305` and README lines 43 and 370 change from optional to recommended and name the command.
+- [ ] If the write is refused: the same row shows the line and path, and a `! ` command to run by hand.
+- [ ] Companion must pick the change up: confirm whether its scripts read `.env` on each run (so no restart is needed) before the toast says "on".
+- [ ] Tests (`tests/plugin.test.ts` fakes: `on('fs.write')`, `promptWorld`): appends once, idempotent, preserves other lines byte for byte, no trailing newline case, CRLF, refused write shows the fallback, Never persists, Not now doesn't, not offered outside Companion's folder, nothing from the file reaches any result.
+- [ ] `claude plugin validate boomi-dashboard`, `claude plugin test boomi-dashboard`, `tsc -p boomi-dashboard`.
+- [ ] Version 0.61.0 in `plugin.json`, a `## 0.61.0` CHANGELOG entry, CHECKLIST.md steps with pass and fail (offer accepted, declined, Never, refused write, on and off), root README unchanged unless the Mods row mentions the log.
+
+Questions for the user
+1. Offer at session start, or on the first Companion script run? DECIDED 2026-10-18: session start, every session until answered Yes or Never; "Not now" lasts that session only.
+2. Should `off` exist at all, or is removing the line the user's own job? DECIDED 2026-10-18: it exists; it asks first and removes only that line.
