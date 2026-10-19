@@ -2287,16 +2287,17 @@ const sendHeld = async ($: Engine, settings: Settings, which: 'upgrade' | 'typed
   await $.prompt.submit({ text, asUser: true }).catch(() => undefined)
 }
 
-/** Puts a held prompt back in the prompt box to edit; it stays unsent. */
+/** Puts the upgrade in the prompt box to edit; the held prompt stays unsent. (The box already holds what was typed: a dropped prompt goes back to it.) */
 const editHeld = async ($: Engine, settings: Settings) => {
   const held = await read($, promptHeld)
-  if (held === null) return
-  if (!(await refill($, held))) {
+  const tips = await read($, promptTips)
+  if (held === null || !tips) return
+  if (!(await refill($, tips.upgrade))) {
     await update($, promptNote, () => "The prompt box couldn't take it here: send it from here instead.")
     return
   }
   await update($, promptHeld, () => null)
-  await update($, promptNote, () => 'Your prompt is back in the prompt box to edit. Nothing was sent.')
+  await update($, promptNote, () => 'The upgrade is in the prompt box to edit. Nothing was sent.')
   await refreshStatus($, settings).catch(() => undefined)
 }
 
