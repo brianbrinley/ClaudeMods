@@ -3264,8 +3264,11 @@ test('confirm: a held prompt can go back to the prompt box, or be discarded; the
   await typed(VAGUE)
   const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
   await tab.press({ key: 'prompt-edit' })
-  expect(filled).toEqual([VAGUE])
-  expect(await tab.find({ text: /Your prompt is back in the prompt box to edit\. Nothing was sent\./ })).toBeDefined()
+  // The box already holds what was typed (a dropped prompt goes back to it), so Edit puts the upgrade there.
+  expect(filled).toHaveLength(1)
+  expect(filled[0]).toContain(VAGUE)
+  expect(filled[0]!.length).toBeGreaterThan(VAGUE.length)
+  expect(await tab.find({ text: /The upgrade is in the prompt box to edit\. Nothing was sent\./ })).toBeDefined()
   await typed('deploy it')
   await tab.press({ key: 'prompt-discard' })
   expect(sent).toEqual([])

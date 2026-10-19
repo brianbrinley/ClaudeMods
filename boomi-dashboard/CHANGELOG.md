@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.61.1
+
+- **Edit in the prompt box puts the upgrade there.** It refilled your typed prompt, which a held prompt's box already holds, so only the cursor came back. It now puts the upgrade (the one the Prompt tab shows) in the box to edit, and the held prompt is let go, nothing sent.
+
 ## 0.61.0
 
 - **The dashboard offers to turn on Companion's activity log.** At the start of a session in a Companion folder, where the `.env` doesn't mention the log, it asks whether to add `BOOMI_COMPANION_LOG_ACTIVITY=1`: **Yes, add it**, **Not now** (asks again next session) or **Never ask again**. While the log is off, the pane says so, with **Turn it on** and **Don't ask** buttons.
