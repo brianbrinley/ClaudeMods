@@ -1380,6 +1380,7 @@ export const headline = (activity: readonly Activity[]): Activity | undefined =>
 export const statusLine = (dashboard: Dashboard, now: number, windowMs: number, usage: Usage = {}, recap?: SessionRecap): string => {
   const parts: string[] = []
   if (usage.isPaused) parts.push(PAUSED)
+  if (usage.login) parts.push(`${STATUS.warning.icon} ${usage.login}`)
   const isNew = !dashboard.activity.some(a => !a.isRestored)
   const latest = isNew ? undefined : headline(dashboard.activity)
   const needs = attention(dashboard, now, windowMs)
@@ -1452,6 +1453,8 @@ export type Usage = {
   companion?: { week?: BudgetView; month?: BudgetView }
   /** Set while a spent budget pauses Companion changes (budgetEnforce confirm or block). */
   isPaused?: boolean
+  /** The Companion login nudge, in words for the status line (loginNudgeWords). */
+  login?: string
   /** Companion's share of all the person's usage, from Claude Code's /usage breakdown: "20% of your usage today · 18% this week". */
   companionUse?: string
   /** The habit that drove most of the week's usage, from the same breakdown: "44% of your usage was at >150k context". */
@@ -1505,6 +1508,14 @@ export const usageReadLines = (usage: Usage): string[] => {
   if (usage.isUsageUnreadable) lines.push("Companion: couldn't read Claude Code's /usage (its wording changed); update the dashboard")
   if (usage.usageHabit) lines.push(`This week: ${usage.usageHabit}`)
   return lines
+}
+
+/** The status line's words for a Companion login nudge, or undefined when there's nothing to say. */
+export const loginNudgeWords = (nudge: LoginNudge | undefined): string | undefined => {
+  if (nudge === 'same-as-claude-account') return "Companion signs in as you, the Claude account: use a dedicated login"
+  if (nudge === 'your-login') return 'Companion signs in with your own login: use a dedicated one'
+  if (nudge === 'personal-looking') return "Companion's login looks personal: use a dedicated one"
+  return undefined
 }
 
 /** What the status line and banner say while a spent budget pauses Companion changes. */

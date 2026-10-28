@@ -84,7 +84,7 @@ import {
   monthSpend,
   monthView,
   resumeCommand,
-  resumable, backgroundOf, isSettled } from '../hooks/activity'
+  resumable, backgroundOf, isSettled, loginNudgeWords } from '../hooks/activity'
 import { agentstudioReading, bdiRunId, connectorProject, connectordevReading, isAwaitingApproval, productRun, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, productWords, quarantineChecks, quarantineReading } from '../hooks/products'
 import { reviewPrompt, reviewSession, reviewText } from '../hooks/review'
 import type { Activity, Dashboard } from '../types'
@@ -657,6 +657,17 @@ test('the budget warns from 80% and says when it is spent, and stays quiet witho
   expect(budgetOf(undefined, 5)).toBeUndefined()
   expect(statusLine(dashboard(), NOW, 24 * HOUR, { usd: 4.2, budgetUsd: 5 })).toContain('◐ 84% of the $5.00 budget')
   expect(statusLine(dashboard(), NOW, 24 * HOUR, { usd: 1, budgetUsd: 5 })).not.toContain('budget')
+})
+
+test('a Companion login nudge shows on the status line, and only when there is one', () => {
+  expect(loginNudgeWords('same-as-claude-account')).toContain('the Claude account')
+  expect(loginNudgeWords('your-login')).toContain('your own login')
+  expect(loginNudgeWords('personal-looking')).toContain('looks personal')
+  expect(loginNudgeWords(undefined)).toBeUndefined()
+  expect(statusLine(dashboard(), NOW, 24 * HOUR, { login: loginNudgeWords('same-as-claude-account') })).toBe(
+    '◐ Companion signs in as you, the Claude account: use a dedicated login',
+  )
+  expect(statusLine(dashboard(), NOW, 24 * HOUR, {})).toBe('waiting for Companion')
 })
 
 test('the next step is to deploy what was saved, then to test what was deployed', () => {
