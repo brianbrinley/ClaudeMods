@@ -160,6 +160,10 @@ export const platformClient = (fetch: Fetch, credentials: Credentials) => {
       return found.map(details).filter(d => d.componentId)
     },
 
+    /** Every environment in the account, with its classification (TEST, PROD, …). */
+    environments: async (): Promise<Record<string, unknown>[]> =>
+      query('List environments', 'Environment/query', { QueryFilter: {} }),
+
     /** The IDs of the runtimes attached to an environment. */
     environmentAtoms: async (environmentId: string): Promise<string[]> =>
       (

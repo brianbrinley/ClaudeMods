@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.61.1",
+  "version": "0.62.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -170,6 +170,17 @@
         "block"
       ],
       "default": "warn"
+    },
+    "envCheck": {
+      "type": "string",
+      "title": "Production check",
+      "description": "Off (the default) reads nothing from Companion's .env. Check reads the environment it points at from Boomi, by name and classification, and shows it. Enforce also refuses Companion deploys, undeploys and test runs to that environment unless it is classified TEST or DEV, so production stays read-only for Companion. The token is never shown",
+      "options": [
+        "off",
+        "check",
+        "enforce"
+      ],
+      "default": "off"
     },
     "budgetGrace": {
       "type": "number",

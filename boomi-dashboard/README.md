@@ -365,6 +365,8 @@ The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Promp
 
 Credentials come from Companion's `.env`, or failing that, from environment variables: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID`. The token only ever goes into a request's `Authorization` header. The dashboard never stores, shows or logs it, and its error messages only include the HTTP status. Without credentials, everything else still works.
 
+**The production check** (`envCheck`, off by default) is the one other read of the `.env`'s environment: at the start of a session it asks Boomi for the environment list, and keeps only the environment's name, ID and classification. With `enforce`, a Companion deploy, undeploy or test run to an environment that isn't TEST or DEV is refused before it runs, and so is one to an environment the list doesn't show. That includes one inside a script the command runs (a deploy wrapper or a local helper), which the check reads the same way the budget gate does. The refusal says why and tells Claude to stop and tell you. A push is never refused by this check.
+
 Up to 0.10.0 the dashboard also checked the environment's process runs. That's been set aside for now and will be back; see [IDEAS](../IDEAS.md#dashboard-follow-ups).
 
 ## Companion's activity log
@@ -490,6 +492,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to 
 | `logo` | `true` | The mark in the pane and the banner. In the Exosphere themes it's the Boomi logo, drawn as a picture in terminals that can (kitty, Ghostty). In the Whimsical themes it's the 8-bit flamingo, standing on one leg in a thin line of seafoam water. Every 15 seconds or so it glances back over its shoulder or blinks. Now and then it switches legs or turns around, and once in a while a neighbour pops in to say hello. Turning this off hides the mark in either theme. It replaces `flamingo`, `bandIcon` and the banner's diamond. |
 | `bandAnimation` | `true` | The banner's flamingo turns into a sparkle for one second in every five. Whimsical themes only. |
 | `recentHours` | `24` | How far back earlier sessions' steps and Companion's activity log count. |
+| `envCheck` | `off` | The production check. `off` reads nothing. `check` reads the environment Companion's `.env` points at, by name and classification, at the start of each session, and shows it. `enforce` also refuses Companion deploys, undeploys and test runs to that environment unless it is classified TEST or DEV, so production stays read-only for Companion. Pushes are not refused. The token is never shown. |
 | `envFile` | `.env` | Companion's `.env`, relative to the working directory. |
 | `componentsDir` | `active-development` | Where Companion keeps component XML. |
 | `pollSeconds` | `60` | How often to check the watched components. `0` turns it off. |
