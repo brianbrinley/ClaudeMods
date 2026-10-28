@@ -115,8 +115,14 @@ import {
   rerunArgs,
   knownName,
 } from './activity'
-import type { Attention, BudgetLine, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
+import type { Attention, BudgetLine, EnvGuard, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
+import { environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, wrapperRuns } from './environment'
+import type { EnvCheck, Environment } from './environment'
+import { loginNudge } from './companion-user'
+import type { LoginNudge } from './companion-user'
+import { accountRolesFrom, loginCheck } from './login-roles'
+import type { LoginCheck } from './login-roles'
 import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { componentTable, hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
 import { toCsv, toTsv } from './export'
@@ -124,7 +130,7 @@ import { changeLines } from './changes'
 import type { BoomiFacts, ReportScope, ReportStyle } from './report-html'
 import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, groupWithValue, listing, menuQuestion, parseValue, pastSpend, questionFor, show, valueOf } from './config'
 import type { Group, PastSpend, Value } from './config'
-import { blockedDetail, companionChanges, denyMessage, enforcementNote, platformWrites, spentBudgets, spentText, wrapperScripts } from './budget-gate'
+import { blockedDetail, companionChanges, denyMessage, enforcementNote, platformWrites, spentBudgets, spentText } from './budget-gate'
 import type { Enforce } from './budget-gate'
 import { BOOMI_MARK_PNG, drawsPictures } from './boomi-mark'
 import { PALETTES, THEMES, THEME_NAMES, THEME_LABELS, THEME_OPTIONS, isDarkAppearance, markOf, resolveTheme, themeFromOptions, themeNamed } from './themes'
@@ -220,6 +226,12 @@ const budgetPaused = atom({ plugin: 'boomi-dashboard', key: 'budgetPaused' } as 
 
 /** The enforcement state Claude was last told about with a prompt, so it's told once, and again on a change. */
 const enforceNoted = atom({ plugin: 'boomi-dashboard', key: 'enforceNoted' } as const, '')
+
+/** The .env's environment as Boomi lists it: read at session start, kept for the session. Never the token. */
+const envTarget = atom({ plugin: 'boomi-dashboard', key: 'envTarget' } as const, { checkedAt: 0, environment: undefined as Environment | undefined, note: '' })
+
+/** Whether the .env's Boomi login looks like a person's rather than a dedicated one: a nudge, read locally at session start. */
+const companionLogin = atom({ plugin: 'boomi-dashboard', key: 'companionLogin' } as const, { nudge: undefined as LoginNudge | undefined, source: undefined as 'identity' | 'login record' | undefined, check: undefined as LoginCheck | undefined })
 
 /** The budget's last warning, as a percent (0, 80 or 100), so each is toasted once. */
 const budgetAlert = atom({ plugin: 'boomi-dashboard', key: 'budgetAlert' } as const, 0)
@@ -375,6 +387,8 @@ type Settings = {
   isOpeningReport: boolean
   budgetEnforce: Enforce
   budgetGrace: number
+  envCheck: EnvCheck
+  personalLogin: string
   reportStyle: ReportStyle
   promptCheck: 'off' | 'suggest' | 'confirm'
   promptModel: string
@@ -416,6 +430,8 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   isOpeningReport: options.reportOpen !== false,
   budgetEnforce: options.budgetEnforce === 'confirm' || options.budgetEnforce === 'block' ? options.budgetEnforce : 'warn',
   budgetGrace: Math.min(100, Math.max(0, Number(options.budgetGrace ?? 0) || 0)),
+  envCheck: options.envCheck === 'check' || options.envCheck === 'enforce' ? options.envCheck : 'off',
+  personalLogin: String(options.personalLogin ?? '').trim(),
   reportStyle: options.reportStyle === 'expressive' ? 'expressive' : 'exosphere',
   promptCheck: options.promptCheck === 'off' || options.promptCheck === 'suggest' ? options.promptCheck : 'confirm',
   promptModel: String(options.promptModel || 'haiku').trim() || 'haiku',
@@ -1149,6 +1165,103 @@ const loadCredentials = async ($: Engine, settings: Settings): Promise<Credentia
   return 'missing' in found
     ? `Not connected: Companion's Boomi credentials aren't set (${found.missing.join(', ')}). Runs show up here once they are.`
     : found.credentials
+}
+
+/**
+ * Reads the .env's environment from Boomi and keeps its name and
+ * classification for the session. Off reads nothing. A failure is kept as a
+ * note, and enforce mode then refuses the environment's changes.
+ */
+const loadEnvironment = async ($: Engine, settings: Settings): Promise<void> => {
+  if (settings.envCheck === 'off') return
+  const checkedAt = await $.clock.now()
+  const loaded = await loadCredentials($, settings)
+  if (typeof loaded === 'string') {
+    await update($, envTarget, () => ({ checkedAt, environment: undefined, note: loaded }))
+    return
+  }
+  const rows = await platformClient((url, init) => $.http.fetch(url, init), loaded)
+    .environments()
+    .catch(() => undefined)
+  if (!rows) {
+    await update($, envTarget, () => ({ checkedAt, environment: undefined, note: "Boomi's environment list couldn't be read" }))
+    return
+  }
+  const environment = environmentNamed(environmentsFrom(rows), loaded.environmentId)
+  const note = environment ? '' : "the .env's environment isn't in Boomi's environment list, so it can't be checked"
+  await update($, envTarget, () => ({ checkedAt, environment, note }))
+  if (settings.envCheck === 'enforce' && environment?.classification === 'PROD') {
+    toast($, settings, `Production is read-only for Companion: deploys, undeploys and test runs to ${environment.name} are refused.`)
+  }
+}
+
+/**
+ * The email of the Claude account the person is signed into: the engine's
+ * identity() where it has one, else the emailAddress in Claude Code's login
+ * record. A claim, not verified by Boomi. Only that one key is read, and the
+ * email is returned to the nudge, never stored.
+ */
+const claudeAccountEmail = async ($: Engine): Promise<{ email: string; source: 'identity' | 'login record' } | undefined> => {
+  const identity = await $.session.identity().catch(() => undefined)
+  if (identity?.email) return { email: identity.email, source: 'identity' }
+  const home = await $.env.get('HOME').catch(() => undefined)
+  if (!home) return undefined
+  const text = await $.fs.read(`${home}/.claude.json`).then(String).catch(() => undefined)
+  if (text === undefined) return undefined
+  try {
+    const email = (JSON.parse(text) as { oauthAccount?: { emailAddress?: unknown } }).oauthAccount?.emailAddress
+    return typeof email === 'string' && email ? { email, source: 'login record' } : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Notes whether the .env's Boomi login looks personal, or is the Claude
+ * account's own email (locally, no Boomi call). With the production check on,
+ * it also reads the login's roles from Boomi and checks them against the
+ * Companion roles. Only the login is read, never whoever is running the session.
+ */
+const loadCompanionLogin = async ($: Engine, settings: Settings): Promise<void> => {
+  const loaded = await loadCredentials($, settings)
+  if (typeof loaded === 'string') {
+    await update($, companionLogin, () => ({}))
+    return
+  }
+  const claude = await claudeAccountEmail($)
+  const nudge = loginNudge(loaded.username, settings.personalLogin, claude?.email)
+  const source = nudge === 'same-as-claude-account' ? claude?.source : undefined
+  if (settings.envCheck === 'off') {
+    await update($, companionLogin, () => ({ nudge, source }))
+    return
+  }
+  const client = platformClient((url, init) => $.http.fetch(url, init), loaded)
+  const check = await Promise.all([client.userRoleIds(loaded.username), client.roles()])
+    .then(([linked, rows]) => loginCheck(linked, accountRolesFrom(rows)))
+    .catch((): LoginCheck => ({ level: 'warning', text: "Couldn't read the .env login's roles from Boomi" }))
+  await update($, companionLogin, () => ({ nudge, source, check }))
+}
+
+/**
+ * The refusal for a Companion change in the .env's environment, in enforce
+ * mode. The environment is read from Boomi only for a command that makes a
+ * change, since the .env can change during a session. A command that runs a
+ * script of its own is refused without a read: the check can't see into it.
+ * A failure refuses the command rather than letting it through.
+ */
+const environmentRefusal = async ($: Engine, settings: Settings, command: string) => {
+  if (settings.envCheck !== 'enforce') return undefined
+  try {
+    const needsEnvironment = environmentChangesIn(command).length > 0 && wrapperRuns(command).length === 0
+    let target: { environment?: Environment; note: string } | undefined
+    if (needsEnvironment) {
+      await loadEnvironment($, settings)
+      target = await read($, envTarget)
+    }
+    return environmentGate(command, settings.envCheck, target?.environment, target?.note || undefined, settings.envFile)
+  } catch {
+    return environmentGate(command, settings.envCheck, undefined, 'the environment check failed', settings.envFile)
+  }
 }
 
 let isPolling = false
@@ -2004,7 +2117,7 @@ const USAGE = [
  * redraws the pane when it changes. The engine wants each reference spelled
  * out where it's read.
  */
-const guardLines = async ($: Engine) => {
+const guardLines = async ($: Engine, settings: Settings) => {
   const valueOf = async (got: Promise<unknown>) => {
     try {
       return ((await got) as { value?: unknown }).value
@@ -2012,9 +2125,18 @@ const guardLines = async ($: Engine) => {
       return undefined
     }
   }
+  const target = await read($, envTarget)
+  const environment: EnvGuard = {
+    mode: settings.envCheck,
+    name: target.environment?.name,
+    classification: target.environment?.classification,
+    note: target.note || undefined,
+  }
   return guardrails(
     (await valueOf($.state.get({ plugin: 'boomi-standards', key: 'activity' } as never))) as StandardsSeen | undefined,
     (await valueOf($.state.get({ plugin: 'boomi-runtime', key: 'runtime' } as never))) as RuntimeSeen | undefined,
+    environment,
+    await read($, companionLogin),
   )
 }
 
@@ -2027,7 +2149,7 @@ const withBudget = async ($: Engine, settings: Settings): Promise<Usage> => {
 const summaryNow = async ($: Engine, settings: Settings) =>
   [
     summary(await read($, dashboard), await withBudget($, settings), await $.clock.now(), settings.windowMs),
-    guardrailText(await guardLines($)),
+    guardrailText(await guardLines($, settings)),
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -2622,12 +2744,26 @@ const STOP = 'Stop'
  * allow the rest of the session, raise the budget, or stop. Undefined lets
  * the command run; reads always do.
  */
+/**
+ * The scripts a command runs, with their text, read from the folder the
+ * command runs them in (after any cd before them). Both gates check these
+ * too, so a change can't hide in a wrapper; at most five are read.
+ */
+const wrapperTexts = async ($: Engine, command: string): Promise<{ path: string; text: string }[]> => {
+  const out: { path: string; text: string }[] = []
+  const cwd = await $.session.cwd()
+  for (const { path, dir } of wrapperRuns(command).slice(0, 5)) {
+    const folder = dir.startsWith('/') ? dir : dir ? `${cwd}/${dir}` : cwd
+    const full = path.startsWith('/') ? path : `${folder}/${path.replace(/^\.\//, '')}`
+    out.push({ path, text: await $.fs.read(full).then(String).catch(() => '') })
+  }
+  return out
+}
+
 const budgetGate = async ($: Engine, settings: Settings, command: string): Promise<{ deny: string; short: string } | undefined> => {
   if (settings.budgetEnforce === 'warn') return undefined
   const changes = [...companionChanges(command), ...platformWrites(command)]
-  for (const path of wrapperScripts(command).slice(0, 5)) {
-    const full = path.startsWith('/') ? path : `${await $.session.cwd()}/${path.replace(/^\.\//, '')}`
-    const text = await $.fs.read(full).then(String).catch(() => '')
+  for (const { path, text } of await wrapperTexts($, command)) {
     changes.push(...[...companionChanges(text), ...platformWrites(text)].map(c => `${c}, inside ${path}`))
   }
   if (changes.length === 0) return undefined
@@ -3104,6 +3240,8 @@ let setUpFor: string | undefined
 
 const setUpSession = async ($: Engine, settings: Settings) => {
   setUpFor = await $.session.id().catch(() => undefined)
+  await loadEnvironment($, settings).catch(() => undefined)
+  await loadCompanionLogin($, settings).catch(() => undefined)
   // The watch list outlives the session; restore it the first time.
   // A theme or size kept in the store (by 0.33.0 and earlier, or where /config refused it) moves to /config once it will take it.
   appearanceCache = undefined
@@ -3264,7 +3402,9 @@ export const register: Register = (on, options) => {
     await ensureSession($, settings).catch(() => undefined)
     const command = String(e.command ?? '')
     // A spent budget, with budgetEnforce confirm or block, stops Companion changes before they run.
-    const gate = await budgetGate($, settings, command).catch(() => undefined)
+    // Production read-only (envCheck enforce) comes first: a refused change never reaches the budget question.
+    const envRefusal = await environmentRefusal($, settings, command).catch(() => environmentGate(command, settings.envCheck, undefined, 'the environment check failed', settings.envFile))
+    const gate = envRefusal ?? (await budgetGate($, settings, command).catch(() => undefined))
     const runs = scriptRuns(command)
     const checks = bdiStatusChecks(command)
     const deploys = datahubStatusChecks(command)
@@ -3273,7 +3413,7 @@ export const register: Register = (on, options) => {
       const started = runs.length > 0 ? await noteStart($, settings, runs).catch(() => [] as Activity[]) : []
       if (started.length > 0) await noteEnd($, settings, started, { deny: gate.short }).catch(() => undefined)
       else await recordBlocked($, settings, gate.short).catch(() => undefined)
-      await markBudgetBlocked($, started.map(a => a.id)).catch(() => undefined)
+      if (!envRefusal) await markBudgetBlocked($, started.map(a => a.id)).catch(() => undefined)
       // Settled before Claude hears the refusal, so the status line and the saved steps already show it.
       await refreshStatus($, settings).catch(() => undefined)
       await saveActivity($, settings).catch(() => undefined)
@@ -3705,7 +3845,7 @@ export const register: Register = (on, options) => {
     const themeNow = await themeOf($, settings)
     const drawnNow = await drawnThemeOf($, settings)
     const markNow = settings.hasLogo ? markOf(drawnNow) : undefined
-    const guards = await guardLines($)
+    const guards = await guardLines($, settings)
     const past = await read($, history)
     const pastHidden = await read($, isPastCollapsed)
     const themeListOpen = await read($, isThemeListOpen)

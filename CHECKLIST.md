@@ -408,3 +408,24 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** none shows any other line of the `.env`, nor your token. **Fail:** any value from the file appears.
 - [ ] **S10. Closing out.** With a prompt held (confirm mode), type `/handoff`, then a prompt such as "wrap it up and write a handoff for the process we deployed".
   **Pass:** neither is held or tipped, and the held prompt is let go of. **Fail:** the dashboard holds or rewrites either.
+
+## T. Production check (boomi-dashboard 0.62.0)
+
+*In a real Claude Code session in a Companion folder, with a `.env` that points at a test account that has a PROD and a TEST environment. Work on a copy of the `.env`: steps T4 to T6 change `BOOMI_ENVIRONMENT_ID`, and T8 restores it. Nothing here deploys, because each deploy is refused or aimed at a TEST environment.*
+
+- [ ] **T1. Off by default.** Start a session with `envCheck` at its default.
+  **Pass:** `/bc-dashboard config` shows `envCheck` as `off`; no environment name or classification appears anywhere in the pane. **Fail:** either shows.
+- [ ] **T2. Check.** Set `envCheck` to `check` and start a new session.
+  **Pass:** the environment's name and classification show in the pane or in `/bc-dashboard text` (for the `.env`'s ID, for example `Test (TEST)`); nothing is refused. **Fail:** no name, or a refusal.
+- [ ] **T3. Enforce, TEST environment.** Set `envCheck` to `enforce`, keep the `.env` on the TEST environment, and start a new session. Ask Claude to run a test execution of a process.
+  **Pass:** the run goes ahead as before. **Fail:** it is refused.
+- [ ] **T4. Enforce, PROD environment.** Change `BOOMI_ENVIRONMENT_ID` in the copy to the PROD environment's ID, start a new session, and ask Claude to deploy a component.
+  **Pass:** a toast says production is read-only and names the environment; the deploy is refused, Claude's reply says it was refused and that it must stop, and the step shows as blocked in the pane. Nothing is deployed in Boomi. **Fail:** the deploy runs, or the refusal doesn't name the environment.
+- [ ] **T5. Enforce, unknown environment.** Set `BOOMI_ENVIRONMENT_ID` to an ID that isn't in the account, start a new session, and ask Claude to run a test execution.
+  **Pass:** the run is refused, and the refusal says the environment isn't in Boomi's list. **Fail:** it runs.
+- [ ] **T6. A push is still allowed.** With the PROD environment from T4 still set, ask Claude to push a component to Boomi.
+  **Pass:** the push goes ahead; nothing about environments refuses it. **Fail:** the push is refused.
+- [ ] **T7. No token in the conversation.** Look through the toasts, the pane and Claude's replies above.
+  **Pass:** none shows `BOOMI_API_TOKEN` or any part of its value. **Fail:** any does.
+- [ ] **T8. Restore.** Put the original `.env` back and set `envCheck` to `off`.
+  **Pass:** the `.env` matches its original contents, and the next session shows no environment name. **Fail:** anything differs.

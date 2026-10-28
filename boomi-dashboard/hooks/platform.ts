@@ -160,6 +160,45 @@ export const platformClient = (fetch: Fetch, credentials: Credentials) => {
       return found.map(details).filter(d => d.componentId)
     },
 
+    /** The IDs of the roles linked to a login, by its user ID (the .env's BOOMI_USERNAME). */
+    userRoleIds: async (userId: string): Promise<string[]> =>
+      (
+        await query('Read the login\'s roles', 'AccountUserRole/query', {
+          QueryFilter: { expression: equals('userId', userId) },
+        })
+      )
+        .map(raw => String(raw.roleId ?? ''))
+        .filter(Boolean),
+
+    /** Every role in the account with its privileges, read a page of 100 at a time. */
+    roles: async (): Promise<Record<string, unknown>[]> => {
+      const all: Record<string, unknown>[] = []
+      let path = 'Role/query'
+      let body: unknown = { QueryFilter: {} }
+      for (let page = 0; page < 50; page++) {
+        const response = await fetch(`${base}/${path}`, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            Authorization: basicAuth(credentials),
+          },
+          body: JSON.stringify(body),
+        })
+        if (!response.ok) throw new PlatformError('List roles', response.status)
+        const parsed = JSON.parse(response.text) as { result?: unknown; queryToken?: unknown }
+        if (Array.isArray(parsed.result)) all.push(...(parsed.result as Record<string, unknown>[]))
+        if (typeof parsed.queryToken !== 'string' || !parsed.queryToken) return all
+        path = 'Role/queryMore'
+        body = { queryToken: parsed.queryToken }
+      }
+      throw new PlatformError('List roles', 0)
+    },
+
+    /** Every environment in the account, with its classification (TEST, PROD, …). */
+    environments: async (): Promise<Record<string, unknown>[]> =>
+      query('List environments', 'Environment/query', { QueryFilter: {} }),
+
     /** The IDs of the runtimes attached to an environment. */
     environmentAtoms: async (environmentId: string): Promise<string[]> =>
       (

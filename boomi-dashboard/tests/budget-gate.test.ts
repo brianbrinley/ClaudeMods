@@ -53,6 +53,11 @@ test('the Platform API called directly: changes are gated, reads (GET and the qu
   expect(platformWrites(`http POST ${API}/Folder name=x`)).toEqual(['POST /api/rest/v1/acct-1/Folder'])
   // Reads.
   expect(platformWrites(`curl -s ${API}/Account/acct-1`)).toEqual([])
+  expect(platformWrites(`curl -XPOST ${API}/Folder -d'{}'`)).toEqual(['POST /api/rest/v1/acct-1/Folder'])
+  expect(platformWrites(`curl ${API}/DeployedPackage -d@req.json`)).toEqual(['POST /api/rest/v1/acct-1/DeployedPackage'])
+  expect(platformWrites(`curl -X "$METHOD" ${API}/Component/c-1`)).toEqual(['UNKNOWN /api/rest/v1/acct-1/Component/c-1'])
+  expect(platformWrites(`curl -X GET ${API}/Account/acct-1`)).toEqual([])
+  expect(platformWrites(`curl -s ${API}/Component/Orders-XML`)).toEqual([])
   expect(platformWrites(`curl -s -X POST ${API}/ComponentMetadata/query -d @q.json`)).toEqual([])
   expect(platformWrites(`curl -s -X POST ${API}/ExecutionRecord/queryMore -d token`)).toEqual([])
   // Not Boomi's API.

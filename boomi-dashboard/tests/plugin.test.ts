@@ -2194,13 +2194,14 @@ test('/bc-dashboard config walks the budget with figures from past sessions, and
     'Month',
     'Keep off',
     'Keep warn',
+    'Keep off',
     'Done',
   ])
   const answer = await $.command.run(dashboard('config'))
-  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget 1/7', 'Budget 2/7', 'Budget 3/7', 'Budget 4/7', 'Budget 5/7', 'Budget 6/7', 'Settings'])
+  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget 1/8', 'Budget 2/8', 'Budget 3/8', 'Budget 4/8', 'Budget 5/8', 'Budget 6/8', 'Budget 7/8', 'Settings'])
   expect(asked[1]!.options.map(o => o.label)).toEqual(['Keep off', '$2.50 (twice a typical session)', '$3.50 (your costliest session)', 'Back to the menu'])
   expect(asked[1]!.question).toContain('cost $1.25 typically, $3.50 at most')
-  expect(asked[7]!.question).toContain('3 changes so far, saved when you pick Done.')
+  expect(asked[8]!.question).toContain('3 changes so far, saved when you pick Done.')
   expect(sets).toEqual([
     ['boomi-dashboard.budgetUsd', 2.5],
     ['boomi-dashboard.companionShare', 30],
@@ -2216,7 +2217,7 @@ test('/bc-dashboard config skips the share period with no share, goes back to th
   const answer = await $.command.run(dashboard('config budget'))
   expect(asked[0]!.options.map(o => o.label)).toEqual(['Keep $5.00', '$2.50 (twice a typical session)', 'Off', 'Back to the menu'])
   expect(asked[1]!.question).toMatch(/^"lots" didn't work: Session budget takes a number \(0 for off\)\. Session budget:/)
-  expect(asked[2]!.header).toBe('Budget 2/7')
+  expect(asked[2]!.header).toBe('Budget 2/8')
   expect(sets).toEqual([['boomi-dashboard.budgetUsd', 7]])
   expect(answer.text).toBe('Saved to /config:\n  Session budget: $5.00 → $7.00')
 })

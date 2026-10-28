@@ -90,11 +90,14 @@ export const platformWrites = (command: string): string[] => {
   for (const part of command.split(/(?:&&|\|\||;|\n)/)) {
     if (!PLATFORM.test(part) || !/\b(curl|wget|http|https|xh)\b/.test(part)) continue
     const url = part.match(/https?:\/\/[^\s'"]*boomi\.com[^\s'"]*/)?.[0] ?? ''
-    const named = part.match(/(?:-X|--request|--method)[=\s]+['"]?([A-Za-z]+)/)?.[1]?.toUpperCase()
+    // -X in any form (-X POST, -XPOST, -sX POST, --request=POST) and a body in any form (-d'{}', -d@file, --data-raw, -F, -T, --json).
+    // A method flag this can't read counts as a write.
+    const named = part.match(/(?:^|\s)(?:-[a-zA-Z]*X|--request|--method)\s*=?\s*['"]?([A-Za-z]+)/)?.[1]?.toUpperCase()
     const httpie = part.match(/\b(?:http|https|xh)\s+(GET|POST|PUT|PATCH|DELETE)\b/i)?.[1]?.toUpperCase()
-    const hasBody = /\s(?:-d|--data(?:-[a-z]+)?|-F|--form|--json|-T|--upload-file|--post-data|--post-file|--body-data)[=\s]/.test(` ${part}`)
-    const method = named ?? httpie ?? (hasBody ? 'POST' : 'GET')
-    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') continue
+    const hasMethodFlag = /(?:^|\s)(?:-[a-zA-Z]*X|--request|--method)/.test(part)
+    const hasBody = /\s(?:-d|-F|-T|--data\S*|--form\S*|--json\S*|--upload-file\S*|--post-data\S*|--post-file\S*|--body-data\S*)/.test(` ${part}`)
+    const method = named ?? httpie ?? (hasMethodFlag ? 'UNKNOWN' : hasBody ? 'POST' : 'GET')
+    if ((method === 'GET' || method === 'HEAD' || method === 'OPTIONS') && !hasBody) continue
     if (method === 'POST' && /\/(?:query|queryMore)(?:[?#'"\s]|$)/.test(url || part)) continue
     const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0] || 'the Platform API'
     out.push(`${method} ${path}`)

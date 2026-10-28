@@ -43,6 +43,7 @@ export const GROUPS: readonly Group[] = [
       { key: 'companionSharePeriod', label: 'Period for the share', about: 'What the share runs over: today, the last 7 days, or this calendar month.', kind: 'choice', options: ['day', 'week', 'month'], default: 'week' },
       { key: 'seatBudgetUsd', label: 'Your Claude budget', about: 'Only for a login whose usage Claude Code reports as a spend limit, in percent: the BUDGET gauge shows it in dollars. Where the account reports its monthly budget in dollars (most do), that is used and this is not needed.', kind: 'number', unit: 'usd', default: 0, zero: 'off' },
       { key: 'budgetEnforce', label: 'When a budget is spent', about: 'Warn only warns. Confirm asks you before each Companion change (create, push, deploy, test and the like); block refuses them. Reads are never stopped, and a change already running finishes.', kind: 'choice', options: ['warn', 'confirm', 'block'], default: 'warn' },
+      { key: 'envCheck', label: 'Production check', about: 'Off reads nothing. Check reads the environment in Companion’s .env from Boomi, by name and classification, and shows it. Enforce also refuses Companion deploys, undeploys and test runs to that environment unless it is TEST or DEV, so production stays read-only for Companion. The token is never shown.', kind: 'choice', options: ['off', 'check', 'enforce'], default: 'off' },
       { key: 'budgetGrace', label: 'Grace past a budget', about: 'How far past a budget, in percent, before confirm or block starts.', kind: 'number', unit: 'percent', default: 0, zero: 'none, at 100%', presets: [5, 10, 20], max: 100 },
     ],
   },
@@ -71,6 +72,7 @@ export const GROUPS: readonly Group[] = [
     name: 'Data and reports',
     header: 'Data',
     fields: [
+      { key: 'personalLogin', label: 'Your own Boomi login', about: 'Your own Boomi login, if you have one. The pane flags Companion when it signs in with it, since Companion should have a login of its own. Leave empty to rely on the name check alone.', kind: 'text', default: '' },
       { key: 'recentHours', label: 'Window for earlier steps', about: 'How far back earlier sessions’ steps and Companion’s activity log count.', kind: 'number', unit: 'hours', default: 24, presets: [12, 24, 48, 72] },
       { key: 'historyDays', label: 'Past sessions window', about: 'How far back history, review and the all-sessions report read Claude Code’s transcripts.', kind: 'number', unit: 'days', default: 90, presets: [30, 90, 180], isWhole: true },
       { key: 'pollSeconds', label: 'Checking watched components', about: 'How often the dashboard checks watched components in Boomi.', kind: 'number', unit: 'seconds', default: 60, zero: 'off', presets: [30, 60, 300], isNextSession: true },
