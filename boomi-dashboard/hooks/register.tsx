@@ -121,6 +121,8 @@ import { environmentChangesIn, environmentGate, environmentNamed, environmentsFr
 import type { EnvCheck, Environment } from './environment'
 import { loginNudge } from './companion-user'
 import type { LoginNudge } from './companion-user'
+import { accountRolesFrom, loginCheck } from './login-roles'
+import type { LoginCheck } from './login-roles'
 import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { componentTable, hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
 import { toCsv, toTsv } from './export'
@@ -229,7 +231,7 @@ const enforceNoted = atom({ plugin: 'boomi-dashboard', key: 'enforceNoted' } as 
 const envTarget = atom({ plugin: 'boomi-dashboard', key: 'envTarget' } as const, { checkedAt: 0, environment: undefined as Environment | undefined, note: '' })
 
 /** Whether the .env's Boomi login looks like a person's rather than a dedicated one: a nudge, read locally at session start. */
-const companionLogin = atom({ plugin: 'boomi-dashboard', key: 'companionLogin' } as const, { nudge: undefined as LoginNudge | undefined })
+const companionLogin = atom({ plugin: 'boomi-dashboard', key: 'companionLogin' } as const, { nudge: undefined as LoginNudge | undefined, check: undefined as LoginCheck | undefined })
 
 /** The budget's last warning, as a percent (0, 80 or 100), so each is toasted once. */
 const budgetAlert = atom({ plugin: 'boomi-dashboard', key: 'budgetAlert' } as const, 0)
@@ -1193,11 +1195,28 @@ const loadEnvironment = async ($: Engine, settings: Settings): Promise<void> => 
   }
 }
 
-/** Reads the .env's Boomi login locally and notes whether it looks personal. No Boomi call. */
+/**
+ * Notes whether the .env's Boomi login looks personal (locally, no Boomi
+ * call). With the production check on, it also reads the login's roles from
+ * Boomi and checks them against the Companion roles. Only the login is read,
+ * never whoever is running the session.
+ */
 const loadCompanionLogin = async ($: Engine, settings: Settings): Promise<void> => {
   const loaded = await loadCredentials($, settings)
-  const nudge = typeof loaded === 'string' ? undefined : loginNudge(loaded.username, settings.personalLogin)
-  await update($, companionLogin, () => ({ nudge }))
+  if (typeof loaded === 'string') {
+    await update($, companionLogin, () => ({}))
+    return
+  }
+  const nudge = loginNudge(loaded.username, settings.personalLogin)
+  if (settings.envCheck === 'off') {
+    await update($, companionLogin, () => ({ nudge }))
+    return
+  }
+  const client = platformClient((url, init) => $.http.fetch(url, init), loaded)
+  const check = await Promise.all([client.userRoleIds(loaded.username), client.roles()])
+    .then(([linked, rows]) => loginCheck(linked, accountRolesFrom(rows)))
+    .catch((): LoginCheck => ({ level: 'warning', text: "Couldn't read the .env login's roles from Boomi" }))
+  await update($, companionLogin, () => ({ nudge, check }))
 }
 
 /**
@@ -2094,7 +2113,7 @@ const guardLines = async ($: Engine, settings: Settings) => {
     (await valueOf($.state.get({ plugin: 'boomi-standards', key: 'activity' } as never))) as StandardsSeen | undefined,
     (await valueOf($.state.get({ plugin: 'boomi-runtime', key: 'runtime' } as never))) as RuntimeSeen | undefined,
     environment,
-    (await read($, companionLogin)).nudge,
+    await read($, companionLogin),
   )
 }
 

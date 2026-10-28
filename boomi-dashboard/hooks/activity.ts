@@ -5,6 +5,7 @@
 
 import type { Activity, ActivityKind, CompanionPlugin, Dashboard, Ledger, Outcome, PastSession, Product, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
 import type { LoginNudge } from './companion-user'
+import type { LoginCheck } from './login-roles'
 import type { SpendPace } from './spend-history'
 import { PRODUCT_NAMES, bdiReasonOf, deployState, isAwaitingApproval, isProductScript, productRun, productWords } from './products'
 import { installedTip } from './plugins'
@@ -2231,11 +2232,12 @@ export const guardrails = (
   standards: StandardsSeen | undefined,
   runtime: RuntimeSeen | undefined,
   environment?: EnvGuard,
-  login?: LoginNudge,
+  login?: { nudge?: LoginNudge; check?: LoginCheck },
 ): GuardLine[] => {
   const lines: GuardLine[] = []
-  if (login === 'your-login') lines.push({ level: 'warning', text: "Companion signs in with your own Boomi login. Companion's guidelines call for a dedicated login for it." })
-  else if (login === 'personal-looking') lines.push({ level: 'warning', text: "Companion's Boomi login looks like a person's. Companion's guidelines call for a dedicated login for it." })
+  if (login?.nudge === 'your-login') lines.push({ level: 'warning', text: "Companion signs in with your own Boomi login. Companion's guidelines call for a dedicated login for it." })
+  else if (login?.nudge === 'personal-looking') lines.push({ level: 'warning', text: "Companion's Boomi login looks like a person's. Companion's guidelines call for a dedicated login for it." })
+  if (login?.check) lines.push({ level: login.check.level, text: login.check.text })
   if (environment && environment.mode !== 'off') {
     const { mode, name, classification, note } = environment
     if (!name) lines.push({ level: 'warning', text: `Production check on, not checking: ${note || "the .env's environment isn't known yet"}` })
