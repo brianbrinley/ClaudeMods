@@ -231,7 +231,7 @@ const enforceNoted = atom({ plugin: 'boomi-dashboard', key: 'enforceNoted' } as 
 const envTarget = atom({ plugin: 'boomi-dashboard', key: 'envTarget' } as const, { checkedAt: 0, environment: undefined as Environment | undefined, note: '' })
 
 /** Whether the .env's Boomi login looks like a person's rather than a dedicated one: a nudge, read locally at session start. */
-const companionLogin = atom({ plugin: 'boomi-dashboard', key: 'companionLogin' } as const, { nudge: undefined as LoginNudge | undefined, check: undefined as LoginCheck | undefined })
+const companionLogin = atom({ plugin: 'boomi-dashboard', key: 'companionLogin' } as const, { nudge: undefined as LoginNudge | undefined, source: undefined as 'identity' | 'login record' | undefined, check: undefined as LoginCheck | undefined })
 
 /** The budget's last warning, as a percent (0, 80 or 100), so each is toasted once. */
 const budgetAlert = atom({ plugin: 'boomi-dashboard', key: 'budgetAlert' } as const, 0)
@@ -1196,10 +1196,31 @@ const loadEnvironment = async ($: Engine, settings: Settings): Promise<void> => 
 }
 
 /**
- * Notes whether the .env's Boomi login looks personal (locally, no Boomi
- * call). With the production check on, it also reads the login's roles from
- * Boomi and checks them against the Companion roles. Only the login is read,
- * never whoever is running the session.
+ * The email of the Claude account the person is signed into: the engine's
+ * identity() where it has one, else the emailAddress in Claude Code's login
+ * record. A claim, not verified by Boomi. Only that one key is read, and the
+ * email is returned to the nudge, never stored.
+ */
+const claudeAccountEmail = async ($: Engine): Promise<{ email: string; source: 'identity' | 'login record' } | undefined> => {
+  const identity = await $.session.identity().catch(() => undefined)
+  if (identity?.email) return { email: identity.email, source: 'identity' }
+  const home = await $.env.get('HOME').catch(() => undefined)
+  if (!home) return undefined
+  const text = await $.fs.read(`${home}/.claude.json`).then(String).catch(() => undefined)
+  if (text === undefined) return undefined
+  try {
+    const email = (JSON.parse(text) as { oauthAccount?: { emailAddress?: unknown } }).oauthAccount?.emailAddress
+    return typeof email === 'string' && email ? { email, source: 'login record' } : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Notes whether the .env's Boomi login looks personal, or is the Claude
+ * account's own email (locally, no Boomi call). With the production check on,
+ * it also reads the login's roles from Boomi and checks them against the
+ * Companion roles. Only the login is read, never whoever is running the session.
  */
 const loadCompanionLogin = async ($: Engine, settings: Settings): Promise<void> => {
   const loaded = await loadCredentials($, settings)
@@ -1207,16 +1228,18 @@ const loadCompanionLogin = async ($: Engine, settings: Settings): Promise<void> 
     await update($, companionLogin, () => ({}))
     return
   }
-  const nudge = loginNudge(loaded.username, settings.personalLogin)
+  const claude = await claudeAccountEmail($)
+  const nudge = loginNudge(loaded.username, settings.personalLogin, claude?.email)
+  const source = nudge === 'same-as-claude-account' ? claude?.source : undefined
   if (settings.envCheck === 'off') {
-    await update($, companionLogin, () => ({ nudge }))
+    await update($, companionLogin, () => ({ nudge, source }))
     return
   }
   const client = platformClient((url, init) => $.http.fetch(url, init), loaded)
   const check = await Promise.all([client.userRoleIds(loaded.username), client.roles()])
     .then(([linked, rows]) => loginCheck(linked, accountRolesFrom(rows)))
     .catch((): LoginCheck => ({ level: 'warning', text: "Couldn't read the .env login's roles from Boomi" }))
-  await update($, companionLogin, () => ({ nudge, check }))
+  await update($, companionLogin, () => ({ nudge, source, check }))
 }
 
 /**

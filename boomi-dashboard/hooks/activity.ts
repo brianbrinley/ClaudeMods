@@ -2232,10 +2232,11 @@ export const guardrails = (
   standards: StandardsSeen | undefined,
   runtime: RuntimeSeen | undefined,
   environment?: EnvGuard,
-  login?: { nudge?: LoginNudge; check?: LoginCheck },
+  login?: { nudge?: LoginNudge; source?: 'identity' | 'login record'; check?: LoginCheck },
 ): GuardLine[] => {
   const lines: GuardLine[] = []
-  if (login?.nudge === 'your-login') lines.push({ level: 'warning', text: "Companion signs in with your own Boomi login. Companion's guidelines call for a dedicated login for it." })
+  if (login?.nudge === 'same-as-claude-account') lines.push({ level: 'warning', text: `Companion signs in as the account you're signed into Claude with (from the ${login.source ?? 'Claude login record'}). Companion's guidelines call for a dedicated login for it.` })
+  else if (login?.nudge === 'your-login') lines.push({ level: 'warning', text: "Companion signs in with your own Boomi login. Companion's guidelines call for a dedicated login for it." })
   else if (login?.nudge === 'personal-looking') lines.push({ level: 'warning', text: "Companion's Boomi login looks like a person's. Companion's guidelines call for a dedicated login for it." })
   if (login?.check) lines.push({ level: login.check.level, text: login.check.text })
   if (environment && environment.mode !== 'off') {
