@@ -72,6 +72,7 @@ export const GROUPS: readonly Group[] = [
     name: 'Data and reports',
     header: 'Data',
     fields: [
+      { key: 'personalLogin', label: 'Your own Boomi login', about: 'Your own Boomi login, if you have one. The pane flags Companion when it signs in with it, since Companion should have a login of its own. Leave empty to rely on the name check alone.', kind: 'text', default: '' },
       { key: 'recentHours', label: 'Window for earlier steps', about: 'How far back earlier sessions’ steps and Companion’s activity log count.', kind: 'number', unit: 'hours', default: 24, presets: [12, 24, 48, 72] },
       { key: 'historyDays', label: 'Past sessions window', about: 'How far back history, review and the all-sessions report read Claude Code’s transcripts.', kind: 'number', unit: 'days', default: 90, presets: [30, 90, 180], isWhole: true },
       { key: 'pollSeconds', label: 'Checking watched components', about: 'How often the dashboard checks watched components in Boomi.', kind: 'number', unit: 'seconds', default: 60, zero: 'off', presets: [30, 60, 300], isNextSession: true },

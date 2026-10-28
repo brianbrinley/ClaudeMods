@@ -119,6 +119,8 @@ import type { Attention, BudgetLine, EnvGuard, Level, Reading, ScriptRun, ShareP
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, wrapperRuns } from './environment'
 import type { EnvCheck, Environment } from './environment'
+import { loginNudge } from './companion-user'
+import type { LoginNudge } from './companion-user'
 import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { componentTable, hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
 import { toCsv, toTsv } from './export'
@@ -225,6 +227,9 @@ const enforceNoted = atom({ plugin: 'boomi-dashboard', key: 'enforceNoted' } as 
 
 /** The .env's environment as Boomi lists it: read at session start, kept for the session. Never the token. */
 const envTarget = atom({ plugin: 'boomi-dashboard', key: 'envTarget' } as const, { checkedAt: 0, environment: undefined as Environment | undefined, note: '' })
+
+/** Whether the .env's Boomi login looks like a person's rather than a dedicated one: a nudge, read locally at session start. */
+const companionLogin = atom({ plugin: 'boomi-dashboard', key: 'companionLogin' } as const, { nudge: undefined as LoginNudge | undefined })
 
 /** The budget's last warning, as a percent (0, 80 or 100), so each is toasted once. */
 const budgetAlert = atom({ plugin: 'boomi-dashboard', key: 'budgetAlert' } as const, 0)
@@ -381,6 +386,7 @@ type Settings = {
   budgetEnforce: Enforce
   budgetGrace: number
   envCheck: EnvCheck
+  personalLogin: string
   reportStyle: ReportStyle
   promptCheck: 'off' | 'suggest' | 'confirm'
   promptModel: string
@@ -423,6 +429,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   budgetEnforce: options.budgetEnforce === 'confirm' || options.budgetEnforce === 'block' ? options.budgetEnforce : 'warn',
   budgetGrace: Math.min(100, Math.max(0, Number(options.budgetGrace ?? 0) || 0)),
   envCheck: options.envCheck === 'check' || options.envCheck === 'enforce' ? options.envCheck : 'off',
+  personalLogin: String(options.personalLogin ?? '').trim(),
   reportStyle: options.reportStyle === 'expressive' ? 'expressive' : 'exosphere',
   promptCheck: options.promptCheck === 'off' || options.promptCheck === 'suggest' ? options.promptCheck : 'confirm',
   promptModel: String(options.promptModel || 'haiku').trim() || 'haiku',
@@ -1184,6 +1191,13 @@ const loadEnvironment = async ($: Engine, settings: Settings): Promise<void> => 
   if (settings.envCheck === 'enforce' && environment?.classification === 'PROD') {
     toast($, settings, `Production is read-only for Companion: deploys, undeploys and test runs to ${environment.name} are refused.`)
   }
+}
+
+/** Reads the .env's Boomi login locally and notes whether it looks personal. No Boomi call. */
+const loadCompanionLogin = async ($: Engine, settings: Settings): Promise<void> => {
+  const loaded = await loadCredentials($, settings)
+  const nudge = typeof loaded === 'string' ? undefined : loginNudge(loaded.username, settings.personalLogin)
+  await update($, companionLogin, () => ({ nudge }))
 }
 
 /**
@@ -2080,6 +2094,7 @@ const guardLines = async ($: Engine, settings: Settings) => {
     (await valueOf($.state.get({ plugin: 'boomi-standards', key: 'activity' } as never))) as StandardsSeen | undefined,
     (await valueOf($.state.get({ plugin: 'boomi-runtime', key: 'runtime' } as never))) as RuntimeSeen | undefined,
     environment,
+    (await read($, companionLogin)).nudge,
   )
 }
 
@@ -3184,6 +3199,7 @@ let setUpFor: string | undefined
 const setUpSession = async ($: Engine, settings: Settings) => {
   setUpFor = await $.session.id().catch(() => undefined)
   await loadEnvironment($, settings).catch(() => undefined)
+  await loadCompanionLogin($, settings).catch(() => undefined)
   // The watch list outlives the session; restore it the first time.
   // A theme or size kept in the store (by 0.33.0 and earlier, or where /config refused it) moves to /config once it will take it.
   appearanceCache = undefined

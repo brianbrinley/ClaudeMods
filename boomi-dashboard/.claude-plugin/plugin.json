@@ -171,6 +171,12 @@
       ],
       "default": "warn"
     },
+    "personalLogin": {
+      "type": "string",
+      "title": "Your own Boomi login",
+      "description": "Your own Boomi login, if you have one. The pane flags Companion when its .env signs in with this login, since Companion should use a login of its own. Leave empty to rely on the name check alone",
+      "default": ""
+    },
     "envCheck": {
       "type": "string",
       "title": "Production check",

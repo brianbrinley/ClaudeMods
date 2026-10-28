@@ -4,6 +4,7 @@
 // nothing here touches the engine, so the tests call them directly.
 
 import type { Activity, ActivityKind, CompanionPlugin, Dashboard, Ledger, Outcome, PastSession, Product, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
+import type { LoginNudge } from './companion-user'
 import type { SpendPace } from './spend-history'
 import { PRODUCT_NAMES, bdiReasonOf, deployState, isAwaitingApproval, isProductScript, productRun, productWords } from './products'
 import { installedTip } from './plugins'
@@ -2226,8 +2227,15 @@ const SCRIPT_NOUN: Record<string, string> = { create: 'create', push: 'push', de
 /** The production check's state for the pane: its mode, and the .env's environment as Boomi lists it. */
 export type EnvGuard = { mode: 'off' | 'check' | 'enforce'; name?: string; classification?: string; note?: string }
 
-export const guardrails = (standards: StandardsSeen | undefined, runtime: RuntimeSeen | undefined, environment?: EnvGuard): GuardLine[] => {
+export const guardrails = (
+  standards: StandardsSeen | undefined,
+  runtime: RuntimeSeen | undefined,
+  environment?: EnvGuard,
+  login?: LoginNudge,
+): GuardLine[] => {
   const lines: GuardLine[] = []
+  if (login === 'your-login') lines.push({ level: 'warning', text: "Companion signs in with your own Boomi login. Companion's guidelines call for a dedicated login for it." })
+  else if (login === 'personal-looking') lines.push({ level: 'warning', text: "Companion's Boomi login looks like a person's. Companion's guidelines call for a dedicated login for it." })
   if (environment && environment.mode !== 'off') {
     const { mode, name, classification, note } = environment
     if (!name) lines.push({ level: 'warning', text: `Production check on, not checking: ${note || "the .env's environment isn't known yet"}` })

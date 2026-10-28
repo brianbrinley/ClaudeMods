@@ -495,6 +495,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to 
 | `bandAnimation` | `true` | The banner's flamingo turns into a sparkle for one second in every five. Whimsical themes only. |
 | `recentHours` | `24` | How far back earlier sessions' steps and Companion's activity log count. |
 | `envCheck` | `off` | The production check. `off` reads nothing. `check` reads the environment Companion's `.env` points at, by name and classification, at the start of each session, and shows it. `enforce` also refuses Companion deploys, undeploys and test runs to that environment unless it is classified TEST or DEV, so production stays read-only for Companion. Pushes are not refused. The token is never shown. |
+| `personalLogin` | empty | Your own Boomi login, if you have one. The pane flags Companion when its `.env` signs in with it, and when the `.env` login otherwise looks like a person's (first.last@domain). Companion should have a dedicated login. It's a nudge only: nothing is refused for it. |
 | `envFile` | `.env` | Companion's `.env`, relative to the working directory. |
 | `componentsDir` | `active-development` | Where Companion keeps component XML. |
 | `pollSeconds` | `60` | How often to check the watched components. `0` turns it off. |
