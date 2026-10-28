@@ -56,10 +56,34 @@ test('enforce refuses when the environment is unknown or has a classification it
 })
 
 test('enforce refuses a wrapper script that deploys to production, and names the script', () => {
-  const refused = environmentGate('bash run-all.sh', 'enforce', PROD, undefined, [{ path: 'run-all.sh', text: `${DEPLOY}\n` }])
+  const found = (text: string) => ({ wrappers: [{ path: 'run-all.sh', text }], unreadable: [], overLimit: false })
+  const refused = environmentGate('bash run-all.sh', 'enforce', PROD, undefined, found(`${DEPLOY}\n`))
   expect(refused?.deny).toContain('Not run: deploy, inside run-all.sh')
-  expect(environmentGate('bash run-all.sh', 'enforce', PROD, undefined, [{ path: 'run-all.sh', text: 'echo hello\n' }])).toBeUndefined()
-  expect(environmentGate('bash run-all.sh', 'check', PROD, undefined, [{ path: 'run-all.sh', text: `${DEPLOY}\n` }])).toBeUndefined()
+  expect(environmentGate('bash run-all.sh', 'enforce', PROD, undefined, found('echo hello\n'))).toBeUndefined()
+  expect(environmentGate('bash run-all.sh', 'check', PROD, undefined, found(`${DEPLOY}\n`))).toBeUndefined()
+})
+
+test('enforce refuses a raw Platform API write to production, and lets a read through', () => {
+  const write = `curl -X POST -d '{}' https://api.boomi.com/api/rest/v1/acc-1/Component`
+  expect(environmentGate(write, 'enforce', PROD)?.deny).toContain('POST /api/rest/v1/acc-1/Component')
+  expect(environmentGate(write, 'enforce', TEST_ENV)).toBeUndefined()
+  expect(environmentGate(`curl https://api.boomi.com/api/rest/v1/acc-1/Component`, 'enforce', PROD)).toBeUndefined()
+})
+
+test('enforce refuses a command that also touches .env, even aimed at a TEST environment', () => {
+  const refused = environmentGate(`sed -i '' 's/TEST/PROD/' .env && ${DEPLOY}`, 'enforce', TEST_ENV)
+  expect(refused?.short).toBe('the command also touches .env, so the environment could change while it runs')
+  expect(environmentGate(`${DEPLOY}`, 'enforce', TEST_ENV)).toBeUndefined()
+})
+
+test('enforce refuses a script it could not read, or a chain too long to check, whatever the environment', () => {
+  expect(environmentGate('bash missing.sh', 'enforce', TEST_ENV, undefined, { wrappers: [], unreadable: ['missing.sh'], overLimit: false })?.short).toBe(
+    "missing.sh couldn't be read, so what it runs can't be checked",
+  )
+  expect(environmentGate('bash long.sh', 'enforce', TEST_ENV, undefined, { wrappers: [], unreadable: [], overLimit: true })?.short).toBe(
+    'the scripts it runs go deeper or further than can be checked',
+  )
+  expect(environmentGate('bash long.sh', 'check', TEST_ENV, undefined, { wrappers: [], unreadable: ['x.sh'], overLimit: true })).toBeUndefined()
 })
 
 test('a wrapper script is read from the folder the command runs it in, after any cd before it', () => {

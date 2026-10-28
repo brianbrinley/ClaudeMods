@@ -4,7 +4,7 @@
 
 ## 0.62.0
 
-- **Production read-only for Companion, opt-in.** A new setting, `envCheck` (`/bc-dashboard config`, Budget), is off by default. `check` reads the environment that Companion's `.env` points at, by name and classification, from Boomi when the session starts, and keeps only that. `enforce` also refuses Companion deploys, undeploys and test runs to that environment unless it is classified TEST or DEV, including ones inside a script the command runs, and refuses when the environment isn't in Boomi's list or can't be read. Pushes are allowed. The refusal says why and tells Claude to stop.
+- **Production read-only for Companion, opt-in.** A new setting, `envCheck` (`/bc-dashboard config`, Budget), is off by default. `check` reads the environment that Companion's `.env` points at, by name and classification, from Boomi when the session starts, and keeps only that. `enforce` also refuses Companion deploys, undeploys and test runs to that environment unless it is classified TEST or DEV, including ones inside a script the command runs, and refuses when the environment isn't in Boomi's list or can't be read. The environment is read again for each command that could change it, since the `.env` can change during a session. Raw Platform API writes (curl and the like) count as changes too, and a command that also touches `.env` is refused. Scripts are followed up to three levels deep and 25 scripts; one that can't be read, or a chain past either limit, is refused. Any error in the check refuses the command. Pushes made through Companion are allowed. The refusal says why and tells Claude to stop.
 
 ## 0.61.1
 

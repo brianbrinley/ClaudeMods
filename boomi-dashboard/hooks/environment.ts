@@ -3,13 +3,22 @@
 // functions: nothing here touches the engine.
 
 import { scriptRuns } from './activity'
-import { wrapperScripts } from './budget-gate'
+import { platformWrites, wrapperScripts } from './budget-gate'
 
 /** What the production check does: off reads nothing, check reports, enforce also refuses. */
 export type EnvCheck = 'off' | 'check' | 'enforce'
 
 /** The environment the .env points at, as Boomi lists it. */
 export type Environment = { id: string; name: string; classification?: string }
+
+/** The scripts a command runs, read where they could be. `unreadable` names those that couldn't be read; `overLimit` says the chain is too long or too deep to check. */
+export type WrapperFind = {
+  wrappers: { path: string; text: string }[]
+  unreadable: string[]
+  overLimit: boolean
+}
+
+export const NO_WRAPPERS: WrapperFind = { wrappers: [], unreadable: [], overLimit: false }
 
 /** Companion steps that change the environment in .env: a deploy, an undeploy, a test run. */
 const CHANGES_ENVIRONMENT: Record<string, string> = {
@@ -62,34 +71,52 @@ export const environmentChanges = (command: string): string[] =>
     .map(run => CHANGES_ENVIRONMENT[run.kind]!)
 
 /**
- * Whether a shell command may run in the .env's environment, in enforce mode:
- * a deploy, undeploy or test run is refused unless the environment is listed
- * and classified TEST or DEV. `unknown` says why there is no environment to
- * check. Undefined lets the command run, and every mode other than enforce
- * lets it run.
+ * Every change a command and the scripts it runs would make in the .env's
+ * environment: Companion deploys, undeploys and test runs, and any Platform
+ * API write made with curl or a similar tool, since its target is unknown.
+ */
+export const environmentChangesIn = (command: string, found: WrapperFind = NO_WRAPPERS): string[] => {
+  const inside = (text: string, path?: string) => {
+    const suffix = path ? `, inside ${path}` : ''
+    return [...environmentChanges(text), ...platformWrites(text)].map(change => `${change}${suffix}`)
+  }
+  return [...inside(command), ...found.wrappers.flatMap(({ path, text }) => inside(text, path))]
+}
+
+/**
+ * Whether a shell command may run in the .env's environment, in enforce mode.
+ * Refused: a change to an environment that isn't TEST or DEV (or that Boomi
+ * doesn't list), and any command that also touches the .env, since the file
+ * could change while the command runs. Also refused: a script that couldn't
+ * be read, or a chain too long to check. `unknown` says why there is no
+ * environment to check. Undefined lets the command run; every mode other
+ * than enforce lets it run.
  */
 export const environmentGate = (
   command: string,
   mode: EnvCheck,
   environment: Environment | undefined,
   unknown = "the .env's environment isn't in Boomi's environment list, so it can't be checked",
-  wrappers: readonly { path: string; text: string }[] = [],
+  found: WrapperFind = NO_WRAPPERS,
 ): { deny: string; short: string } | undefined => {
   if (mode !== 'enforce') return undefined
-  const changes = [
-    ...environmentChanges(command),
-    ...wrappers.flatMap(({ path, text }) => environmentChanges(text).map(change => `${change}, inside ${path}`)),
-  ]
-  if (changes.length === 0) return undefined
-  if (environment?.classification && ALLOWED.has(environment.classification)) return undefined
-
-  const short = environment ? `${environment.name} is ${environment.classification ?? 'unclassified'}, not TEST or DEV` : unknown
-  return {
+  const refuse = (short: string, changes: string[]) => ({
     short,
     deny: [
-      `boomi-dashboard: refused: ${short}. Companion may not ${changes.join(' or ')} there in enforce mode (envCheck).`,
+      `boomi-dashboard: refused: ${short}. Companion may not run these in enforce mode (envCheck): ${changes.join('; ')}.`,
       `Not run: ${changes.join('; ')}.`,
       'Stop the Boomi work now and tell the user. Do not work around this: no curl or other calls to api.boomi.com, no running the script another way, no wrapper script. Production changes are a person\'s release through the normal process. The user can change envCheck with /bc-dashboard config.',
     ].join('\n'),
+  })
+  if (found.unreadable.length > 0) {
+    return refuse(`${found.unreadable.join(', ')} couldn't be read, so what it runs can't be checked`, found.unreadable.map(path => `read ${path}`))
   }
+  if (found.overLimit) return refuse('the scripts it runs go deeper or further than can be checked', ['run scripts that cannot be checked'])
+  const changes = environmentChangesIn(command, found)
+  if (changes.length === 0) return undefined
+  const touchesEnvFile = [command, ...found.wrappers.map(w => w.text)].some(text => /\.env\b/.test(text))
+  if (touchesEnvFile) return refuse('the command also touches .env, so the environment could change while it runs', changes)
+  if (environment?.classification && ALLOWED.has(environment.classification)) return undefined
+  const short = environment ? `${environment.name} is ${environment.classification ?? 'unclassified'}, not TEST or DEV` : unknown
+  return refuse(short, changes)
 }
