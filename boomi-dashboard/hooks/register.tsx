@@ -117,8 +117,7 @@ import {
 } from './activity'
 import type { Attention, BudgetLine, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
-import { environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, uncheckedRefusal, wrapperRuns } from './environment'
-import type { WrapperFind } from './environment'
+import { environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, wrapperRuns } from './environment'
 import type { EnvCheck, Environment } from './environment'
 import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { componentTable, hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
@@ -1187,58 +1186,25 @@ const loadEnvironment = async ($: Engine, settings: Settings): Promise<void> => 
   }
 }
 
-const WRAPPER_LIMIT = 25
-const WRAPPER_DEPTH = 3
-
-/**
- * The scripts a command runs, read recursively (a script that runs another
- * is followed, to WRAPPER_DEPTH levels). Enforce mode treats an unreadable
- * script, or a chain past either limit, as something it can't check.
- */
-const environmentWrappers = async ($: Engine, command: string): Promise<WrapperFind> => {
-  const found: WrapperFind = { wrappers: [], unreadable: [], overLimit: false }
-  const seen = new Set<string>()
-  const visit = async (text: string, folder: string, depth: number): Promise<void> => {
-    for (const { path, dir } of wrapperRuns(text)) {
-      const at = dir.startsWith('/') ? dir : dir ? `${folder}/${dir}` : folder
-      const full = path.startsWith('/') ? path : `${at}/${path.replace(/^\.\//, '')}`
-      if (seen.has(full)) continue
-      seen.add(full)
-      if (found.wrappers.length >= WRAPPER_LIMIT) {
-        found.overLimit = true
-        return
-      }
-      const body = await $.fs.read(full).then(String).catch(() => undefined)
-      if (body === undefined) {
-        found.unreadable.push(path)
-        continue
-      }
-      found.wrappers.push({ path, text: body })
-      if (depth < WRAPPER_DEPTH) await visit(body, full.slice(0, full.lastIndexOf('/')), depth + 1)
-      else if (wrapperRuns(body).length > 0) found.overLimit = true
-    }
-  }
-  await visit(command, await $.session.cwd(), 1)
-  return found
-}
-
 /**
  * The refusal for a Companion change in the .env's environment, in enforce
- * mode. The environment is read from Boomi for every command that might make
- * one, because the .env can change during a session. Any failure refuses
- * such a command rather than letting it through.
+ * mode. The environment is read from Boomi only for a command that makes a
+ * change, since the .env can change during a session. A command that runs a
+ * script of its own is refused without a read: the check can't see into it.
+ * A failure refuses the command rather than letting it through.
  */
 const environmentRefusal = async ($: Engine, settings: Settings, command: string) => {
   if (settings.envCheck !== 'enforce') return undefined
   try {
-    const found = await environmentWrappers($, command)
-    const isNothingToCheck = found.wrappers.length === 0 && found.unreadable.length === 0 && !found.overLimit && environmentChangesIn(command, found).length === 0
-    if (isNothingToCheck) return undefined
-    await loadEnvironment($, settings)
-    const target = await read($, envTarget)
-    return environmentGate(command, settings.envCheck, target.environment, target.note || undefined, found, settings.envFile)
+    const needsEnvironment = environmentChangesIn(command).length > 0 && wrapperRuns(command).length === 0
+    let target: { environment?: Environment; note: string } | undefined
+    if (needsEnvironment) {
+      await loadEnvironment($, settings)
+      target = await read($, envTarget)
+    }
+    return environmentGate(command, settings.envCheck, target?.environment, target?.note || undefined, settings.envFile)
   } catch {
-    return uncheckedRefusal(command, settings.envCheck, 'the environment check failed')
+    return environmentGate(command, settings.envCheck, undefined, 'the environment check failed', settings.envFile)
   }
 }
 
@@ -3371,7 +3337,7 @@ export const register: Register = (on, options) => {
     const command = String(e.command ?? '')
     // A spent budget, with budgetEnforce confirm or block, stops Companion changes before they run.
     // Production read-only (envCheck enforce) comes first: a refused change never reaches the budget question.
-    const envRefusal = await environmentRefusal($, settings, command).catch(() => uncheckedRefusal(command, settings.envCheck, 'the environment check failed'))
+    const envRefusal = await environmentRefusal($, settings, command).catch(() => environmentGate(command, settings.envCheck, undefined, 'the environment check failed', settings.envFile))
     const gate = envRefusal ?? (await budgetGate($, settings, command).catch(() => undefined))
     const runs = scriptRuns(command)
     const checks = bdiStatusChecks(command)

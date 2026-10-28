@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { environmentChanges, environmentGate, environmentNamed, environmentsFrom, rewritesScript, uncheckedRefusal, wrapperRuns } from '../hooks/environment'
+import { environmentChanges, environmentGate, environmentNamed, environmentsFrom, wrapperRuns } from '../hooks/environment'
 import type { Environment } from '../hooks/environment'
 
 const S = 'bash /home/me/.claude/plugins/cache/boomi-companion/bc-integration/1.4.0/skills/boomi-integration/scripts'
@@ -33,12 +33,13 @@ test('the changes a command makes in the .env environment are deploy, undeploy a
 test('off and check never refuse, whatever the environment', () => {
   expect(environmentGate(DEPLOY, 'off', PROD)).toBeUndefined()
   expect(environmentGate(DEPLOY, 'check', PROD)).toBeUndefined()
+  expect(environmentGate('bash run-all.sh', 'check', PROD)).toBeUndefined()
 })
 
 test('enforce refuses a deploy, undeploy or test run to a production environment, and says why', () => {
   const refused = environmentGate(DEPLOY, 'enforce', PROD)
   expect(refused?.short).toBe('Production is PROD, not TEST or DEV')
-  expect(refused?.deny).toContain('Not run: deploy')
+  expect(refused?.deny).toContain('Not run: deploy.')
   expect(refused?.deny).toContain('Do not work around this')
   expect(environmentGate(`${S}/boomi-undeploy.sh dep-1`, 'enforce', PROD)).toBeDefined()
   expect(environmentGate(TEST, 'enforce', PROD)).toBeDefined()
@@ -55,14 +56,6 @@ test('enforce refuses when the environment is unknown or has a classification it
   expect(environmentGate(DEPLOY, 'enforce', { id: 'e-x', name: 'Odd', classification: undefined })?.short).toBe('Odd is unclassified, not TEST or DEV')
 })
 
-test('enforce refuses a wrapper script that deploys to production, and names the script', () => {
-  const found = (text: string) => ({ wrappers: [{ path: 'run-all.sh', text }], unreadable: [], overLimit: false })
-  const refused = environmentGate('bash run-all.sh', 'enforce', PROD, undefined, found(`${DEPLOY}\n`))
-  expect(refused?.deny).toContain('Not run: deploy, inside run-all.sh')
-  expect(environmentGate('bash run-all.sh', 'enforce', PROD, undefined, found('echo hello\n'))).toBeUndefined()
-  expect(environmentGate('bash run-all.sh', 'check', PROD, undefined, found(`${DEPLOY}\n`))).toBeUndefined()
-})
-
 test('enforce refuses a raw Platform API write to production, and lets a read through', () => {
   const write = `curl -X POST -d '{}' https://api.boomi.com/api/rest/v1/acc-1/Component`
   expect(environmentGate(write, 'enforce', PROD)?.deny).toContain('POST /api/rest/v1/acc-1/Component')
@@ -70,23 +63,20 @@ test('enforce refuses a raw Platform API write to production, and lets a read th
   expect(environmentGate(`curl https://api.boomi.com/api/rest/v1/acc-1/Component`, 'enforce', PROD)).toBeUndefined()
 })
 
-test('enforce refuses a command that also touches .env, even aimed at a TEST environment', () => {
+test('enforce refuses a command that also names the .env, even aimed at a TEST environment', () => {
   const refused = environmentGate(`sed -i '' 's/TEST/PROD/' .env && ${DEPLOY}`, 'enforce', TEST_ENV)
   expect(refused?.short).toBe('the command also touches .env, so the environment could change while it runs')
-  expect(environmentGate(`${DEPLOY}`, 'enforce', TEST_ENV)).toBeUndefined()
+  expect(environmentGate(DEPLOY, 'enforce', TEST_ENV)).toBeUndefined()
 })
 
-test('enforce refuses a script it could not read, or a chain too long to check, whatever the environment', () => {
-  expect(environmentGate('bash missing.sh', 'enforce', TEST_ENV, undefined, { wrappers: [], unreadable: ['missing.sh'], overLimit: false })?.short).toBe(
-    "missing.sh couldn't be read, so what it runs can't be checked",
+test('the configured env file counts as the .env, under whatever name it has', () => {
+  expect(environmentGate(`${DEPLOY} && cat deploy.cfg`, 'enforce', TEST_ENV, undefined, 'config/deploy.cfg')?.short).toBe(
+    'the command also touches deploy.cfg, so the environment could change while it runs',
   )
-  expect(environmentGate('bash long.sh', 'enforce', TEST_ENV, undefined, { wrappers: [], unreadable: [], overLimit: true })?.short).toBe(
-    'the scripts it runs go deeper or further than can be checked',
-  )
-  expect(environmentGate('bash long.sh', 'check', TEST_ENV, undefined, { wrappers: [], unreadable: ['x.sh'], overLimit: true })).toBeUndefined()
+  expect(environmentGate(DEPLOY, 'enforce', TEST_ENV, undefined, 'config/deploy.cfg')).toBeUndefined()
 })
 
-test('a wrapper script is read from the folder the command runs it in, after any cd before it', () => {
+test('a script the command runs is found, with the folder it runs from after any cd', () => {
   expect(wrapperRuns('cd deploy && bash run.sh')).toEqual([{ path: 'run.sh', dir: 'deploy' }])
   expect(wrapperRuns('bash run.sh; cd /opt/x && ./go.sh')).toEqual([
     { path: 'run.sh', dir: '' },
@@ -96,26 +86,13 @@ test('a wrapper script is read from the folder the command runs it in, after any
   expect(wrapperRuns(`${S}/boomi-deploy.sh x.xml`)).toEqual([])
 })
 
-test('when the check itself fails, a command that runs a script or changes the environment is refused', () => {
-  expect(uncheckedRefusal('bash run-all.sh', 'enforce', 'the environment check failed')?.short).toBe("run-all.sh couldn't be read, so what it runs can't be checked")
-  expect(uncheckedRefusal(DEPLOY, 'enforce', 'the environment check failed')?.short).toBe('the environment check failed')
-  expect(uncheckedRefusal('ls -la', 'enforce', 'the environment check failed')).toBeUndefined()
-  expect(uncheckedRefusal('bash run-all.sh', 'check', 'the environment check failed')).toBeUndefined()
-})
-
-test('a command that rewrites a script it runs is refused, whatever the environment', () => {
-  expect(rewritesScript('cp new.sh run.sh && bash run.sh', 'run.sh')).toBe(true)
-  expect(rewritesScript('echo deploy > run.sh; bash run.sh', 'run.sh')).toBe(true)
-  expect(rewritesScript('bash run.sh > run.log', 'run.sh')).toBe(false)
-  const found = { wrappers: [{ path: 'run.sh', text: 'echo hi' }], unreadable: [], overLimit: false }
-  expect(environmentGate('echo x > run.sh && bash run.sh', 'enforce', TEST_ENV, undefined, found)?.short).toBe("the command rewrites run.sh and then runs it, so what runs can't be checked")
-})
-
-test('the configured env file counts as the .env, under whatever name it has', () => {
-  expect(environmentGate(`${DEPLOY} && cat deploy.cfg`, 'enforce', TEST_ENV, undefined, undefined, 'config/deploy.cfg')?.short).toBe(
-    'the command also touches deploy.cfg, so the environment could change while it runs',
-  )
-  expect(environmentGate(DEPLOY, 'enforce', TEST_ENV, undefined, undefined, 'config/deploy.cfg')).toBeUndefined()
+test('enforce refuses any command that runs a script of its own, whatever it does, and check mode lets it run', () => {
+  const refused = environmentGate('bash run-all.sh', 'enforce', TEST_ENV)
+  expect(refused?.short).toBe('the command runs run-all.sh, a script the check can\'t see into')
+  expect(refused?.deny).toContain('Not run: the script run-all.sh.')
+  expect(environmentGate('cd deploy && ./go.sh', 'enforce', PROD)).toBeDefined()
+  expect(environmentGate('bash run-all.sh', 'check', PROD)).toBeUndefined()
+  expect(environmentGate(`${DEPLOY} && bash run-all.sh`, 'enforce', TEST_ENV)).toBeDefined()
 })
 
 test('enforce never refuses a push, a check or a command that changes nothing', () => {
