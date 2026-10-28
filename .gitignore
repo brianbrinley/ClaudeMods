@@ -1,9 +1,6 @@
 # Credentials a mod reads (Boomi Companion's .env, for one)
 .env
 
-# This machine's review rules for the security-guidance plugin
-.claude/claude-security-guidance.local.md
-
 # Laid beside each mod by Claude Code when it loads it
 */.claude-plugin/types/
 
