@@ -117,7 +117,7 @@ import {
 } from './activity'
 import type { Attention, BudgetLine, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
-import { environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, wrapperRuns } from './environment'
+import { environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, uncheckedRefusal, wrapperRuns } from './environment'
 import type { WrapperFind } from './environment'
 import type { EnvCheck, Environment } from './environment'
 import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
@@ -1232,13 +1232,13 @@ const environmentRefusal = async ($: Engine, settings: Settings, command: string
   if (settings.envCheck !== 'enforce') return undefined
   try {
     const found = await environmentWrappers($, command)
-    if (found.unreadable.length === 0 && !found.overLimit && environmentChangesIn(command, found).length === 0) return undefined
+    const isNothingToCheck = found.wrappers.length === 0 && found.unreadable.length === 0 && !found.overLimit && environmentChangesIn(command, found).length === 0
+    if (isNothingToCheck) return undefined
     await loadEnvironment($, settings)
     const target = await read($, envTarget)
-    return environmentGate(command, settings.envCheck, target.environment, target.note || undefined, found)
+    return environmentGate(command, settings.envCheck, target.environment, target.note || undefined, found, settings.envFile)
   } catch {
-    if (environmentChangesIn(command).length === 0 && wrapperRuns(command).length === 0) return undefined
-    return environmentGate(command, settings.envCheck, undefined, 'the environment check failed')
+    return uncheckedRefusal(command, settings.envCheck, 'the environment check failed')
   }
 }
 
@@ -3371,7 +3371,7 @@ export const register: Register = (on, options) => {
     const command = String(e.command ?? '')
     // A spent budget, with budgetEnforce confirm or block, stops Companion changes before they run.
     // Production read-only (envCheck enforce) comes first: a refused change never reaches the budget question.
-    const envRefusal = await environmentRefusal($, settings, command).catch(() => environmentGate(command, settings.envCheck, undefined, 'the environment check failed'))
+    const envRefusal = await environmentRefusal($, settings, command).catch(() => uncheckedRefusal(command, settings.envCheck, 'the environment check failed'))
     const gate = envRefusal ?? (await budgetGate($, settings, command).catch(() => undefined))
     const runs = scriptRuns(command)
     const checks = bdiStatusChecks(command)

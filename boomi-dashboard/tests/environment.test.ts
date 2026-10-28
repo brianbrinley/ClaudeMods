@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { environmentChanges, environmentGate, environmentNamed, environmentsFrom, wrapperRuns } from '../hooks/environment'
+import { environmentChanges, environmentGate, environmentNamed, environmentsFrom, rewritesScript, uncheckedRefusal, wrapperRuns } from '../hooks/environment'
 import type { Environment } from '../hooks/environment'
 
 const S = 'bash /home/me/.claude/plugins/cache/boomi-companion/bc-integration/1.4.0/skills/boomi-integration/scripts'
@@ -94,6 +94,28 @@ test('a wrapper script is read from the folder the command runs it in, after any
   ])
   expect(wrapperRuns('cd deploy && cd .. && source env.sh')).toEqual([{ path: 'env.sh', dir: 'deploy/..' }])
   expect(wrapperRuns(`${S}/boomi-deploy.sh x.xml`)).toEqual([])
+})
+
+test('when the check itself fails, a command that runs a script or changes the environment is refused', () => {
+  expect(uncheckedRefusal('bash run-all.sh', 'enforce', 'the environment check failed')?.short).toBe("run-all.sh couldn't be read, so what it runs can't be checked")
+  expect(uncheckedRefusal(DEPLOY, 'enforce', 'the environment check failed')?.short).toBe('the environment check failed')
+  expect(uncheckedRefusal('ls -la', 'enforce', 'the environment check failed')).toBeUndefined()
+  expect(uncheckedRefusal('bash run-all.sh', 'check', 'the environment check failed')).toBeUndefined()
+})
+
+test('a command that rewrites a script it runs is refused, whatever the environment', () => {
+  expect(rewritesScript('cp new.sh run.sh && bash run.sh', 'run.sh')).toBe(true)
+  expect(rewritesScript('echo deploy > run.sh; bash run.sh', 'run.sh')).toBe(true)
+  expect(rewritesScript('bash run.sh > run.log', 'run.sh')).toBe(false)
+  const found = { wrappers: [{ path: 'run.sh', text: 'echo hi' }], unreadable: [], overLimit: false }
+  expect(environmentGate('echo x > run.sh && bash run.sh', 'enforce', TEST_ENV, undefined, found)?.short).toBe("the command rewrites run.sh and then runs it, so what runs can't be checked")
+})
+
+test('the configured env file counts as the .env, under whatever name it has', () => {
+  expect(environmentGate(`${DEPLOY} && cat deploy.cfg`, 'enforce', TEST_ENV, undefined, undefined, 'config/deploy.cfg')?.short).toBe(
+    'the command also touches deploy.cfg, so the environment could change while it runs',
+  )
+  expect(environmentGate(DEPLOY, 'enforce', TEST_ENV, undefined, undefined, 'config/deploy.cfg')).toBeUndefined()
 })
 
 test('enforce never refuses a push, a check or a command that changes nothing', () => {
