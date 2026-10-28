@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import { environmentChanges, environmentGate, environmentNamed, environmentsFrom, wrapperRuns } from '../hooks/environment'
 import type { Environment } from '../hooks/environment'
+import { guardrails } from '../hooks/activity'
 
 const S = 'bash /home/me/.claude/plugins/cache/boomi-companion/bc-integration/1.4.0/skills/boomi-integration/scripts'
 const DEPLOY = `${S}/boomi-deploy.sh active-development/processes/Orders.xml`
@@ -93,6 +94,16 @@ test('enforce refuses any command that runs a script of its own, whatever it doe
   expect(environmentGate('cd deploy && ./go.sh', 'enforce', PROD)).toBeDefined()
   expect(environmentGate('bash run-all.sh', 'check', PROD)).toBeUndefined()
   expect(environmentGate(`${DEPLOY} && bash run-all.sh`, 'enforce', TEST_ENV)).toBeDefined()
+})
+
+test('the pane says what the production check is doing, and says nothing while it is off', () => {
+  expect(guardrails(undefined, undefined, { mode: 'off' })).toEqual([])
+  expect(guardrails(undefined, undefined, { mode: 'check', note: "the .env's environment isn't known yet" })[0]?.text).toBe(
+    "Production check on, not checking: the .env's environment isn't known yet",
+  )
+  expect(guardrails(undefined, undefined, { mode: 'check', name: 'Test', classification: 'TEST' })[0]).toEqual({ level: 'healthy', text: 'Production check: Test is TEST' })
+  expect(guardrails(undefined, undefined, { mode: 'check', name: 'Production', classification: 'PROD' })[0]?.level).toBe('warning')
+  expect(guardrails(undefined, undefined, { mode: 'enforce', name: 'Production', classification: 'PROD' })[0]?.level).toBe('serious')
 })
 
 test('enforce never refuses a push, a check or a command that changes nothing', () => {

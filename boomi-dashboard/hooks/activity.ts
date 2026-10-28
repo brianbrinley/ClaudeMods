@@ -2223,8 +2223,18 @@ const SCRIPT_NOUN: Record<string, string> = { create: 'create', push: 'push', de
  * What boomi-standards and boomi-runtime say about the session, as lines.
  * A mod that isn't loaded (undefined) adds nothing.
  */
-export const guardrails = (standards: StandardsSeen | undefined, runtime: RuntimeSeen | undefined): GuardLine[] => {
+/** The production check's state for the pane: its mode, and the .env's environment as Boomi lists it. */
+export type EnvGuard = { mode: 'off' | 'check' | 'enforce'; name?: string; classification?: string; note?: string }
+
+export const guardrails = (standards: StandardsSeen | undefined, runtime: RuntimeSeen | undefined, environment?: EnvGuard): GuardLine[] => {
   const lines: GuardLine[] = []
+  if (environment && environment.mode !== 'off') {
+    const { mode, name, classification, note } = environment
+    if (!name) lines.push({ level: 'warning', text: `Production check on, not checking: ${note || "the .env's environment isn't known yet"}` })
+    else if (classification === 'TEST' || classification === 'DEV') lines.push({ level: 'healthy', text: `Production check: ${name} is ${classification}` })
+    else if (mode === 'enforce') lines.push({ level: 'serious', text: `Production check: ${name} is ${classification ?? 'unclassified'}, so Companion deploys, undeploys and test runs to it are refused` })
+    else lines.push({ level: 'warning', text: `Production check: ${name} is ${classification ?? 'unclassified'}; enforce would refuse Companion changes to it` })
+  }
   if (standards) {
     const last = standards.last
     const tally = `${standards.checks} check${standards.checks === 1 ? '' : 's'}, ${standards.blocked} blocked`

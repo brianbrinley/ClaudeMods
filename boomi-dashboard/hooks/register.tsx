@@ -115,7 +115,7 @@ import {
   rerunArgs,
   knownName,
 } from './activity'
-import type { Attention, BudgetLine, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
+import type { Attention, BudgetLine, EnvGuard, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, wrapperRuns } from './environment'
 import type { EnvCheck, Environment } from './environment'
@@ -2061,7 +2061,7 @@ const USAGE = [
  * redraws the pane when it changes. The engine wants each reference spelled
  * out where it's read.
  */
-const guardLines = async ($: Engine) => {
+const guardLines = async ($: Engine, settings: Settings) => {
   const valueOf = async (got: Promise<unknown>) => {
     try {
       return ((await got) as { value?: unknown }).value
@@ -2069,9 +2069,17 @@ const guardLines = async ($: Engine) => {
       return undefined
     }
   }
+  const target = await read($, envTarget)
+  const environment: EnvGuard = {
+    mode: settings.envCheck,
+    name: target.environment?.name,
+    classification: target.environment?.classification,
+    note: target.note || undefined,
+  }
   return guardrails(
     (await valueOf($.state.get({ plugin: 'boomi-standards', key: 'activity' } as never))) as StandardsSeen | undefined,
     (await valueOf($.state.get({ plugin: 'boomi-runtime', key: 'runtime' } as never))) as RuntimeSeen | undefined,
+    environment,
   )
 }
 
@@ -2084,7 +2092,7 @@ const withBudget = async ($: Engine, settings: Settings): Promise<Usage> => {
 const summaryNow = async ($: Engine, settings: Settings) =>
   [
     summary(await read($, dashboard), await withBudget($, settings), await $.clock.now(), settings.windowMs),
-    guardrailText(await guardLines($)),
+    guardrailText(await guardLines($, settings)),
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -3779,7 +3787,7 @@ export const register: Register = (on, options) => {
     const themeNow = await themeOf($, settings)
     const drawnNow = await drawnThemeOf($, settings)
     const markNow = settings.hasLogo ? markOf(drawnNow) : undefined
-    const guards = await guardLines($)
+    const guards = await guardLines($, settings)
     const past = await read($, history)
     const pastHidden = await read($, isPastCollapsed)
     const themeListOpen = await read($, isThemeListOpen)
