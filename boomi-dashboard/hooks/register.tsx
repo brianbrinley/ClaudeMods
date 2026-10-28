@@ -112,6 +112,7 @@ import {
   parseActivityLog,
   newLogSteps,
   PAUSED,
+  loginNudgeWords,
   rerunArgs,
   knownName,
 } from './activity'
@@ -580,6 +581,7 @@ const refreshStatus = async ($: Engine, settings: Settings) => {
   const read0 = { ...(await usageOf($)), budgetUsd: settings.budgetUsd }
   const usage: Usage = await withUse($, { ...read0, companion: await companionBudget($, settings, read0) })
   usage.isPaused = await notePause($, settings, usage)
+  usage.login = loginNudgeWords((await read($, companionLogin)).nudge)
   const line = statusLine(await read($, dashboard), now, settings.windowMs, usage, (await read($, recap)) ?? undefined)
   const tips = settings.promptCheck === 'off' ? undefined : statusPart(await read($, promptTips), (await read($, promptHeld)) !== null)
   $.ui.status(tips ? `${line} · ${tips}` : line)
