@@ -75,6 +75,16 @@ export const environmentChangesIn = (command: string): string[] => [...environme
  * `unknown` says why there is no environment to check. Undefined lets the
  * command run, and every mode other than enforce lets it run.
  */
+/** The refusal for a Companion change in enforce mode: the reason, what was not run, and what Claude must do. */
+export const refusal = (short: string, notRun: string): { deny: string; short: string } => ({
+  short,
+  deny: [
+    `boomi-dashboard: refused: ${short}. Companion may not run this in enforce mode (envCheck).`,
+    `Not run: ${notRun}.`,
+    'Stop the Boomi work now and tell the user. Do not work around this: no curl or other calls to api.boomi.com, no running the script another way, no wrapper script. Production changes are a person\'s release through the normal process. The user can change envCheck with /bc-dashboard config.',
+  ].join('\n'),
+})
+
 export const environmentGate = (
   command: string,
   mode: EnvCheck,
@@ -83,26 +93,18 @@ export const environmentGate = (
   envFile = '.env',
 ): { deny: string; short: string } | undefined => {
   if (mode !== 'enforce') return undefined
-  const refuse = (short: string, notRun: string) => ({
-    short,
-    deny: [
-      `boomi-dashboard: refused: ${short}. Companion may not run this in enforce mode (envCheck).`,
-      `Not run: ${notRun}.`,
-      'Stop the Boomi work now and tell the user. Do not work around this: no curl or other calls to api.boomi.com, no running the script another way, no wrapper script. Production changes are a person\'s release through the normal process. The user can change envCheck with /bc-dashboard config.',
-    ].join('\n'),
-  })
   const scripts = wrapperRuns(command).map(run => run.path)
   if (scripts.length > 0) {
-    return refuse(`the command runs ${scripts.join(', ')}, a script the check can't see into`, `the script${scripts.length > 1 ? 's' : ''} ${scripts.join(', ')}`)
+    return refusal(`the command runs ${scripts.join(', ')}, a script the check can't see into`, `the script${scripts.length > 1 ? 's' : ''} ${scripts.join(', ')}`)
   }
   const changes = environmentChangesIn(command)
   if (changes.length === 0) return undefined
   const envName = envFile.split('/').pop() || '.env'
   const names = [...new Set(['.env', envName])].map(name => new RegExp(`${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`))
   if (names.some(name => name.test(command))) {
-    return refuse(`the command also touches ${envName}, so the environment could change while it runs`, changes.join('; '))
+    return refusal(`the command also touches ${envName}, so the environment could change while it runs`, changes.join('; '))
   }
   if (environment?.classification && ALLOWED.has(environment.classification)) return undefined
   const short = environment ? `${environment.name} is ${environment.classification ?? 'unclassified'}, not TEST or DEV` : unknown
-  return refuse(short, changes.join('; '))
+  return refusal(short, changes.join('; '))
 }

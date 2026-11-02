@@ -2,7 +2,7 @@
 // only the Companion roles, nothing broader. Plain functions: nothing here
 // touches the engine.
 
-/** The roles the boomi-ai-role-setup skill creates for Companion: full access in non-PROD, read-only in PROD. */
+/** The Companion roles by name: full access in non-PROD, read-only in PROD. Whoever set them up in Boomi may not have any Claude skill, so nothing here depends on one. */
 export const COMPANION_ROLES: readonly string[] = ['CR-Boomi-Companion-Non-Prod-FullAccess', 'CR-Boomi-Companion-Prod-ReadOnly']
 
 /** A role in the account, with the privileges it grants. */
@@ -28,6 +28,15 @@ export const accountRolesFrom = (rows: readonly Record<string, unknown>[]): Acco
       privileges: Array.isArray(raw.Privileges) ? raw.Privileges.map(privilegeName).filter(Boolean) : [],
     }))
     .filter(role => role.id)
+
+/**
+ * Why enforce mode refuses a Companion change, from the login check: only a
+ * confirmed non-dedicated login (an admin role, or roles beyond the Companion
+ * ones). A warning (roles that couldn't be read) is not refused, so the check
+ * fails open until the role endpoints are confirmed live.
+ */
+export const loginRefusal = (check: LoginCheck | undefined): string | undefined =>
+  check && (check.level === 'critical' || check.level === 'serious') ? check.text : undefined
 
 /**
  * The check for the .env login, from the IDs of the roles linked to it and

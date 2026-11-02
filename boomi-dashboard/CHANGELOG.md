@@ -2,6 +2,12 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.63.0
+
+- **Enforce also refuses a Companion change from a login that isn't dedicated to Companion.** With `envCheck` on `enforce`, a deploy, undeploy, test run or raw Platform API write is refused when the `.env` login holds an account-admin role, or roles beyond the two Companion roles (`CR-Boomi-Companion-Non-Prod-FullAccess`, `CR-Boomi-Companion-Prod-ReadOnly`). The refusal says which role is the problem and tells Claude to stop. The login's roles are read again for each such command, since the `.env` can change during a session. Pushes are not refused, matching the production gate.
+- **An unreadable set of roles is not refused.** If Boomi's role lists can't be read, the pane and status line show a warning and the change goes ahead. This is deliberate until the role endpoints are confirmed live; it's the first thing to tighten after that.
+- The refusal wording is shared with the production gate, and no longer depends on any Claude skill: the two roles are named, and the setup is an admin's job in Boomi.
+
 ## 0.62.1
 
 - **The login nudge is on the status line too.** When Companion's `.env` login looks like your own (the Claude account you're signed into, your `personalLogin`, or a person's name), the status line shows a warning with it, after any budget pause, so it's visible without opening the pane. Same check, read locally at session start, nothing new read from Boomi.

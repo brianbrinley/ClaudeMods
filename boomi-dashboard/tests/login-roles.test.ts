@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { accountRolesFrom, loginCheck } from '../hooks/login-roles'
+import { accountRolesFrom, loginCheck, loginRefusal } from '../hooks/login-roles'
 import type { AccountRole } from '../hooks/login-roles'
 
 const FULL = { id: 'r-full', name: 'CR-Boomi-Companion-Non-Prod-FullAccess', privileges: ['API'] }
@@ -28,6 +28,14 @@ test('an account admin privilege is critical, whatever else the login holds', ()
 test('a login with no roles, or a role it can\'t read, is a warning', () => {
   expect(loginCheck([], ROLES).level).toBe('warning')
   expect(loginCheck(['r-full', 'r-missing'], ROLES)).toEqual({ level: 'warning', text: "The .env login holds 2 roles, and 1 of them couldn't be read" })
+})
+
+test('enforce refuses only a confirmed non-dedicated login, not an unreadable one', () => {
+  expect(loginRefusal(undefined)).toBeUndefined()
+  expect(loginRefusal({ level: 'healthy', text: 'ok' })).toBeUndefined()
+  expect(loginRefusal({ level: 'warning', text: "couldn't read" })).toBeUndefined()
+  expect(loginRefusal({ level: 'serious', text: 'holds roles beyond the Companion roles: Standard User' })).toBe('holds roles beyond the Companion roles: Standard User')
+  expect(loginRefusal(loginCheck(['r-full', 'r-admin'], ROLES))).toBe('The .env login holds an account admin role: Administrator')
 })
 
 test('privileges are read as names whether Boomi sends strings or objects', () => {
