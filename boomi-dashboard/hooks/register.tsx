@@ -118,11 +118,11 @@ import {
 } from './activity'
 import type { Attention, BudgetLine, EnvGuard, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
-import { environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, wrapperRuns } from './environment'
+import { environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, refusal, wrapperRuns } from './environment'
 import type { EnvCheck, Environment } from './environment'
 import { loginNudge } from './companion-user'
 import type { LoginNudge } from './companion-user'
-import { accountRolesFrom, loginCheck } from './login-roles'
+import { accountRolesFrom, loginCheck, loginRefusal } from './login-roles'
 import type { LoginCheck } from './login-roles'
 import { agentstudioReading, bdiDiagnosis, bdiFailedStep, bdiRunId, connectordevReading, bdiRunReading, bdiStatusChecks, causeWords, datahubDeployReading, datahubStatusChecks, deployState, quarantineChecks, quarantineReading, recipeComponents } from './products'
 import { componentTable, hasEarlierSteps, reportHtml, scoped, stepsToMatch, transcriptsFolder } from './report-html'
@@ -1254,13 +1254,19 @@ const loadCompanionLogin = async ($: Engine, settings: Settings): Promise<void> 
 const environmentRefusal = async ($: Engine, settings: Settings, command: string) => {
   if (settings.envCheck !== 'enforce') return undefined
   try {
-    const needsEnvironment = environmentChangesIn(command).length > 0 && wrapperRuns(command).length === 0
+    const changes = environmentChangesIn(command)
+    const needsEnvironment = changes.length > 0 && wrapperRuns(command).length === 0
     let target: { environment?: Environment; note: string } | undefined
     if (needsEnvironment) {
       await loadEnvironment($, settings)
       target = await read($, envTarget)
     }
-    return environmentGate(command, settings.envCheck, target?.environment, target?.note || undefined, settings.envFile)
+    const gate = environmentGate(command, settings.envCheck, target?.environment, target?.note || undefined, settings.envFile)
+    if (gate || changes.length === 0) return gate
+    // A change also needs the .env login to hold only Companion's roles. Read again, since the .env can change during a session.
+    await loadCompanionLogin($, settings)
+    const reason = loginRefusal((await read($, companionLogin)).check)
+    return reason ? refusal(`the .env login isn't dedicated to Companion (${reason})`, changes.join('; ')) : undefined
   } catch {
     return environmentGate(command, settings.envCheck, undefined, 'the environment check failed', settings.envFile)
   }

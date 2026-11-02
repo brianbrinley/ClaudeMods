@@ -429,3 +429,21 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** none shows `BOOMI_API_TOKEN` or any part of its value. **Fail:** any does.
 - [ ] **T8. Restore.** Put the original `.env` back and set `envCheck` to `off`.
   **Pass:** the `.env` matches its original contents, and the next session shows no environment name. **Fail:** anything differs.
+
+## U. Dedicated login (boomi-dashboard 0.63.0)
+
+*In a real Claude Code session in a Companion folder, with `envCheck` on `enforce` and a `.env` that points at a TEST environment. Work on a copy of the `.env`: U2 and U3 change `BOOMI_USERNAME` (or the roles on that login in Boomi), and U5 restores it. Nothing here should reach PROD. The login's roles are only read from Boomi, so a shared or admin login must not be used for U2 or U3 without the person who owns it agreeing.*
+
+- [ ] **U1. Dedicated login passes.** Use a login that holds only `CR-Boomi-Companion-Non-Prod-FullAccess` (and `CR-Boomi-Companion-Prod-ReadOnly` if it's set up). Ask Claude to run a test execution of a process.
+  **Pass:** the pane's login line says the login holds only the Companion roles; the run goes ahead. **Fail:** the run is refused, or the pane says the login holds roles beyond them.
+- [ ] **U2. Extra role refused.** Add one role that isn't a Companion role (for example `Standard User`) to that login in Boomi. Start a new session and ask Claude to run a test execution.
+  **Pass:** the run is refused, and the refusal says the login holds roles beyond the Companion roles and names the extra role. **Fail:** the run goes ahead.
+- [ ] **U3. Admin role refused.** Add `Administrator` (or another account-admin role) to that login, instead of U2's role. Start a new session and ask Claude to run a test execution.
+  **Pass:** the run is refused, and the refusal says the login holds an account admin role and names it. **Fail:** the run goes ahead.
+- [ ] **U4. A push is still allowed.** With the login from U2 or U3, ask Claude to push a component to Boomi.
+  **Pass:** the push goes ahead; nothing about the login refuses it. **Fail:** the push is refused.
+- [ ] **U5. Unreadable roles go ahead, with a warning.** With the login from U1, make Boomi's role list unreadable for the check (for example, point `BOOMI_ACCOUNT_ID` at an account the login can't read roles for, in the copy of the `.env`, then restore it). Start a new session and ask Claude to run a test execution.
+  **Pass:** the pane shows the warning "Couldn't read the .env login's roles from Boomi", the run goes ahead, and the warning is visible on the status line too. **Fail:** the run is refused, or no warning shows.
+  *This is the deliberate fail-open case (see the 0.63.0 CHANGELOG entry). Record here whether the warning was seen; it is the place to confirm the pass-through is visible before it is tightened.*
+- [ ] **U6. Restore.** Put the original `.env` back, remove any test role from the login in Boomi, and set `envCheck` to `off`.
+  **Pass:** the `.env` matches its original contents, the login holds only its original roles, and the next session shows no login warning. **Fail:** anything differs.
