@@ -98,6 +98,8 @@ A banner above the prompt shows the latest step and what needs attention, and th
 ◆ BC Dashboard Tip: Why? on a failed test reads its log; Ask Claude to fix drafts the request │ $0.00 this session   [ Open ]  [ Hide ]
 ```
 
+Some of the tips are about keeping tokens down: `/clear` between tasks, the current task in a short `CLAUDE.md`, `/compact` with what to keep, searches and line ranges instead of whole files, `/context` to see what's using your tokens, and the [token guard](#token-guard).
+
 If Claude Code can tell which Companion plugins are turned on, the first tip lists them, and you won't see tips for plugins you don't have:
 
 ```text
@@ -169,6 +171,21 @@ Tokens: 412k new (18k in · 44k out · 350k cache writes) · 3.30M cache reads
 Spend is the session's cost as `/cost` reports it. On a Claude seat, that's what the same usage would cost on the API, not what you're billed. A step's share is what Claude spent since the step before it, and a component's is the total of all its steps.
 
 **Budget:** if you set `budgetUsd`, the status line, the summary and the SPEND gauge warn you from 80% (`◐ 84% of the $5.00 budget`) and again once it's spent, with one toast at each point. Out of the box that's all it does, and nothing gets stopped. To make a spent budget actually pause or stop Companion's changes, see [Budget enforcement](#budget-enforcement).
+
+### Token guard
+
+The token guard is there if you want help keeping a session's tokens down. It's yours to turn on, and works only where Companion does:
+
+```text
+/bc-dashboard config tokenGuard suggest
+```
+
+Until you do, nothing is stopped and nothing warns. `tokenGuard` starts on `offer`: a toast names the setting as a session starts, and comes back only when Claude has just read a large file whole or the context has filled, at most three times a session and 30 minutes apart. `off` stays silent.
+
+With it on:
+
+- **Large reads.** When Claude asks for all of a file over `largeReadKb` (40 KB, about 10K tokens), the read is refused once, and Claude is told to search or read a range. If it needs the whole file, the same read again goes ahead, so nothing is out of reach. Images, PDFs and notebooks are left alone.
+- **A filling context.** At `contextWarnPercent` (50%), a toast says so, the prompt box offers `/compact` (Tab takes it), and the pane's CONTEXT gauge shows `◐ /compact or /clear soon`. It warns once each time the context gets there. It compacts nothing itself. If you set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, keep this below the point they compact at.
 
 ### Your Claude usage limits
 
@@ -503,6 +520,9 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to 
 | `activityLogPrompt` | `ask` | Whether to offer, at the start of a session in a Companion folder, to add `BOOMI_COMPANION_LOG_ACTIVITY=1` to its `.env`. `ask` offers until you say yes or never; `never` stops the offer. |
 | `toasts` | `true` | Toasts for failures, finished deploys and tests, and watched changes. |
 | `banner` | `true` | The banner above the prompt, plus a new session's recap and tips. |
+| `tokenGuard` | `offer` | `suggest` [warns when the context fills and turns back a large whole-file read once](#token-guard). `offer` does neither, and mentions the guard as a session starts and now and then. `off` stays silent. |
+| `largeReadKb` | `40` | With `tokenGuard` on `suggest`, a file over this size, read whole in one go, is turned back once. `0` never turns a read back. |
+| `contextWarnPercent` | `50` | With `tokenGuard` on `suggest`, how full the context gets before the warning and the `/compact` offer. `0` never warns. |
 | `budgetUsd` | `0` | The session's spend budget, in US dollars. `0` turns it off. |
 | `companionShare` | `0` | Companion's share of your weekly usage limit, as a percent. `0` turns it off. |
 | `companionSharePeriod` | `week` | What the share covers: `day`, `week` or `month`. |

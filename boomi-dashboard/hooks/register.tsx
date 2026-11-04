@@ -131,6 +131,8 @@ import { changeLines } from './changes'
 import type { BoomiFacts, ReportScope, ReportStyle } from './report-html'
 import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, groupWithValue, listing, menuQuestion, parseValue, pastSpend, questionFor, show, valueOf } from './config'
 import type { Group, PastSpend, Value } from './config'
+import { COMPACT_SUGGESTION, CONTEXT_HINT, contextNudge, contextOffer, contextToast, isContextFull, isLargeRead, largeReadDeny, largeReadOffer, largeReadToast, mayMention, mentioned, startOffer } from './token-guard'
+import type { Mentions, TokenGuard } from './token-guard'
 import { blockedDetail, companionChanges, denyMessage, enforcementNote, platformWrites, spentBudgets, spentText } from './budget-gate'
 import type { Enforce } from './budget-gate'
 import { BOOMI_MARK_PNG, drawsPictures } from './boomi-mark'
@@ -399,6 +401,9 @@ type Settings = {
   promptSkip: ReadonlySet<string>
   promptView: 'auto' | 'manual' | 'off'
   seatBudgetUsd: number
+  tokenGuard: TokenGuard
+  largeReadKb: number
+  contextWarnPercent: number
   isReadingBreakdown: boolean
   /** The options these settings came from, for a change to one of them. */
   options: Readonly<Record<string, unknown>>
@@ -440,6 +445,9 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   promptSuggested: options.promptSuggested === 'check' ? 'check' : 'skip',
   activityLogPrompt: options.activityLogPrompt === 'never' ? 'never' : 'ask',
   seatBudgetUsd: Math.max(0, Number(options.seatBudgetUsd ?? 0) || 0),
+  tokenGuard: options.tokenGuard === 'off' || options.tokenGuard === 'suggest' ? options.tokenGuard : 'offer',
+  largeReadKb: Math.max(0, Number(options.largeReadKb ?? 40) || 0),
+  contextWarnPercent: Math.min(100, Math.max(0, Number(options.contextWarnPercent ?? 50) || 0)),
   isReadingBreakdown: options.usageBreakdown !== false,
   promptView: options.promptView === 'manual' || options.promptView === 'off' ? options.promptView : 'auto',
   promptSkip: new Set(String(options.promptSkip ?? '').split(/[\s,]+/).filter(Boolean)),
@@ -1655,6 +1663,42 @@ const rerunByNumber = async ($: Engine, settings: Settings, target: string): Pro
   if (typeof item === 'string') return item
   if (item.rerunId === undefined) return `${item.title} isn't a test Claude ran, so there's nothing to run again.`
   return rerun($, settings, item.rerunId)
+}
+
+/** Whether this session is one the token guard is about: it isn't turned off, and Companion works here. */
+const isGuarding = async ($: Engine, settings: Settings) => {
+  if (settings.tokenGuard === 'off') return false
+  await ensureSession($, settings).catch(() => undefined)
+  return (await read($, isCompanionFolder)) || Boolean((await read($, companionPlugins))?.length)
+}
+
+/** This session's mentions of the guard: how many, and when the last was. */
+type GuardMentions = { said: Mentions }
+
+/** Whether a mention of the guard is due, with toasts to say it in. */
+const canOfferGuard = async ($: Engine, settings: Settings, mentions: GuardMentions) =>
+  settings.isToasting && mayMention(mentions.said, await $.clock.now())
+
+/** Mentions the guard, and counts it. */
+const offerGuard = async ($: Engine, settings: Settings, mentions: GuardMentions, text: string) => {
+  mentions.said = mentioned(mentions.said, await $.clock.now())
+  toast($, settings, text)
+}
+
+/** After Claude's turn, says so once when the context has filled, and offers /compact. True when it did. */
+const nudgeContext = async ($: Engine, settings: Settings, isArmed: { value: boolean }, mentions: GuardMentions) => {
+  if (!(await isGuarding($, settings))) return false
+  const percent = (await $.session.usage()).context.percent ?? undefined
+  if (settings.tokenGuard === 'offer') {
+    if (isContextFull(percent, settings.contextWarnPercent) && (await canOfferGuard($, settings, mentions))) await offerGuard($, settings, mentions, contextOffer(percent!))
+    return false
+  }
+  const nudge = contextNudge(percent, settings.contextWarnPercent, isArmed.value)
+  isArmed.value = nudge.isArmed
+  if (!nudge.isNudging) return false
+  toast($, settings, contextToast(percent!))
+  if (settings.isSuggesting) await $.prompt.suggest({ text: COMPACT_SUGGESTION }).catch(() => undefined)
+  return true
 }
 
 /** After Claude's turn, suggests the step a process still needs, once for each step. */
@@ -3308,6 +3352,7 @@ const ensureSession = async ($: Engine, settings: Settings) => {
 
 export const register: Register = (on, options) => {
   const settings = settingsFrom(options)
+  const guardMentions: GuardMentions = { said: { count: 0 } }
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -3345,6 +3390,12 @@ export const register: Register = (on, options) => {
     await setUpSession($, settings)
     // Offered on a timer, not here: the question must not hold the session's start up. Every interactive session, until the answer is yes or never.
     if (e.isInteractive) $.clock.after(3_000, () => offerActivityLog($, settings).catch(() => undefined))
+    // The token guard's first mention, once the session has settled. Only where it's on offer and Companion works.
+    if (e.isInteractive && settings.tokenGuard === 'offer') {
+      $.clock.after(3_000, async () => {
+        if ((await isGuarding($, settings).catch(() => false)) && (await canOfferGuard($, settings, guardMentions))) await offerGuard($, settings, guardMentions, startOffer())
+      })
+    }
 
     $.clock.every(5_000, () => refreshStatus($, settings))
     // Claude Code's /usage breakdown: Companion's share of all usage. Only in an interactive session, so the headless run it starts never starts another.
@@ -3436,6 +3487,28 @@ export const register: Register = (on, options) => {
     if (deploys.length > 0) await followDeploys($, settings, deploys, ran).catch(() => undefined)
     if (quarantines.length > 0) await followQuarantine($, settings, quarantines, ran).catch(() => undefined)
     return ran
+  })
+
+  // All of a large file read in one go: refused once, with the way to read less. The same read again goes ahead.
+  const askedWhole = new Set<string>()
+  const isContextArmed = { value: true }
+  on('tool.call', { tool: 'Read' }, async ($, e, next) => {
+    const path = e.file_path
+    const hasRange = e.offset !== undefined || e.limit !== undefined || e.pages !== undefined
+    if (typeof path !== 'string' || hasRange || settings.largeReadKb <= 0 || !(await isGuarding($, settings).catch(() => false))) return next(e)
+    const isOffering = settings.tokenGuard === 'offer'
+    if (isOffering && !(await canOfferGuard($, settings, guardMentions))) return next(e)
+    const stat = await $.fs.stat(path).catch(() => undefined)
+    if (stat?.kind !== 'file') return next(e)
+    if (!isLargeRead({ path, size: stat.size, limitKb: settings.largeReadKb, hasRange, isRetry: askedWhole.has(path) })) return next(e)
+    if (isOffering) {
+      const ran = await next(e)
+      if (ran.deny === undefined && ran.isError !== true) await offerGuard($, settings, guardMentions, largeReadOffer(path, stat.size)).catch(() => undefined)
+      return ran
+    }
+    askedWhole.add(path)
+    toast($, settings, largeReadToast(path, stat.size))
+    return { deny: largeReadDeny(path, stat.size) }
   })
 
   // Claude editing a component's XML: the first step of every change.
@@ -3545,7 +3618,11 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     await update($, isWorking, () => false).catch(() => undefined)
     void refreshStatus($, settings)
-    if (e.reason === 'answer') void suggestNext($, settings)
+    if (e.reason === 'answer') {
+      void nudgeContext($, settings, isContextArmed, guardMentions)
+        .catch(() => false)
+        .then(isNudged => (isNudged ? undefined : suggestNext($, settings)))
+    }
     return done
   })
 
@@ -4024,6 +4101,7 @@ export const register: Register = (on, options) => {
               {gauge(
                 'CONTEXT',
                 usage.contextPercent === undefined ? '—' : `${meter(usage.contextPercent, 8)} ${Math.round(usage.contextPercent)}%`,
+                settings.tokenGuard === 'suggest' && isContextFull(usage.contextPercent, settings.contextWarnPercent) ? `${STATUS.warning.icon} ${CONTEXT_HINT}` : undefined,
               )}
               {limitsNow.length > 0 &&
                 gauge(

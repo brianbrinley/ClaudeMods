@@ -31,6 +31,8 @@ type WorldOptions = {
   limits?: () => { kind: string; percentUsed: number; resetsAt?: string }[]
   /** When the session started, as the engine reports it: epoch milliseconds. */
   startedAt?: number
+  /** How full the context is, read each time the session's usage is. */
+  contextPercent?: () => number
 }
 
 /** The panes the plugin asked to open in the test running now. */
@@ -65,7 +67,7 @@ const world = (on: On, files: Record<string, string> = {}, options: WorldOptions
     return { value: undefined }
   })
   on('session.usage', async () => ({
-    value: { startedAt: options.startedAt ?? 0, context: { window: 200_000, percent: 12 }, rateLimits: options.limits?.() ?? [], cost: { usd: 1.25 } },
+    value: { startedAt: options.startedAt ?? 0, context: { window: 200_000, percent: options.contextPercent?.() ?? 12 }, rateLimits: options.limits?.() ?? [], cost: { usd: 1.25 } },
   }))
   return toasts
 }
@@ -3573,3 +3575,164 @@ for (const theme of ['exosphere-light', 'exosphere-dark'] as const) {
     console.log(`PANE-TREE ${theme} ${JSON.stringify(await pane.drawn())}`)
   })
 }
+
+// --- Token guard -----------------------------------------------------------------
+
+const LARGE = 'x'.repeat(50 * 1024)
+
+/** A Companion folder with a large file in it, the Read tool beneath the plugin, and the context's fill as the test sets it. */
+const guarded = (on: On, percent: () => number = () => 12) => {
+  const toasts = world(on, { 'active-development': '', 'big.xml': LARGE, 'small.xml': 'x', 'big.png': LARGE }, { contextPercent: percent })
+  const reads: string[] = []
+  on('tool.call', { tool: 'Read' }, async (_$, e) => {
+    reads.push(String(e.file_path))
+    return { result: { type: 'text', file: { filePath: String(e.file_path), content: '' } } as never }
+  })
+  const suggestions: string[] = []
+  on('prompt.suggest', async (_$, e) => {
+    suggestions.push(e.text)
+    return { isShown: true }
+  })
+  on('turn.complete', async () => ({ text: '' }))
+  return { toasts, reads, suggestions }
+}
+
+/** One finished turn, with what it set off in the background settled. */
+const turnEnds = async ($: Engine, id: string) => {
+  await $.turn.complete({ reason: 'answer', turnId: id, answer: '' } as never)
+  await $.command.run(dashboard('text'))
+}
+
+test('a whole read of a large file is refused once with the way to read less, and the same read then goes ahead', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  const { toasts, reads } = guarded(on)
+  await startSession($, on, {})
+  const first = await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  expect(first.deny).toContain('offset and limit')
+  expect(reads).toEqual([])
+  expect(toasts.some(t => t.includes('read part of big.xml'))).toBe(true)
+  const second = await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  expect(second.deny).toBeUndefined()
+  expect(reads).toEqual(['/work/big.xml'])
+})
+
+test('a ranged read, a small file and a picture are never refused', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  const { reads } = guarded(on)
+  await startSession($, on, {})
+  for (const input of [{ file_path: '/work/big.xml', limit: 20 }, { file_path: '/work/small.xml' }, { file_path: '/work/big.png' }]) {
+    expect((await $.tool.call({ tool: 'Read', ...input })).deny).toBeUndefined()
+  }
+  expect(reads).toHaveLength(3)
+})
+
+test('tokenGuard off reads the whole file and never warns', { options: { tokenGuard: 'off' } }, async ($, on) => {
+  const { toasts, reads, suggestions } = guarded(on, () => 90)
+  await startSession($, on, {})
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBeUndefined()
+  await turnEnds($, 't1')
+  expect(reads).toEqual(['/work/big.xml'])
+  expect(toasts.some(t => t.includes('Context'))).toBe(false)
+  expect(suggestions).toEqual([])
+})
+
+test('outside a Companion folder the guard leaves reads and the context alone', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  const toasts = world(on, { 'big.xml': LARGE }, { contextPercent: () => 90 })
+  const reads: string[] = []
+  on('tool.call', { tool: 'Read' }, async (_$, e) => {
+    reads.push(String(e.file_path))
+    return { result: { type: 'text', file: { filePath: String(e.file_path), content: '' } } as never }
+  })
+  on('turn.complete', async () => ({ text: '' }))
+  await startSession($, on, {})
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBeUndefined()
+  await turnEnds($, 't1')
+  expect(reads).toEqual(['/work/big.xml'])
+  expect(toasts.some(t => t.includes('Context'))).toBe(false)
+})
+
+test('a full context warns and offers /compact once, and again only after it has dropped', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  let percent = 40
+  const { toasts, suggestions } = guarded(on, () => percent)
+  await startSession($, on, {})
+  await turnEnds($, 't1')
+  expect(suggestions).toEqual([])
+  percent = 55
+  await turnEnds($, 't2')
+  await turnEnds($, 't3')
+  expect(suggestions).toEqual(['/compact keep the current goal and the remaining steps'])
+  expect(toasts.filter(t => t.includes('Context 55% full'))).toHaveLength(1)
+  percent = 20
+  await turnEnds($, 't4')
+  percent = 60
+  await turnEnds($, 't5')
+  expect(suggestions).toHaveLength(2)
+})
+
+test('with suggestions off, a full context only warns', { options: { tokenGuard: 'suggest', suggestions: false } }, async ($, on) => {
+  const { toasts, suggestions } = guarded(on, () => 70)
+  await startSession($, on, {})
+  await turnEnds($, 't1')
+  expect(toasts.some(t => t.includes('Context 70% full'))).toBe(true)
+  expect(suggestions).toEqual([])
+})
+
+/** A little over the 30 minutes between mentions, in steps the test clock can take with the dashboard's timers running. */
+const halfAnHourPasses = async () => {
+  for (let i = 0; i < 4; i++) await clock.advance(8 * 60_000)
+}
+const guardToasts = (toasts: string[]) => toasts.filter(t => t.includes('/bc-dashboard config tokenGuard suggest'))
+
+test('out of the box a session mentions the guard as it starts, and a large read goes ahead with no mention right after', async ($, on) => {
+  const { toasts, reads } = guarded(on)
+  await startSession($, on, {})
+  expect(guardToasts(toasts)).toHaveLength(0)
+  await clock.advance(3_000)
+  expect(guardToasts(toasts)).toEqual([expect.stringContaining('Optional:')])
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBeUndefined()
+  expect(reads).toEqual(['/work/big.xml'])
+  expect(guardToasts(toasts)).toHaveLength(1)
+})
+
+test('after 30 minutes a large read or a full context mentions it again, three times a session at most', async ($, on) => {
+  const { toasts, suggestions } = guarded(on, () => 70)
+  await startSession($, on, {})
+  await clock.advance(3_000)
+  await halfAnHourPasses()
+  await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  expect(guardToasts(toasts)[1]).toContain('Claude read all of big.xml')
+  await turnEnds($, 't1')
+  expect(guardToasts(toasts)).toHaveLength(2)
+  await halfAnHourPasses()
+  await turnEnds($, 't2')
+  expect(guardToasts(toasts)[2]).toContain('Context 70% full')
+  await halfAnHourPasses()
+  await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  await turnEnds($, 't3')
+  expect(guardToasts(toasts)).toHaveLength(3)
+  expect(toasts.some(t => t.includes('/compact keeps'))).toBe(false)
+  expect(suggestions).toEqual([])
+})
+
+test('tokenGuard off, or already on, never mentions it', { options: { tokenGuard: 'off' } }, async ($, on) => {
+  const { toasts } = guarded(on, () => 70)
+  await startSession($, on, {})
+  await clock.advance(3_000)
+  await halfAnHourPasses()
+  await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  await turnEnds($, 't1')
+  expect(guardToasts(toasts)).toEqual([])
+})
+
+test('outside a Companion folder it is never mentioned', async ($, on) => {
+  const toasts = world(on, {}, { contextPercent: () => 70 })
+  await startSession($, on, {})
+  await clock.advance(3_000)
+  expect(guardToasts(toasts)).toEqual([])
+})
+
+test('a read that failed mentions nothing', async ($, on) => {
+  const toasts = world(on, { 'active-development': '', 'big.xml': LARGE })
+  on('tool.call', { tool: 'Read' }, async () => ({ deny: 'not allowed' }))
+  await startSession($, on, {})
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBe('not allowed')
+  expect(guardToasts(toasts)).toEqual([])
+})

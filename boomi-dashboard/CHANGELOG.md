@@ -2,6 +2,14 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.64.0
+
+- **A token guard you can turn on.** A new setting, `tokenGuard` (`/bc-dashboard config`, Data). It stays out of your way until you choose it: `offer`, the default, stops nothing and warns about nothing. To turn it on: `/bc-dashboard config tokenGuard suggest`.
+- **With it on, a large read is turned back once.** When Claude reads all of a file over `largeReadKb` (40 KB), it is asked to search or read a range instead. The same read again goes ahead, so a file it really needs whole costs one extra step. Images, PDFs and notebooks are left alone.
+- **With it on, a warning when the context fills.** At `contextWarnPercent` (50%) a toast says so and the prompt box offers `/compact`, once each time the context gets there. The pane's CONTEXT gauge shows it too.
+- **A mention now and then.** On `offer`, a toast names the setting as a session starts in a Companion folder. It comes back only when Claude has just read a large file whole or the context has filled: at most three times a session, 30 minutes apart. `off` stays silent.
+- **New-session tips on keeping tokens down.** The banner's tips now also cover `/clear` between tasks, a short `CLAUDE.md` for the current task, `/compact` with what to keep, asking for searches and line ranges instead of whole files, `/context`, and the token guard.
+
 ## 0.63.0
 
 - **Enforce also refuses a Companion change from a login that isn't dedicated to Companion.** With `envCheck` on `enforce`, a deploy, undeploy, test run or raw Platform API write is refused when the `.env` login holds an account-admin role, or roles beyond the two Companion roles (`CR-Boomi-Companion-Non-Prod-FullAccess`, `CR-Boomi-Companion-Prod-ReadOnly`). The refusal says which role is the problem and tells Claude to stop. The login's roles are read again for each such command, since the `.env` can change during a session. Pushes are not refused, matching the production gate.

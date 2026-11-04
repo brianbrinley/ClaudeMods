@@ -447,3 +447,26 @@ When an item passes, tick it here. When every item in a section passes, the sect
   *This is the deliberate fail-open case (see the 0.63.0 CHANGELOG entry). Record here whether the warning was seen; it is the place to confirm the pass-through is visible before it is tightened.*
 - [ ] **U6. Restore.** Put the original `.env` back, remove any test role from the login in Boomi, and set `envCheck` to `off`.
   **Pass:** the `.env` matches its original contents, the login holds only its original roles, and the next session shows no login warning. **Fail:** anything differs.
+
+## V. Token tips and token guard (boomi-dashboard 0.64.0)
+
+- [ ] **V1. The tips show.** Start a new session in a Companion workspace and leave it idle until the banner has turned through its tips (one every 20 seconds).
+  **Pass:** the six tips on `/clear`, `CLAUDE.md`, `/compact`, line ranges, `/context` and the token guard each appear, readable in the banner. **Fail:** one never appears, or is cut off so it can't be understood.
+- [ ] **V2. Out of the box, nothing is stopped.** With `tokenGuard` left alone, start a new session in a Companion workspace, then ask Claude to read all of a text file over 40 KB.
+  **Pass:** a few seconds in, one toast names `/bc-dashboard config tokenGuard suggest`; the file is read first time, with no second toast about the guard. **Fail:** the read is refused, no toast shows at the start, or a second shows straight after the read.
+- [ ] **V3. Not too pushy.** In that session, after 30 minutes, read another large file; after 30 more, read a third; after 30 more, read a fourth.
+  **Pass:** a toast for each of the first two reads, none for the fourth, and each is readable. No warning and no `/compact` offer at any point. **Fail:** more than three toasts about the guard in the session, or two inside 30 minutes.
+- [ ] **V4. Turn it on.** Run `/bc-dashboard config tokenGuard suggest`, start a new session and ask Claude to read all of a text file over 40 KB.
+  **Pass:** a toast says Claude was asked to read part of the file, and Claude searches or reads a range instead. **Fail:** the whole file is read first time, or no toast shows.
+- [ ] **V5. The same read goes through.** Ask Claude to read that whole file anyway.
+  **Pass:** the read goes ahead without a second refusal. **Fail:** it is refused again.
+- [ ] **V6. Small and ranged reads are left alone.** Ask Claude to read a small file, then lines 1 to 20 of a large one in a new session.
+  **Pass:** both go ahead with no toast. **Fail:** either is refused.
+- [ ] **V7. The context warning.** Set `contextWarnPercent` just above the session's current CONTEXT figure, then work until it passes.
+  **Pass:** one toast, the pane's CONTEXT gauge says `◐ /compact or /clear soon`, and the prompt box offers `/compact`. **Fail:** any of those is missing, or the toast repeats every turn.
+- [ ] **V8. Tab takes the offer.** Press Tab on the `/compact` offer and send it.
+  **Pass:** the session compacts, keeping the goal, and the gauge's warning goes away. **Fail:** the text goes to Claude as a prompt, or the warning stays.
+- [ ] **V9. `claude-local`.** Run V7 in `claude-local` with `contextWarnPercent` at 50, and note the CONTEXT figure when it compacts on its own.
+  **Pass:** the warning comes before the compaction. **Fail:** the session compacts with no warning first.
+- [ ] **V10. Off stays silent.** Set `tokenGuard` to `off`, start a new session and repeat V2.
+  **Pass:** the file is read whole, with no toast about the guard. **Fail:** a toast shows, or the read is refused.

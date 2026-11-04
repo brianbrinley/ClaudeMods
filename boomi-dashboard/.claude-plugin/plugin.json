@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.63.0",
+  "version": "0.64.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -287,6 +287,29 @@
       "title": "Prompt checks to skip",
       "description": "Checks to leave out, separated by commas: subject, environment, test, production, steps, error, build, map, secret, aim",
       "default": ""
+    },
+    "tokenGuard": {
+      "type": "string",
+      "title": "Token guard",
+      "description": "suggest warns when the context fills and offers /compact, and turns back a whole-file read of a large file once, with the way to read less. offer (the default) does none of that, and mentions the guard as a session starts, then when it would have helped: at most three times a session, 30 minutes apart. off stays silent. Only where Companion works",
+      "options": [
+        "offer",
+        "suggest",
+        "off"
+      ],
+      "default": "offer"
+    },
+    "largeReadKb": {
+      "type": "number",
+      "title": "Large read limit (KB)",
+      "description": "With tokenGuard on suggest, a file over this size read whole in one go is turned back once; the same read again goes ahead. Images, PDFs and notebooks are left alone. 0 never turns a read back",
+      "default": 40
+    },
+    "contextWarnPercent": {
+      "type": "number",
+      "title": "Context warning (%)",
+      "description": "With tokenGuard on suggest, how full the context gets before the dashboard warns, once each time it gets there, and offers /compact. 0 never warns",
+      "default": 50
     }
   }
 }
