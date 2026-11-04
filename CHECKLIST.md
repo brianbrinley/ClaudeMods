@@ -470,3 +470,7 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** the warning comes before the compaction. **Fail:** the session compacts with no warning first.
 - [ ] **V10. Off stays silent.** Set `tokenGuard` to `off`, start a new session and repeat V2.
   **Pass:** the file is read whole, with no toast about the guard. **Fail:** a toast shows, or the read is refused.
+- [ ] **V11. The menu in smaller steps.** Run `/bc-dashboard config`, pick **Budget**, then **Tokens**, keep each answer, then back out to the first menu and pick **Done**.
+  **Pass:** three areas, then three sections each, three questions in Tokens, and each way back lands on the menu above. **Fail:** more than five questions in a row, or a way back lands somewhere else.
+- [ ] **V12. Straight to a section.** Run `/bc-dashboard config tokens`, then `/bc-dashboard config budget`.
+  **Pass:** the first opens the Tokens questions, the second the Budget sections with **Done** as the way out. **Fail:** either starts somewhere else.

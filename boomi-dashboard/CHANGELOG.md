@@ -4,10 +4,11 @@
 
 ## 0.64.0
 
-- **A token guard you can turn on.** A new setting, `tokenGuard` (`/bc-dashboard config`, Data). It stays out of your way until you choose it: `offer`, the default, stops nothing and warns about nothing. To turn it on: `/bc-dashboard config tokenGuard suggest`.
+- **A token guard you can turn on.** A new setting, `tokenGuard` (`/bc-dashboard config tokens`). It stays out of your way until you choose it: `offer`, the default, stops nothing and warns about nothing. To turn it on: `/bc-dashboard config tokenGuard suggest`.
 - **With it on, a large read is turned back once.** When Claude reads all of a file over `largeReadKb` (40 KB), it is asked to search or read a range instead. The same read again goes ahead, so a file it really needs whole costs one extra step. Images, PDFs and notebooks are left alone.
 - **With it on, a warning when the context fills.** At `contextWarnPercent` (50%) a toast says so and the prompt box offers `/compact`, once each time the context gets there. The pane's CONTEXT gauge shows it too.
 - **A mention now and then.** On `offer`, a toast names the setting as a session starts in a Companion folder. It comes back only when Claude has just read a large file whole or the context has filled: at most three times a session, 30 minutes apart. `off` stays silent.
+- **`/bc-dashboard config` in smaller steps.** Pick an area, then a section of at most five questions, in place of up to sixteen in a row. `config budget`, `config pane` and `config data` now open the area's sections, and each section has a name of its own: `budgets`, `limits`, `tokens`, `look`, `nudges`, `prompts`, `history`, `checks`, `files`. `config <setting> <value>` is unchanged. A few settings moved to fit, such as `personalLogin` to Budget's Limits and production.
 - **New-session tips on keeping tokens down.** The banner's tips now also cover `/clear` between tasks, a short `CLAUDE.md` for the current task, `/compact` with what to keep, asking for searches and line ranges instead of whole files, `/context`, and the token guard.
 
 ## 0.63.0

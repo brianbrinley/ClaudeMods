@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { PastSession } from '../types'
-import { BACK, GROUPS, fieldNamed, groupNamed, groupWithValue, listing, menuQuestion, parseValue, pastSpend, questionFor, roundUp, show, valueOf } from '../hooks/config'
+import { BACK, GROUPS, fieldNamed, groupNamed, groupWithValue, listing, menuQuestion, parseValue, pastSpend, questionFor, roundUp, sectionNamed, sectionQuestion, show, valueOf } from '../hooks/config'
 
 const NOW = Date.parse('2026-10-14T12:00:00Z')
 const past = (costUsd: number, daysAgo: number): PastSession =>
@@ -17,6 +17,18 @@ test('every userConfig field is in one group, and every group fits the menu', ()
   expect([...keys].sort()).toEqual(MANIFEST_KEYS)
   expect(GROUPS.length).toBeLessThanOrEqual(3)
   for (const g of GROUPS) expect(g.header.length).toBeLessThanOrEqual(8)
+  for (const g of GROUPS) {
+    // The question box holds four options: three sections and the way out.
+    expect(g.sections!.length).toBeLessThanOrEqual(3)
+    for (const section of g.sections!) {
+      expect(section.fields.length).toBeLessThanOrEqual(5)
+      // Room for " 5/5" in the question's 12-character header.
+      expect(section.header.length).toBeLessThanOrEqual(8)
+      expect(sectionNamed(section.header)).toBe(section)
+      expect(groupNamed(section.header)).toBeUndefined()
+      expect(fieldNamed(section.header)).toBeUndefined()
+    }
+  }
 })
 
 test('values read as a person says them', () => {
@@ -108,6 +120,8 @@ test('the menu and the listing', () => {
   expect(fieldNamed('BUDGETUSD')?.key).toBe('budgetUsd')
   expect(groupNamed('data')?.name).toBe('Data and reports')
   expect(groupNamed('Done')).toBeUndefined()
+  expect(sectionNamed('tokens')?.fields.map(f => f.key)).toEqual(['tokenGuard', 'largeReadKb', 'contextWarnPercent'])
+  expect(sectionQuestion(groupNamed('budget')!, BACK, 0).options).toEqual(['Budgets', 'Limits and production', 'Tokens', BACK])
 })
 
 test('a group named with a value saves nothing and says which setting the value fits', () => {

@@ -180,6 +180,8 @@ The token guard is there if you want help keeping a session's tokens down. It's 
 /bc-dashboard config tokenGuard suggest
 ```
 
+Or go through its settings with `/bc-dashboard config tokens`.
+
 Until you do, nothing is stopped and nothing warns. `tokenGuard` starts on `offer`: a toast names the setting as a session starts, and comes back only when Claude has just read a large file whole or the context has filled, at most three times a session and 30 minutes apart. `off` stays silent.
 
 With it on:
@@ -226,7 +228,7 @@ There are three budgets. You can set any of them, or none. By default they only 
 
 Not sure where to start? On a Pro or Max seat, try `companionShare`, since your limit is what runs out. On an API key, try `companionMonthlyUsd`, since your bill is what grows.
 
-**With the dashboard (easiest):** run `/bc-dashboard config budget`. It walks through each budget in turn, starting from your current value, and suggests figures based on what your past Companion sessions cost, such as "twice a typical session" or "a quarter above the last 30 days". Pick one, keep what you have, or type your own under **Other**. Your changes are saved to `/config` and take effect right away.
+**With the dashboard (easiest):** run `/bc-dashboard config budgets`. It walks through each budget in turn, starting from your current value, and suggests figures based on what your past Companion sessions cost, such as "twice a typical session" or "a quarter above the last 30 days". Pick one, keep what you have, or type your own under **Other**. Your changes are saved to `/config` and take effect right away.
 
 **In `/config`:**
 
@@ -291,7 +293,7 @@ Numbers go in without quotes. The period is `"day"`, `"week"` or `"month"`. Leav
 
 **Limits:** the gate only reads the commands Claude runs through the Bash tool. It can't see changes made any other way, such as a script that builds its command at run time, a program in another language, or work you do yourself in a terminal. The refusal message tells Claude not to try.
 
-**To set it up,** run `/bc-dashboard config budget` and answer the **When a budget is spent** and **Grace past a budget** questions, or set `budgetEnforce` and `budgetGrace` in `/config`.
+**To set it up,** run `/bc-dashboard config limits` and answer the **When a budget is spent** and **Grace past a budget** questions, or set `budgetEnforce` and `budgetGrace` in `/config`.
 
 ## Prompt tips
 
@@ -443,7 +445,7 @@ Boomi Companion sessions on this machine, last 90 days:
 
 The page follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system. It uses Exosphere's Exo III color tokens in light and dark (switch with the moon or sun button at the top, or let it follow your system), Poppins headings, Noto Sans text, and Exosphere's cards, badges and alerts. Every status shows its icon and its label, never color alone.
 
-**Another style:** set `reportStyle` to `expressive` (in `/config` or `/bc-dashboard config data`), or add `--style expressive` for a single report. That report uses this repository's own Valence theme, Miami Deco: Sand by day and Midnight Navy by night, Poiret One for the title, Josefin Sans headings, Deco Gold rules, and Flamingo marking the sessions. Status keeps Valence's fixed colors, with its icon and label. Stick with `exosphere`, the default, for anything Boomi people will read.
+**Another style:** set `reportStyle` to `expressive` (in `/config` or `/bc-dashboard config checks`), or add `--style expressive` for a single report. That report uses this repository's own Valence theme, Miami Deco: Sand by day and Midnight Navy by night, Poiret One for the title, Josefin Sans headings, Deco Gold rules, and Flamingo marking the sessions. Status keeps Valence's fixed colors, with its icon and label. Stick with `exosphere`, the default, for anything Boomi people will read.
 
 - **Charts** only appear when they add something: outcomes and spend by product when the work spans two or more products, cost over the session in a one-session report, and, in an all-sessions report with at least two sessions, each session's cost and how its steps went (click a session to open its steps). Each chart has hover details and a **Show the data** table, and each product keeps the same color in every chart.
 - **Tables** of custom connectors and Agentstudio agents can be sorted by clicking a column.
@@ -489,7 +491,7 @@ When you're online, the page loads its fonts from Google Fonts. Offline, it fall
 | `/bc-dashboard review [n]` | | What drove a past session's cost, and what to change next time. Without a number, it asks which of the most expensive ones. |
 | `/bc-dashboard theme [name]` | | Picks the pane's theme, or lists them. |
 | `/bc-dashboard components [csv] [save]` | | Copies every component with its IDs, tab-separated for a spreadsheet (`csv` copies it as CSV, and `save` also writes a `.csv` file). |
-| `/bc-dashboard config [budget\|pane\|data]` | | Goes through the dashboard's settings one question at a time, or just one group of them. `config <setting> <value>` sets one, such as `config budgetUsd 5`, and `config list` shows them all. |
+| `/bc-dashboard config [area\|section]` | | Goes through the dashboard's settings a few questions at a time: pick an area (`budget`, `pane`, `data`), then a section of at most five questions, or name a section to go straight there (`budgets`, `limits`, `tokens`, `look`, `nudges`, `prompts`, `history`, `checks`, `files`). `config <setting> <value>` sets one, such as `config budgetUsd 5`, and `config list` shows them all. |
 | `/bc-dashboard prompt [use\|upgrade\|guide [refresh]]` | | Your last Boomi prompt's [tips](#prompt-tips) and an upgraded version. `use` puts it in the prompt box, `upgrade` has a model rewrite it, `guide` compares the dashboard's guide with your installed Companion plugins, and `guide refresh` drafts edits. |
 | `/bc-dashboard banner` | | Brings the banner back after **Hide**. |
 

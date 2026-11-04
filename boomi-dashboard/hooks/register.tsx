@@ -129,7 +129,7 @@ import { componentTable, hasEarlierSteps, reportHtml, scoped, stepsToMatch, tran
 import { toCsv, toTsv } from './export'
 import { changeLines } from './changes'
 import type { BoomiFacts, ReportScope, ReportStyle } from './report-html'
-import { DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, groupWithValue, listing, menuQuestion, parseValue, pastSpend, questionFor, show, valueOf } from './config'
+import { BACK, DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, groupWithValue, listing, menuQuestion, parseValue, pastSpend, questionFor, sectionNamed, sectionQuestion, show, valueOf } from './config'
 import type { Group, PastSpend, Value } from './config'
 import { COMPACT_SUGGESTION, CONTEXT_HINT, contextNudge, contextOffer, contextToast, isContextFull, isLargeRead, largeReadDeny, largeReadOffer, largeReadToast, mayMention, mentioned, startOffer } from './token-guard'
 import type { Mentions, TokenGuard } from './token-guard'
@@ -2159,7 +2159,7 @@ const USAGE = [
   '/bc-dashboard seen            mark watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
   '/bc-dashboard theme [name]    the pane\'s colors: auto, exosphere-light, exosphere-dark, whimsical-light, whimsical-dark or terminal',
-  '/bc-dashboard config [group]  walk through the dashboard\'s settings (budget, pane, data); config <setting> <value> sets one; config list shows them',
+  '/bc-dashboard config [area|section]  walk through the dashboard\'s settings (budget, pane, data, or a section such as tokens); config <setting> <value> sets one; config list shows them',
   '/bc-dashboard upgrade         update the dashboard from its GitHub checkout: --check only looks, --yes skips the question, --rollback goes back',
 ].join('\n')
 
@@ -2971,7 +2971,7 @@ const configCommand = async ($: Engine, settings: Settings, target: string): Pro
     if (parsed.value === current) return `${named.label} is already ${show(named, current)}.`
     return (await saveConfig($, settings, values, new Map([[named.key, parsed.value]]))).join('\n')
   }
-  const only = words[0] ? groupNamed(words[0]) : undefined
+  const only = words[0] ? (groupNamed(words[0]) ?? sectionNamed(words[0])) : undefined
   if (words[0] && !only) return `No setting or group called ${words[0]}.\n\n${listing(values)}`
   if (only && words.length > 1) return groupWithValue(only, words.slice(1).join(' '))
 
@@ -3021,7 +3021,19 @@ const configCommand = async ($: Engine, settings: Settings, target: string): Pro
   }
   let isClosed = false
   try {
-    if (only) await walk(only)
+    // An area's sections, a pick at a time, until the way out.
+    const pickSections = async (group: Group, out: string) => {
+      for (let round = 0; round < 12; round++) {
+        const menu = sectionQuestion(group, out, changes.size)
+        const picked = await $.ui.ask(menu.question, { header: group.header, options: menu.options })
+        asked++
+        const section = group.sections?.find(s => s.name === picked)
+        if (!section) return
+        await walk(section)
+      }
+    }
+    if (only?.sections) await pickSections(only, DONE)
+    else if (only) await walk(only)
     else
       for (let round = 0; round < 12; round++) {
         const menu = menuQuestion(Object.fromEntries(FIELDS.map(f => [f.key, current(f.key)])), changes.size)
@@ -3029,7 +3041,7 @@ const configCommand = async ($: Engine, settings: Settings, target: string): Pro
         asked++
         const group = picked === DONE ? undefined : groupNamed(picked)
         if (!group) break
-        await walk(group)
+        await pickSections(group, BACK)
       }
   } catch {
     isClosed = true

@@ -2331,7 +2331,7 @@ const TIP_LIST: readonly Tip[] = [
   { text: "Tip: Run again repeats a failed test without a turn of Claude's", plugin: 'bc-integration' },
   { text: 'Tip: ask Claude "what\'s left to fix?" and it answers from the dashboard' },
   { text: 'Tip: /bc-dashboard report save writes the session up for a PR or a hand-off' },
-  { text: 'Tip: /bc-dashboard config budget sets a spend budget, with figures from your past sessions' },
+  { text: 'Tip: /bc-dashboard config budgets sets a spend budget, with figures from your past sessions' },
   { text: 'Tip: Scan under Past Companion sessions shows what earlier sessions cost' },
   { text: 'Tip: /bc-dashboard watch <component> flags changes someone else makes in Boomi', plugin: 'bc-integration' },
   { text: "Tip: /bc-dashboard activity-log on adds BOOMI_COMPANION_LOG_ACTIVITY=1 to Companion's .env, which adds its activity log as a second source", plugin: 'bc-integration' },
