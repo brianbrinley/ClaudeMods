@@ -98,6 +98,8 @@ A banner above the prompt shows the latest step and what needs attention, and th
 ◆ BC Dashboard Tip: Why? on a failed test reads its log; Ask Claude to fix drafts the request │ $0.00 this session   [ Open ]  [ Hide ]
 ```
 
+Some of the tips are about keeping tokens down: `/clear` between tasks, the current task in a short `CLAUDE.md`, `/compact` with what to keep, searches and line ranges instead of whole files, `/context` to see what's using your tokens, and the [token guard](#token-guard).
+
 If Claude Code can tell which Companion plugins are turned on, the first tip lists them, and you won't see tips for plugins you don't have:
 
 ```text
@@ -170,6 +172,23 @@ Spend is the session's cost as `/cost` reports it. On a Claude seat, that's what
 
 **Budget:** if you set `budgetUsd`, the status line, the summary and the SPEND gauge warn you from 80% (`◐ 84% of the $5.00 budget`) and again once it's spent, with one toast at each point. Out of the box that's all it does, and nothing gets stopped. To make a spent budget actually pause or stop Companion's changes, see [Budget enforcement](#budget-enforcement).
 
+### Token guard
+
+The token guard is there if you want help keeping a session's tokens down. It's yours to turn on, and works only where Companion does:
+
+```text
+/bc-dashboard config tokenGuard suggest
+```
+
+Or go through its settings with `/bc-dashboard config tokens`.
+
+Until you do, nothing is stopped and nothing warns. `tokenGuard` starts on `offer`: a toast names the setting as a session starts, and comes back only when Claude has just read a large file whole or the context has filled, at most three times a session and 30 minutes apart. `off` stays silent.
+
+With it on:
+
+- **Large reads.** When Claude asks for all of a file over `largeReadKb` (40 KB, about 10K tokens), the read is refused once, and Claude is told to search or read a range. If it needs the whole file, the same read again goes ahead, so nothing is out of reach. Images, PDFs and notebooks are left alone.
+- **A filling context.** At `contextWarnPercent` (50%), a toast says so, the prompt box offers `/compact` (Tab takes it), and the pane's CONTEXT gauge shows `◐ /compact or /clear soon`. It warns once each time the context gets there. It compacts nothing itself. If you set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, keep this below the point they compact at.
+
 ### Your Claude usage limits
 
 On a Claude seat (Pro, Max, Team or Enterprise), the dashboard reads your usage limits as Claude Code reports them, with no setup: the 5-hour and weekly windows, plus your admin's spend limit if there is one.
@@ -209,7 +228,7 @@ There are three budgets. You can set any of them, or none. By default they only 
 
 Not sure where to start? On a Pro or Max seat, try `companionShare`, since your limit is what runs out. On an API key, try `companionMonthlyUsd`, since your bill is what grows.
 
-**With the dashboard (easiest):** run `/bc-dashboard config budget`. It walks through each budget in turn, starting from your current value, and suggests figures based on what your past Companion sessions cost, such as "twice a typical session" or "a quarter above the last 30 days". Pick one, keep what you have, or type your own under **Other**. Your changes are saved to `/config` and take effect right away.
+**With the dashboard (easiest):** run `/bc-dashboard config budgets`. It walks through each budget in turn, starting from your current value, and suggests figures based on what your past Companion sessions cost, such as "twice a typical session" or "a quarter above the last 30 days". Pick one, keep what you have, or type your own under **Other**. Your changes are saved to `/config` and take effect right away.
 
 **In `/config`:**
 
@@ -274,7 +293,7 @@ Numbers go in without quotes. The period is `"day"`, `"week"` or `"month"`. Leav
 
 **Limits:** the gate only reads the commands Claude runs through the Bash tool. It can't see changes made any other way, such as a script that builds its command at run time, a program in another language, or work you do yourself in a terminal. The refusal message tells Claude not to try.
 
-**To set it up,** run `/bc-dashboard config budget` and answer the **When a budget is spent** and **Grace past a budget** questions, or set `budgetEnforce` and `budgetGrace` in `/config`.
+**To set it up,** run `/bc-dashboard config limits` and answer the **When a budget is spent** and **Grace past a budget** questions, or set `budgetEnforce` and `budgetGrace` in `/config`.
 
 ## Prompt tips
 
@@ -426,7 +445,7 @@ Boomi Companion sessions on this machine, last 90 days:
 
 The page follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system. It uses Exosphere's Exo III color tokens in light and dark (switch with the moon or sun button at the top, or let it follow your system), Poppins headings, Noto Sans text, and Exosphere's cards, badges and alerts. Every status shows its icon and its label, never color alone.
 
-**Another style:** set `reportStyle` to `expressive` (in `/config` or `/bc-dashboard config data`), or add `--style expressive` for a single report. That report uses this repository's own Valence theme, Miami Deco: Sand by day and Midnight Navy by night, Poiret One for the title, Josefin Sans headings, Deco Gold rules, and Flamingo marking the sessions. Status keeps Valence's fixed colors, with its icon and label. Stick with `exosphere`, the default, for anything Boomi people will read.
+**Another style:** set `reportStyle` to `expressive` (in `/config` or `/bc-dashboard config checks`), or add `--style expressive` for a single report. That report uses this repository's own Valence theme, Miami Deco: Sand by day and Midnight Navy by night, Poiret One for the title, Josefin Sans headings, Deco Gold rules, and Flamingo marking the sessions. Status keeps Valence's fixed colors, with its icon and label. Stick with `exosphere`, the default, for anything Boomi people will read.
 
 - **Charts** only appear when they add something: outcomes and spend by product when the work spans two or more products, cost over the session in a one-session report, and, in an all-sessions report with at least two sessions, each session's cost and how its steps went (click a session to open its steps). Each chart has hover details and a **Show the data** table, and each product keeps the same color in every chart.
 - **Tables** of custom connectors and Agentstudio agents can be sorted by clicking a column.
@@ -472,7 +491,7 @@ When you're online, the page loads its fonts from Google Fonts. Offline, it fall
 | `/bc-dashboard review [n]` | | What drove a past session's cost, and what to change next time. Without a number, it asks which of the most expensive ones. |
 | `/bc-dashboard theme [name]` | | Picks the pane's theme, or lists them. |
 | `/bc-dashboard components [csv] [save]` | | Copies every component with its IDs, tab-separated for a spreadsheet (`csv` copies it as CSV, and `save` also writes a `.csv` file). |
-| `/bc-dashboard config [budget\|pane\|data]` | | Goes through the dashboard's settings one question at a time, or just one group of them. `config <setting> <value>` sets one, such as `config budgetUsd 5`, and `config list` shows them all. |
+| `/bc-dashboard config [area\|section]` | | Goes through the dashboard's settings a few questions at a time: pick an area (`budget`, `pane`, `data`), then a section of at most five questions, or name a section to go straight there (`budgets`, `limits`, `tokens`, `look`, `nudges`, `prompts`, `history`, `checks`, `files`). `config <setting> <value>` sets one, such as `config budgetUsd 5`, and `config list` shows them all. |
 | `/bc-dashboard prompt [use\|upgrade\|guide [refresh]]` | | Your last Boomi prompt's [tips](#prompt-tips) and an upgraded version. `use` puts it in the prompt box, `upgrade` has a model rewrite it, `guide` compares the dashboard's guide with your installed Companion plugins, and `guide refresh` drafts edits. |
 | `/bc-dashboard banner` | | Brings the banner back after **Hide**. |
 
@@ -503,6 +522,9 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to 
 | `activityLogPrompt` | `ask` | Whether to offer, at the start of a session in a Companion folder, to add `BOOMI_COMPANION_LOG_ACTIVITY=1` to its `.env`. `ask` offers until you say yes or never; `never` stops the offer. |
 | `toasts` | `true` | Toasts for failures, finished deploys and tests, and watched changes. |
 | `banner` | `true` | The banner above the prompt, plus a new session's recap and tips. |
+| `tokenGuard` | `offer` | `suggest` [warns when the context fills and turns back a large whole-file read once](#token-guard). `offer` does neither, and mentions the guard as a session starts and now and then. `off` stays silent. |
+| `largeReadKb` | `40` | With `tokenGuard` on `suggest`, a file over this size, read whole in one go, is turned back once. `0` never turns a read back. |
+| `contextWarnPercent` | `50` | With `tokenGuard` on `suggest`, how full the context gets before the warning and the `/compact` offer. `0` never warns. |
 | `budgetUsd` | `0` | The session's spend budget, in US dollars. `0` turns it off. |
 | `companionShare` | `0` | Companion's share of your weekly usage limit, as a percent. `0` turns it off. |
 | `companionSharePeriod` | `week` | What the share covers: `day`, `week` or `month`. |

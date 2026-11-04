@@ -144,7 +144,7 @@ export const denyMessage = (spent: readonly BudgetLine[], changes: readonly stri
   [
     `boomi-dashboard: ${isChosen ? 'the user chose to stop this' : 'refused'}: Boomi Companion's budget is spent: ${spentText(spent)}.`,
     `Companion changes are paused${mode === 'block' ? '' : ' until the user allows them'}. Not run: ${changes.join('; ')}.`,
-    'Stop the Boomi work now and tell the user which budget is spent and what you were about to do. Do not work around this: no curl or other calls to api.boomi.com, no running the script another way, no wrapper script. The user can raise the budget with /bc-dashboard config budget, or change budgetEnforce.',
+    'Stop the Boomi work now and tell the user which budget is spent and what you were about to do. Do not work around this: no curl or other calls to api.boomi.com, no running the script another way, no wrapper script. The user can raise the budget with /bc-dashboard config budgets, or change budgetEnforce.',
   ].join('\n')
 
 /** The note Claude gets with the person's prompt once enforcement starts or changes. */

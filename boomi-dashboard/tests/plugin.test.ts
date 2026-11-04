@@ -31,6 +31,8 @@ type WorldOptions = {
   limits?: () => { kind: string; percentUsed: number; resetsAt?: string }[]
   /** When the session started, as the engine reports it: epoch milliseconds. */
   startedAt?: number
+  /** How full the context is, read each time the session's usage is. */
+  contextPercent?: () => number
 }
 
 /** The panes the plugin asked to open in the test running now. */
@@ -65,7 +67,7 @@ const world = (on: On, files: Record<string, string> = {}, options: WorldOptions
     return { value: undefined }
   })
   on('session.usage', async () => ({
-    value: { startedAt: options.startedAt ?? 0, context: { window: 200_000, percent: 12 }, rateLimits: options.limits?.() ?? [], cost: { usd: 1.25 } },
+    value: { startedAt: options.startedAt ?? 0, context: { window: 200_000, percent: options.contextPercent?.() ?? 12 }, rateLimits: options.limits?.() ?? [], cost: { usd: 1.25 } },
   }))
   return toasts
 }
@@ -2188,19 +2190,21 @@ test('/bc-dashboard config walks the budget with figures from past sessions, and
   // Past sessions cost $3.50 and $1.25: twice the typical one is $2.50, the costliest $3.50.
   const { sets, asked } = configWorld(on, { budgetUsd: 0, companionMonthlyUsd: 0, companionShare: 0 }, [
     'Budget',
+    'Budgets',
     '$2.50 (twice a typical session)',
     'Keep off',
     '30%',
     'Month',
     'Keep off',
-    'Keep warn',
-    'Keep off',
+    'Back to the menu',
     'Done',
   ])
   const answer = await $.command.run(dashboard('config'))
-  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget 1/8', 'Budget 2/8', 'Budget 3/8', 'Budget 4/8', 'Budget 5/8', 'Budget 6/8', 'Budget 7/8', 'Settings'])
-  expect(asked[1]!.options.map(o => o.label)).toEqual(['Keep off', '$2.50 (twice a typical session)', '$3.50 (your costliest session)', 'Back to the menu'])
-  expect(asked[1]!.question).toContain('cost $1.25 typically, $3.50 at most')
+  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget', 'Budgets 1/5', 'Budgets 2/5', 'Budgets 3/5', 'Budgets 4/5', 'Budgets 5/5', 'Budget', 'Settings'])
+  expect(asked[1]!.options.map(o => o.label)).toEqual(['Budgets', 'Limits and production', 'Tokens', 'Back to the menu'])
+  expect(asked[2]!.options.map(o => o.label)).toEqual(['Keep off', '$2.50 (twice a typical session)', '$3.50 (your costliest session)', 'Back to the menu'])
+  expect(asked[2]!.question).toContain('cost $1.25 typically, $3.50 at most')
+  expect(asked[7]!.question).toContain('3 changes so far, saved when you pick Done.')
   expect(asked[8]!.question).toContain('3 changes so far, saved when you pick Done.')
   expect(sets).toEqual([
     ['boomi-dashboard.budgetUsd', 2.5],
@@ -2214,10 +2218,10 @@ test('/bc-dashboard config walks the budget with figures from past sessions, and
 
 test('/bc-dashboard config skips the share period with no share, goes back to the menu, and asks again after a typo', async ($, on) => {
   const { sets, asked } = configWorld(on, { budgetUsd: 5, companionShare: 0 }, ['lots', '7', 'Back to the menu'])
-  const answer = await $.command.run(dashboard('config budget'))
+  const answer = await $.command.run(dashboard('config budgets'))
   expect(asked[0]!.options.map(o => o.label)).toEqual(['Keep $5.00', '$2.50 (twice a typical session)', 'Off', 'Back to the menu'])
   expect(asked[1]!.question).toMatch(/^"lots" didn't work: Session budget takes a number \(0 for off\)\. Session budget:/)
-  expect(asked[2]!.header).toBe('Budget 2/8')
+  expect(asked[2]!.header).toBe('Budgets 2/5')
   expect(sets).toEqual([['boomi-dashboard.budgetUsd', 7]])
   expect(answer.text).toBe('Saved to /config:\n  Session budget: $5.00 → $7.00')
 })
@@ -2237,14 +2241,29 @@ test('/bc-dashboard config sets one setting by name, and lists them where it can
   expect(sets).toHaveLength(1)
 })
 
+test('/bc-dashboard config goes from an area to a section and back, and never asks more than five in a row', async ($, on) => {
+  const { sets, asked } = configWorld(on, {}, ['Tokens', 'Suggest', 'Keep 40 KB', 'Keep 50%', 'Done'])
+  const answer = await $.command.run(dashboard('config budget'))
+  expect(asked.map(q => q.header)).toEqual(['Budget', 'Tokens 1/3', 'Tokens 2/3', 'Tokens 3/3', 'Budget'])
+  expect(asked[0]!.options.map(o => o.label)).toEqual(['Budgets', 'Limits and production', 'Tokens', 'Done'])
+  expect(sets).toEqual([['boomi-dashboard.tokenGuard', 'suggest']])
+  expect(answer.text).toBe('Saved to /config:\n  Token guard: offer → suggest')
+})
+
+test('/bc-dashboard config goes straight to a section by its name', async ($, on) => {
+  const { asked } = configWorld(on, {}, ['Keep offer', 'Back to the menu'])
+  expect((await $.command.run(dashboard('config tokens'))).text).toBe('Nothing changed.')
+  expect(asked.map(q => q.header)).toEqual(['Tokens 1/3', 'Tokens 2/3'])
+})
+
 test('/bc-dashboard config closed before Done with nothing picked changes nothing', async ($, on) => {
-  const { sets } = configWorld(on, { toasts: true }, ['Pane and banner', 'Keep auto', undefined])
+  const { sets } = configWorld(on, { toasts: true }, ['Pane and banner', 'Look', 'Keep auto', undefined])
   expect((await $.command.run(dashboard('config'))).text).toBe('Nothing changed.')
   expect(sets).toEqual([])
 })
 
 test('/bc-dashboard config keeps what was picked when the menu closes before Done, and the pane takes the colors', async ($, on) => {
-  const { sets } = configWorld(on, { toasts: true }, ['Pane and banner', 'Exosphere-dark', undefined])
+  const { sets } = configWorld(on, { toasts: true }, ['Pane and banner', 'Look', 'Exosphere-dark', undefined])
   const saved = await $.command.run(dashboard('config'))
   expect(sets).toEqual([['boomi-dashboard.paneTheme', 'exosphere-dark']])
   expect(saved.text).toBe('Saved to /config:\n  Theme: auto → exosphere-dark\nThe menu closed before Done; what you picked before it closed is saved.')
@@ -3573,3 +3592,164 @@ for (const theme of ['exosphere-light', 'exosphere-dark'] as const) {
     console.log(`PANE-TREE ${theme} ${JSON.stringify(await pane.drawn())}`)
   })
 }
+
+// --- Token guard -----------------------------------------------------------------
+
+const LARGE = 'x'.repeat(50 * 1024)
+
+/** A Companion folder with a large file in it, the Read tool beneath the plugin, and the context's fill as the test sets it. */
+const guarded = (on: On, percent: () => number = () => 12) => {
+  const toasts = world(on, { 'active-development': '', 'big.xml': LARGE, 'small.xml': 'x', 'big.png': LARGE }, { contextPercent: percent })
+  const reads: string[] = []
+  on('tool.call', { tool: 'Read' }, async (_$, e) => {
+    reads.push(String(e.file_path))
+    return { result: { type: 'text', file: { filePath: String(e.file_path), content: '' } } as never }
+  })
+  const suggestions: string[] = []
+  on('prompt.suggest', async (_$, e) => {
+    suggestions.push(e.text)
+    return { isShown: true }
+  })
+  on('turn.complete', async () => ({ text: '' }))
+  return { toasts, reads, suggestions }
+}
+
+/** One finished turn, with what it set off in the background settled. */
+const turnEnds = async ($: Engine, id: string) => {
+  await $.turn.complete({ reason: 'answer', turnId: id, answer: '' } as never)
+  await $.command.run(dashboard('text'))
+}
+
+test('a whole read of a large file is refused once with the way to read less, and the same read then goes ahead', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  const { toasts, reads } = guarded(on)
+  await startSession($, on, {})
+  const first = await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  expect(first.deny).toContain('offset and limit')
+  expect(reads).toEqual([])
+  expect(toasts.some(t => t.includes('read part of big.xml'))).toBe(true)
+  const second = await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  expect(second.deny).toBeUndefined()
+  expect(reads).toEqual(['/work/big.xml'])
+})
+
+test('a ranged read, a small file and a picture are never refused', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  const { reads } = guarded(on)
+  await startSession($, on, {})
+  for (const input of [{ file_path: '/work/big.xml', limit: 20 }, { file_path: '/work/small.xml' }, { file_path: '/work/big.png' }]) {
+    expect((await $.tool.call({ tool: 'Read', ...input })).deny).toBeUndefined()
+  }
+  expect(reads).toHaveLength(3)
+})
+
+test('tokenGuard off reads the whole file and never warns', { options: { tokenGuard: 'off' } }, async ($, on) => {
+  const { toasts, reads, suggestions } = guarded(on, () => 90)
+  await startSession($, on, {})
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBeUndefined()
+  await turnEnds($, 't1')
+  expect(reads).toEqual(['/work/big.xml'])
+  expect(toasts.some(t => t.includes('Context'))).toBe(false)
+  expect(suggestions).toEqual([])
+})
+
+test('outside a Companion folder the guard leaves reads and the context alone', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  const toasts = world(on, { 'big.xml': LARGE }, { contextPercent: () => 90 })
+  const reads: string[] = []
+  on('tool.call', { tool: 'Read' }, async (_$, e) => {
+    reads.push(String(e.file_path))
+    return { result: { type: 'text', file: { filePath: String(e.file_path), content: '' } } as never }
+  })
+  on('turn.complete', async () => ({ text: '' }))
+  await startSession($, on, {})
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBeUndefined()
+  await turnEnds($, 't1')
+  expect(reads).toEqual(['/work/big.xml'])
+  expect(toasts.some(t => t.includes('Context'))).toBe(false)
+})
+
+test('a full context warns and offers /compact once, and again only after it has dropped', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  let percent = 40
+  const { toasts, suggestions } = guarded(on, () => percent)
+  await startSession($, on, {})
+  await turnEnds($, 't1')
+  expect(suggestions).toEqual([])
+  percent = 55
+  await turnEnds($, 't2')
+  await turnEnds($, 't3')
+  expect(suggestions).toEqual(['/compact keep the current goal and the remaining steps'])
+  expect(toasts.filter(t => t.includes('Context 55% full'))).toHaveLength(1)
+  percent = 20
+  await turnEnds($, 't4')
+  percent = 60
+  await turnEnds($, 't5')
+  expect(suggestions).toHaveLength(2)
+})
+
+test('with suggestions off, a full context only warns', { options: { tokenGuard: 'suggest', suggestions: false } }, async ($, on) => {
+  const { toasts, suggestions } = guarded(on, () => 70)
+  await startSession($, on, {})
+  await turnEnds($, 't1')
+  expect(toasts.some(t => t.includes('Context 70% full'))).toBe(true)
+  expect(suggestions).toEqual([])
+})
+
+/** A little over the 30 minutes between mentions, in steps the test clock can take with the dashboard's timers running. */
+const halfAnHourPasses = async () => {
+  for (let i = 0; i < 4; i++) await clock.advance(8 * 60_000)
+}
+const guardToasts = (toasts: string[]) => toasts.filter(t => t.includes('/bc-dashboard config tokenGuard suggest'))
+
+test('out of the box a session mentions the guard as it starts, and a large read goes ahead with no mention right after', async ($, on) => {
+  const { toasts, reads } = guarded(on)
+  await startSession($, on, {})
+  expect(guardToasts(toasts)).toHaveLength(0)
+  await clock.advance(3_000)
+  expect(guardToasts(toasts)).toEqual([expect.stringContaining('Optional:')])
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBeUndefined()
+  expect(reads).toEqual(['/work/big.xml'])
+  expect(guardToasts(toasts)).toHaveLength(1)
+})
+
+test('after 30 minutes a large read or a full context mentions it again, three times a session at most', async ($, on) => {
+  const { toasts, suggestions } = guarded(on, () => 70)
+  await startSession($, on, {})
+  await clock.advance(3_000)
+  await halfAnHourPasses()
+  await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  expect(guardToasts(toasts)[1]).toContain('Claude read all of big.xml')
+  await turnEnds($, 't1')
+  expect(guardToasts(toasts)).toHaveLength(2)
+  await halfAnHourPasses()
+  await turnEnds($, 't2')
+  expect(guardToasts(toasts)[2]).toContain('Context 70% full')
+  await halfAnHourPasses()
+  await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  await turnEnds($, 't3')
+  expect(guardToasts(toasts)).toHaveLength(3)
+  expect(toasts.some(t => t.includes('/compact keeps'))).toBe(false)
+  expect(suggestions).toEqual([])
+})
+
+test('tokenGuard off, or already on, never mentions it', { options: { tokenGuard: 'off' } }, async ($, on) => {
+  const { toasts } = guarded(on, () => 70)
+  await startSession($, on, {})
+  await clock.advance(3_000)
+  await halfAnHourPasses()
+  await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  await turnEnds($, 't1')
+  expect(guardToasts(toasts)).toEqual([])
+})
+
+test('outside a Companion folder it is never mentioned', async ($, on) => {
+  const toasts = world(on, {}, { contextPercent: () => 70 })
+  await startSession($, on, {})
+  await clock.advance(3_000)
+  expect(guardToasts(toasts)).toEqual([])
+})
+
+test('a read that failed mentions nothing', async ($, on) => {
+  const toasts = world(on, { 'active-development': '', 'big.xml': LARGE })
+  on('tool.call', { tool: 'Read' }, async () => ({ deny: 'not allowed' }))
+  await startSession($, on, {})
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBe('not allowed')
+  expect(guardToasts(toasts)).toEqual([])
+})

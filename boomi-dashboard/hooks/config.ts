@@ -8,7 +8,7 @@ import type { PastSession } from '../types'
 
 export type Value = boolean | number | string
 
-type Unit = 'usd' | 'percent' | 'hours' | 'days' | 'seconds' | 'rows' | 'columns'
+type Unit = 'usd' | 'percent' | 'hours' | 'days' | 'seconds' | 'rows' | 'columns' | 'KB'
 
 export type Field = {
   /** The `userConfig` field, as plugin.json names it. */
@@ -30,63 +30,113 @@ export type Field = {
   isWhole?: boolean
 }
 
-export type Group = { name: string; header: string; fields: readonly Field[] }
+/** An area of the menu, with its sections, or one section: a walk of a few questions. */
+export type Group = { name: string; header: string; fields: readonly Field[]; sections?: readonly Group[] }
 
+/** An area of the menu from its sections: every setting in it, in order, and the sections to pick from. */
+const area = (name: string, header: string, sections: readonly Group[]): Group => ({ name, header, sections, fields: sections.flatMap(section => section.fields) })
+
+/** The menu's two levels: at most three areas, three sections in each (the question box holds four options, with the way out) and five settings in a section. */
 export const GROUPS: readonly Group[] = [
-  {
-    name: 'Budget',
-    header: 'Budget',
-    fields: [
-      { key: 'budgetUsd', label: 'Session budget', about: 'The status line and pane warn at 80% of it and when it is spent.', kind: 'number', unit: 'usd', default: 0, zero: 'off' },
-      { key: 'companionMonthlyUsd', label: 'Monthly amount for Companion', about: 'What Companion sessions may cost in a calendar month, by Claude Code’s own cost figures; warns at 80% and when it is reached.', kind: 'number', unit: 'usd', default: 0, zero: 'off' },
-      { key: 'companionShare', label: 'Companion’s share of your usage limit', about: 'How much of your weekly Claude usage limit Companion work may use; warns at 80% and when it is used. Needs a Claude login that reports a weekly limit.', kind: 'number', unit: 'percent', default: 0, zero: 'off', presets: [25, 50, 75], max: 100 },
-      { key: 'companionSharePeriod', label: 'Period for the share', about: 'What the share runs over: today, the last 7 days, or this calendar month.', kind: 'choice', options: ['day', 'week', 'month'], default: 'week' },
-      { key: 'seatBudgetUsd', label: 'Your Claude budget', about: 'Only for a login whose usage Claude Code reports as a spend limit, in percent: the BUDGET gauge shows it in dollars. Where the account reports its monthly budget in dollars (most do), that is used and this is not needed.', kind: 'number', unit: 'usd', default: 0, zero: 'off' },
-      { key: 'budgetEnforce', label: 'When a budget is spent', about: 'Warn only warns. Confirm asks you before each Companion change (create, push, deploy, test and the like); block refuses them. Reads are never stopped, and a change already running finishes.', kind: 'choice', options: ['warn', 'confirm', 'block'], default: 'warn' },
-      { key: 'envCheck', label: 'Production check', about: 'Off reads nothing. Check reads the environment in Companion’s .env from Boomi, by name and classification, and shows it. Enforce also refuses Companion deploys, undeploys and test runs to that environment unless it is TEST or DEV, so production stays read-only for Companion. The token is never shown.', kind: 'choice', options: ['off', 'check', 'enforce'], default: 'off' },
-      { key: 'budgetGrace', label: 'Grace past a budget', about: 'How far past a budget, in percent, before confirm or block starts.', kind: 'number', unit: 'percent', default: 0, zero: 'none, at 100%', presets: [5, 10, 20], max: 100 },
-    ],
-  },
-  {
-    name: 'Pane and banner',
-    header: 'Pane',
-    fields: [
-      { key: 'paneTheme', label: 'Theme', about: 'Auto is Exosphere, Boomi’s design system, in your system’s light or dark. Exosphere and Whimsical (the Art Deco look with the flamingo) each have a light and a dark; Terminal takes your terminal’s theme.', kind: 'choice', options: ['auto', 'exosphere-light', 'exosphere-dark', 'whimsical-light', 'whimsical-dark', 'terminal'], default: 'auto' },
-      { key: 'paneRows', label: 'Pane height', about: 'How many rows the pane asks for above the prompt. A size you drag it to, or set with /bc-dashboard size, wins.', kind: 'number', unit: 'rows', default: 0, zero: 'Claude Code decides', presets: [12, 20, 30], isWhole: true },
-      { key: 'paneColumns', label: 'Pane width', about: 'How many columns the pane asks for when docked beside a fullscreen transcript. A width you drag it to wins.', kind: 'number', unit: 'columns', default: 0, zero: 'Claude Code decides', presets: [60, 80, 100], isWhole: true },
-      { key: 'banner', label: 'Banner above the prompt', about: 'The latest Companion step and what needs attention; at the start of a session, the last session’s recap and tips.', kind: 'boolean', default: true },
-      { key: 'logo', label: 'Logo', about: 'The mark in the pane and banner: the Boomi logo in Exosphere (where the terminal draws pictures), the flamingo in Whimsical.', kind: 'boolean', default: true },
-      { key: 'bandAnimation', label: 'Animate the banner flamingo', about: 'A sparkle in the flamingo’s place for a second in every five. Only in the Whimsical themes.', kind: 'boolean', default: true, isNextSession: true },
-      { key: 'handoffNudge', label: 'Suggest /handoff on the way out', about: 'The first /exit, /quit or /clear of a session that did work suggests /handoff first, which saves a summary for the next session; typing the command again goes through.', kind: 'boolean', default: true },
-      { key: 'toasts', label: 'Toasts', about: 'A pop-up when a step fails, a deploy or test finishes, or a watched component changes.', kind: 'boolean', default: true },
-      { key: 'suggestions', label: 'Suggest the next step', about: 'With a component saved but not deployed, or deployed but not tested, offer that step in the prompt box (Tab takes it).', kind: 'boolean', default: true },
-      { key: 'promptCheck', label: 'Prompt tips', about: 'Check each Boomi prompt for what it leaves out and suggest an upgrade. Confirm holds a flagged prompt until you send it or the upgrade; suggest shows tips and sends it. A password or token in a prompt always asks unless this is off.', kind: 'choice', options: ['off', 'suggest', 'confirm'], default: 'confirm' },
-      { key: 'promptView', label: 'Prompt tab', about: 'Auto opens the Prompt tab beside the pane when a prompt gets tips; manual only from /bc-dashboard prompt or the pane’s Prompt tab button; off never.', kind: 'choice', options: ['auto', 'manual', 'off'], default: 'auto' },
-      { key: 'promptRewrite', label: 'Rewrite prompts automatically', about: 'Auto has the prompt model polish a prompt that gets tips, in the background, right after the checks; it costs a few cents at most per prompt. Manual rewrites only when you press Upgrade with a model or run /bc-dashboard prompt upgrade.', kind: 'choice', options: ['auto', 'manual'], default: 'auto' },
-      { key: 'promptSuggested', label: 'Prompts taken from a suggestion', about: 'Skip leaves a suggestion from the prompt box (Claude’s guess after a turn, or the dashboard’s next step), taken with Tab and sent as it was, unchecked: no tips, no hold, no rewrite. Check treats it like any other prompt.', kind: 'choice', options: ['skip', 'check'], default: 'skip' },
-      { key: 'promptModel', label: 'Prompt rewrite model', about: 'The model that rewrites a prompt: automatically after the checks, or when you ask.', kind: 'text', default: 'haiku' },
-      { key: 'promptSkip', label: 'Prompt checks to skip', about: 'Checks to leave out, separated by commas: subject, environment, test, production, steps, error, build, map, secret, aim.', kind: 'text', default: '' },
-    ],
-  },
-  {
-    name: 'Data and reports',
-    header: 'Data',
-    fields: [
-      { key: 'personalLogin', label: 'Your own Boomi login', about: 'Your own Boomi login, if you have one. The pane flags Companion when it signs in with it, since Companion should have a login of its own. Leave empty to rely on the name check alone.', kind: 'text', default: '' },
-      { key: 'recentHours', label: 'Window for earlier steps', about: 'How far back earlier sessions’ steps and Companion’s activity log count.', kind: 'number', unit: 'hours', default: 24, presets: [12, 24, 48, 72] },
-      { key: 'historyDays', label: 'Past sessions window', about: 'How far back history, review and the all-sessions report read Claude Code’s transcripts.', kind: 'number', unit: 'days', default: 90, presets: [30, 90, 180], isWhole: true },
-      { key: 'pollSeconds', label: 'Checking watched components', about: 'How often the dashboard checks watched components in Boomi.', kind: 'number', unit: 'seconds', default: 60, zero: 'off', presets: [30, 60, 300], isNextSession: true },
-      { key: 'reportStyle', label: 'HTML report style', about: 'Exosphere is Boomi\u2019s design system, for anything Boomi people read; expressive is the Valence theme, Miami Deco.', kind: 'choice', options: ['exosphere', 'expressive'], default: 'exosphere' },
-      { key: 'reportOpen', label: 'Open the HTML report', about: 'Open /bc-dashboard report html’s page in your browser once it is saved.', kind: 'boolean', default: true },
-      { key: 'usageBreakdown', label: 'Read Claude Code’s usage breakdown', about: 'Every 15 minutes, run claude -p "/usage" (no model call, no session kept) for Companion’s share of all your usage on this machine.', kind: 'boolean', default: true, isNextSession: true },
-      { key: 'activityLog', label: 'Read Companion’s activity log', about: 'Also read .activity-log/activity.jsonl for script runs Claude’s tool calls didn’t show.', kind: 'boolean', default: true, isNextSession: true },
-      { key: 'activityLogPrompt', label: 'Offer to turn on the activity log', about: 'At the start of a session in Companion’s folder, offer to add BOOMI_COMPANION_LOG_ACTIVITY=1 to its env file, which makes Companion’s scripts keep the log. Ask offers each session until you say yes or never; never stops offering.', kind: 'choice', options: ['ask', 'never'], default: 'ask' },
-      { key: 'updateCheck', label: 'Check for updates', about: 'At the start of a session, say when a newer dashboard is out. It never installs.', kind: 'boolean', default: true, isNextSession: true },
-      { key: 'updateCheckHours', label: 'Time between update checks', about: 'How long the dashboard waits between update checks.', kind: 'number', unit: 'hours', default: 24, zero: 'off', presets: [24, 168], isNextSession: true },
-      { key: 'envFile', label: 'Companion’s .env file', about: 'Where the dashboard reads the Platform API credentials, relative to the session’s folder.', kind: 'text', default: '.env' },
-      { key: 'componentsDir', label: 'Components folder', about: 'Where Companion keeps component XML; edits under it show as edited components.', kind: 'text', default: 'active-development' },
-    ],
-  },
+  area('Budget', 'Budget', [
+    {
+      name: 'Budgets',
+      header: 'Budgets',
+      fields: [
+        { key: 'budgetUsd', label: 'Session budget', about: 'The status line and pane warn at 80% of it and when it is spent.', kind: 'number', unit: 'usd', default: 0, zero: 'off' },
+        { key: 'companionMonthlyUsd', label: 'Monthly amount for Companion', about: 'What Companion sessions may cost in a calendar month, by Claude Code’s own cost figures; warns at 80% and when it is reached.', kind: 'number', unit: 'usd', default: 0, zero: 'off' },
+        { key: 'companionShare', label: 'Companion’s share of your usage limit', about: 'How much of your weekly Claude usage limit Companion work may use; warns at 80% and when it is used. Needs a Claude login that reports a weekly limit.', kind: 'number', unit: 'percent', default: 0, zero: 'off', presets: [25, 50, 75], max: 100 },
+        { key: 'companionSharePeriod', label: 'Period for the share', about: 'What the share runs over: today, the last 7 days, or this calendar month.', kind: 'choice', options: ['day', 'week', 'month'], default: 'week' },
+        { key: 'seatBudgetUsd', label: 'Your Claude budget', about: 'Only for a login whose usage Claude Code reports as a spend limit, in percent: the BUDGET gauge shows it in dollars. Where the account reports its monthly budget in dollars (most do), that is used and this is not needed.', kind: 'number', unit: 'usd', default: 0, zero: 'off' },
+      ],
+    },
+    {
+      name: 'Limits and production',
+      header: 'Limits',
+      fields: [
+        { key: 'budgetEnforce', label: 'When a budget is spent', about: 'Warn only warns. Confirm asks you before each Companion change (create, push, deploy, test and the like); block refuses them. Reads are never stopped, and a change already running finishes.', kind: 'choice', options: ['warn', 'confirm', 'block'], default: 'warn' },
+        { key: 'budgetGrace', label: 'Grace past a budget', about: 'How far past a budget, in percent, before confirm or block starts.', kind: 'number', unit: 'percent', default: 0, zero: 'none, at 100%', presets: [5, 10, 20], max: 100 },
+        { key: 'envCheck', label: 'Production check', about: 'Off reads nothing. Check reads the environment in Companion’s .env from Boomi, by name and classification, and shows it. Enforce also refuses Companion deploys, undeploys and test runs to that environment unless it is TEST or DEV, so production stays read-only for Companion. The token is never shown.', kind: 'choice', options: ['off', 'check', 'enforce'], default: 'off' },
+        { key: 'personalLogin', label: 'Your own Boomi login', about: 'Your own Boomi login, if you have one. The pane flags Companion when it signs in with it, since Companion should have a login of its own. Leave empty to rely on the name check alone.', kind: 'text', default: '' },
+      ],
+    },
+    {
+      name: 'Tokens',
+      header: 'Tokens',
+      fields: [
+        { key: 'tokenGuard', label: 'Token guard', about: 'Suggest warns when the context fills and offers /compact, and turns back a whole-file read of a large file once. Offer does none of that, and mentions the guard as a session starts and now and then. Off stays silent.', kind: 'choice', default: 'offer', options: ['offer', 'suggest', 'off'] },
+        { key: 'largeReadKb', label: 'Large read limit', about: 'A file over this size, in KB, read whole in one go is turned back once, with the way to read less. The same read again goes ahead.', kind: 'number', unit: 'KB', default: 40, presets: [40, 100], zero: 'never turns a read back', isWhole: true },
+        { key: 'contextWarnPercent', label: 'Context warning', about: 'How full the context gets before the dashboard warns, once each time it gets there, and offers /compact.', kind: 'number', unit: 'percent', default: 50, presets: [50, 70], zero: 'never warns', max: 100, isWhole: true },
+      ],
+    },
+  ]),
+  area('Pane and banner', 'Pane', [
+    {
+      name: 'Look',
+      header: 'Look',
+      fields: [
+        { key: 'paneTheme', label: 'Theme', about: 'Auto is Exosphere, Boomi’s design system, in your system’s light or dark. Exosphere and Whimsical (the Art Deco look with the flamingo) each have a light and a dark; Terminal takes your terminal’s theme.', kind: 'choice', options: ['auto', 'exosphere-light', 'exosphere-dark', 'whimsical-light', 'whimsical-dark', 'terminal'], default: 'auto' },
+        { key: 'paneRows', label: 'Pane height', about: 'How many rows the pane asks for above the prompt. A size you drag it to, or set with /bc-dashboard size, wins.', kind: 'number', unit: 'rows', default: 0, zero: 'Claude Code decides', presets: [12, 20, 30], isWhole: true },
+        { key: 'paneColumns', label: 'Pane width', about: 'How many columns the pane asks for when docked beside a fullscreen transcript. A width you drag it to wins.', kind: 'number', unit: 'columns', default: 0, zero: 'Claude Code decides', presets: [60, 80, 100], isWhole: true },
+        { key: 'logo', label: 'Logo', about: 'The mark in the pane and banner: the Boomi logo in Exosphere (where the terminal draws pictures), the flamingo in Whimsical.', kind: 'boolean', default: true },
+        { key: 'bandAnimation', label: 'Animate the banner flamingo', about: 'A sparkle in the flamingo’s place for a second in every five. Only in the Whimsical themes.', kind: 'boolean', default: true, isNextSession: true },
+      ],
+    },
+    {
+      name: 'Banner and nudges',
+      header: 'Nudges',
+      fields: [
+        { key: 'banner', label: 'Banner above the prompt', about: 'The latest Companion step and what needs attention; at the start of a session, the last session’s recap and tips.', kind: 'boolean', default: true },
+        { key: 'toasts', label: 'Toasts', about: 'A pop-up when a step fails, a deploy or test finishes, or a watched component changes.', kind: 'boolean', default: true },
+        { key: 'suggestions', label: 'Suggest the next step', about: 'With a component saved but not deployed, or deployed but not tested, offer that step in the prompt box (Tab takes it).', kind: 'boolean', default: true },
+        { key: 'handoffNudge', label: 'Suggest /handoff on the way out', about: 'The first /exit, /quit or /clear of a session that did work suggests /handoff first, which saves a summary for the next session; typing the command again goes through.', kind: 'boolean', default: true },
+        { key: 'promptView', label: 'Prompt tab', about: 'Auto opens the Prompt tab beside the pane when a prompt gets tips; manual only from /bc-dashboard prompt or the pane’s Prompt tab button; off never.', kind: 'choice', options: ['auto', 'manual', 'off'], default: 'auto' },
+      ],
+    },
+    {
+      name: 'Prompt tips',
+      header: 'Prompts',
+      fields: [
+        { key: 'promptCheck', label: 'Prompt tips', about: 'Check each Boomi prompt for what it leaves out and suggest an upgrade. Confirm holds a flagged prompt until you send it or the upgrade; suggest shows tips and sends it. A password or token in a prompt always asks unless this is off.', kind: 'choice', options: ['off', 'suggest', 'confirm'], default: 'confirm' },
+        { key: 'promptRewrite', label: 'Rewrite prompts automatically', about: 'Auto has the prompt model polish a prompt that gets tips, in the background, right after the checks; it costs a few cents at most per prompt. Manual rewrites only when you press Upgrade with a model or run /bc-dashboard prompt upgrade.', kind: 'choice', options: ['auto', 'manual'], default: 'auto' },
+        { key: 'promptSuggested', label: 'Prompts taken from a suggestion', about: 'Skip leaves a suggestion from the prompt box (Claude’s guess after a turn, or the dashboard’s next step), taken with Tab and sent as it was, unchecked: no tips, no hold, no rewrite. Check treats it like any other prompt.', kind: 'choice', options: ['skip', 'check'], default: 'skip' },
+        { key: 'promptModel', label: 'Prompt rewrite model', about: 'The model that rewrites a prompt: automatically after the checks, or when you ask.', kind: 'text', default: 'haiku' },
+        { key: 'promptSkip', label: 'Prompt checks to skip', about: 'Checks to leave out, separated by commas: subject, environment, test, production, steps, error, build, map, secret, aim.', kind: 'text', default: '' },
+      ],
+    },
+  ]),
+  area('Data and reports', 'Data', [
+    {
+      name: 'History',
+      header: 'History',
+      fields: [
+        { key: 'recentHours', label: 'Window for earlier steps', about: 'How far back earlier sessions’ steps and Companion’s activity log count.', kind: 'number', unit: 'hours', default: 24, presets: [12, 24, 48, 72] },
+        { key: 'historyDays', label: 'Past sessions window', about: 'How far back history, review and the all-sessions report read Claude Code’s transcripts.', kind: 'number', unit: 'days', default: 90, presets: [30, 90, 180], isWhole: true },
+        { key: 'usageBreakdown', label: 'Read Claude Code’s usage breakdown', about: 'Every 15 minutes, run claude -p "/usage" (no model call, no session kept) for Companion’s share of all your usage on this machine.', kind: 'boolean', default: true, isNextSession: true },
+        { key: 'activityLog', label: 'Read Companion’s activity log', about: 'Also read .activity-log/activity.jsonl for script runs Claude’s tool calls didn’t show.', kind: 'boolean', default: true, isNextSession: true },
+        { key: 'activityLogPrompt', label: 'Offer to turn on the activity log', about: 'At the start of a session in Companion’s folder, offer to add BOOMI_COMPANION_LOG_ACTIVITY=1 to its env file, which makes Companion’s scripts keep the log. Ask offers each session until you say yes or never; never stops offering.', kind: 'choice', options: ['ask', 'never'], default: 'ask' },
+      ],
+    },
+    {
+      name: 'Reports and checks',
+      header: 'Checks',
+      fields: [
+        { key: 'pollSeconds', label: 'Checking watched components', about: 'How often the dashboard checks watched components in Boomi.', kind: 'number', unit: 'seconds', default: 60, zero: 'off', presets: [30, 60, 300], isNextSession: true },
+        { key: 'reportStyle', label: 'HTML report style', about: 'Exosphere is Boomi\u2019s design system, for anything Boomi people read; expressive is the Valence theme, Miami Deco.', kind: 'choice', options: ['exosphere', 'expressive'], default: 'exosphere' },
+        { key: 'reportOpen', label: 'Open the HTML report', about: 'Open /bc-dashboard report html’s page in your browser once it is saved.', kind: 'boolean', default: true },
+        { key: 'updateCheck', label: 'Check for updates', about: 'At the start of a session, say when a newer dashboard is out. It never installs.', kind: 'boolean', default: true, isNextSession: true },
+        { key: 'updateCheckHours', label: 'Time between update checks', about: 'How long the dashboard waits between update checks.', kind: 'number', unit: 'hours', default: 24, zero: 'off', presets: [24, 168], isNextSession: true },
+      ],
+    },
+    {
+      name: 'Files',
+      header: 'Files',
+      fields: [
+        { key: 'envFile', label: 'Companion’s .env file', about: 'Where the dashboard reads the Platform API credentials, relative to the session’s folder.', kind: 'text', default: '.env' },
+        { key: 'componentsDir', label: 'Components folder', about: 'Where Companion keeps component XML; edits under it show as edited components.', kind: 'text', default: 'active-development' },
+      ],
+    },
+  ]),
 ]
 
 export const FIELDS: readonly Field[] = GROUPS.flatMap(g => g.fields)
@@ -106,6 +156,13 @@ export const groupNamed = (name: string): Group | undefined => {
   return wanted ? GROUPS.find(g => g.name.toLowerCase() === wanted || g.header.toLowerCase() === wanted || g.name.toLowerCase().startsWith(wanted)) : undefined
 }
 
+/** A section by a word of its name: `tokens`, `limits`, `look`. */
+export const sectionNamed = (name: string): Group | undefined => {
+  const wanted = name.trim().toLowerCase()
+  const sections = GROUPS.flatMap(g => g.sections ?? [])
+  return wanted ? sections.find(g => g.name.toLowerCase() === wanted || g.header.toLowerCase() === wanted || g.name.toLowerCase().startsWith(wanted)) : undefined
+}
+
 /**
  * `/bc-dashboard config budget warn`: a group with a value would start the
  * walk and lose the value. Says so, and which of the group's settings takes it.
@@ -113,7 +170,7 @@ export const groupNamed = (name: string): Group | undefined => {
 export const groupWithValue = (group: Group, text: string): string => {
   const fits = group.fields.filter(f => f.kind !== 'text' && !('error' in parseValue(f, text))).slice(0, 3)
   const meant = fits.length > 0 ? ` Did you mean ${fits.map(f => `/bc-dashboard config ${f.key} ${text}`).join(' or ')}?` : ''
-  return `${group.header} is a group of settings, so "${text}" wasn't saved.${meant} Run /bc-dashboard config ${group.name.toLowerCase()} on its own to go through the group a question at a time.`
+  return `${group.header} is a group of settings, so "${text}" wasn't saved.${meant} Run /bc-dashboard config ${group.header.toLowerCase()} on its own to go through the group a question at a time.`
 }
 
 const money = (usd: number) => `$${usd < 10 ? usd.toFixed(2) : usd.toFixed(0)}`
@@ -218,7 +275,7 @@ export const parseValue = (field: Field, text: string): { value: Value } | { err
     return { value: t }
   }
   if (/^(off|none|no)$/i.test(t) && field.zero) return { value: 0 }
-  const n = Number(t.replace(/^\$|\s*(%|usd|dollars?|hours?|h|days?|d|seconds?|s|rows?|columns?)$/gi, '').replace(/,/g, ''))
+  const n = Number(t.replace(/^\$|\s*(%|usd|dollars?|hours?|h|days?|d|seconds?|s|rows?|columns?|kb)$/gi, '').replace(/,/g, ''))
   if (!Number.isFinite(n) || n < 0 || t === '') return { error: `${field.label} takes a number${field.zero ? ` (0 for ${field.zero})` : ''}` }
   if (field.max !== undefined && n > field.max) return { error: `${field.label} goes up to ${field.max}` }
   if (field.zero === undefined && n === 0) return { error: `${field.label} can't be 0` }
@@ -255,13 +312,19 @@ export const DONE = 'Done'
 
 /** The menu: each group with what's set in it now, and Done. */
 export const menuQuestion = (values: Readonly<Record<string, Value>>, changed: number): { question: string; options: string[] } => {
-  const budget = GROUPS[0]!.fields.filter(f => f.kind === 'number' && Number(values[f.key]) > 0).map(f => `${f.label.toLowerCase()} ${show(f, values[f.key]!)}`)
+  const budget = GROUPS[0]!.sections![0]!.fields.filter(f => f.kind === 'number' && Number(values[f.key]) > 0).map(f => `${f.label.toLowerCase()} ${show(f, values[f.key]!)}`)
   const now = budget.length ? `Budgets now: ${budget.join(', ')}.` : 'No budget is set.'
   return {
     question: `Which dashboard settings do you want to go through? ${now}${changed ? ` ${changed} change${changed === 1 ? '' : 's'} so far, saved when you pick Done.` : ''}`,
     options: [...GROUPS.map(g => g.name), DONE],
   }
 }
+
+/** An area's own menu: its sections, each with how many questions it has, and the way out. */
+export const sectionQuestion = (group: Group, out: string, changed: number): { question: string; options: string[] } => ({
+  question: `Which ${group.name.toLowerCase()} settings do you want to go through?${changed ? ` ${changed} change${changed === 1 ? '' : 's'} so far, saved when you pick Done.` : ''}`,
+  options: [...(group.sections ?? []).map(section => section.name), out],
+})
 
 /** Every setting and its value, for where the menu can't ask (a -p run), with how to change one. */
 export const listing = (values: Readonly<Record<string, Value>>): string => {

@@ -2331,11 +2331,17 @@ const TIP_LIST: readonly Tip[] = [
   { text: "Tip: Run again repeats a failed test without a turn of Claude's", plugin: 'bc-integration' },
   { text: 'Tip: ask Claude "what\'s left to fix?" and it answers from the dashboard' },
   { text: 'Tip: /bc-dashboard report save writes the session up for a PR or a hand-off' },
-  { text: 'Tip: /bc-dashboard config budget sets a spend budget, with figures from your past sessions' },
+  { text: 'Tip: /bc-dashboard config budgets sets a spend budget, with figures from your past sessions' },
   { text: 'Tip: Scan under Past Companion sessions shows what earlier sessions cost' },
   { text: 'Tip: /bc-dashboard watch <component> flags changes someone else makes in Boomi', plugin: 'bc-integration' },
   { text: "Tip: /bc-dashboard activity-log on adds BOOMI_COMPANION_LOG_ACTIVITY=1 to Companion's .env, which adds its activity log as a second source", plugin: 'bc-integration' },
   { text: 'Tip: the Day, Night and Terminal buttons in the pane change its colors' },
+  { text: 'Tip: /clear between tasks, so each turn stops re-reading the last task' },
+  { text: 'Tip: keep the current task in a short CLAUDE.md; it comes back after a compaction, and what you only said in chat may not' },
+  { text: 'Tip: /compact <what to keep> at a stopping point, before auto-compact picks the moment' },
+  { text: 'Tip: ask Claude to search or read line ranges, not whole files; one big result can fill the context' },
+  { text: 'Tip: /context shows what is using your tokens' },
+  { text: 'Tip: /bc-dashboard config tokenGuard suggest warns as the context fills and steers Claude away from large whole-file reads' },
 ]
 
 /** Tips about the other Companion plugins, shown only where the plugin is installed. */
