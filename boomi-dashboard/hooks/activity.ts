@@ -2091,6 +2091,8 @@ export type ScannedSession = {
   startedAt?: string
   endedAt?: string
   costUsd?: number | null
+  costByMonth?: Record<string, number>
+  hasUnknownModelCost?: boolean
   models?: Record<string, { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }>
   commands?: string[]
   title?: string
@@ -2143,6 +2145,8 @@ export const pastSessions = (scan: { sessions?: ScannedSession[] }): PastSession
       startedAt: s.startedAt,
       endedAt: s.endedAt,
       costUsd: typeof s.costUsd === 'number' ? s.costUsd : undefined,
+      ...(s.costByMonth ? { costByMonth: s.costByMonth } : {}),
+      ...(s.hasUnknownModelCost ? { hasUnknownCost: true } : {}),
       tokens: sum(m => (m.input ?? 0) + (m.output ?? 0) + (m.cacheWrite ?? 0)),
       cached: sum(m => m.cacheRead ?? 0),
       models: models.map(([id]) => modelName(id) ?? id),
@@ -2796,17 +2800,56 @@ export const monthOf = (at: number): string => {
  */
 export const monthSpend = (sessions: readonly PastSession[] | undefined, now: number, currentId: string | undefined, liveUsd: number | undefined): number => {
   const month = monthOf(now)
-  const earlier = (sessions ?? [])
-    .filter(s => s.id !== currentId && s.startedAt && monthOf(Date.parse(s.startedAt)) === month)
-    .reduce((sum, s) => sum + (s.costUsd ?? 0), 0)
+  const earlier = (sessions ?? []).filter(s => s.id !== currentId).reduce((sum, s) => sum + costIn(s, month), 0)
   return earlier + (liveUsd ?? 0)
 }
 
+/** What a session cost in a month: the transcript's own split where the scan has one, else all of it in the month it started. */
+const costIn = (s: PastSession, month: string): number => {
+  if (s.costByMonth) return s.costByMonth[month] ?? 0
+  return s.startedAt && monthOf(Date.parse(s.startedAt)) === month ? (s.costUsd ?? 0) : 0
+}
+
+/** This month's earlier sessions with no price for some of their use, such as a local model's: they count as less than they used. */
+export const monthUnpriced = (sessions: readonly PastSession[] | undefined, now: number, currentId: string | undefined): number => {
+  const month = monthOf(now)
+  return (sessions ?? []).filter(s => s.id !== currentId && (s.hasUnknownCost || s.costUsd === undefined) && (s.costByMonth ? month in s.costByMonth : s.startedAt && monthOf(Date.parse(s.startedAt)) === month)).length
+}
+
+/** Whether something saved at `savedAt` has been kept longer than `keptMs`. */
+export const isExpired = (savedAt: number, now: number, keptMs: number): boolean => now - savedAt > keptMs
+
+/** When the month of a moment began. */
+export const monthStartOf = (at: number): number => {
+  const d = new Date(at)
+  return new Date(d.getFullYear(), d.getMonth(), 1).getTime()
+}
+
+/** The longest a watch waits between tries while Boomi can't be reached. */
+const MAX_POLL_WAIT_MS = 30 * 60_000
+
+/**
+ * How a poll of the watched components went. Connected only if at least one
+ * could be read; otherwise each failed poll in a row doubles the wait before
+ * the next timed one, up to half an hour. "Not found" is an answer from Boomi.
+ */
+export const pollOutcome = (
+  watched: readonly { error?: string }[],
+  failures: number,
+  pollMs: number,
+): { phase: 'ok' | 'error'; message: string; failures: number; waitMs: number } => {
+  const failed = watched.filter(w => w.error && w.error !== 'not found in Boomi')
+  if (failed.length < watched.length || watched.length === 0) return { phase: 'ok', message: 'Connected.', failures: 0, waitMs: 0 }
+  const count = failures + 1
+  return { phase: 'error', message: `Couldn't reach Boomi: ${failed[0]!.error}`, failures: count, waitMs: Math.min(pollMs * 2 ** count, MAX_POLL_WAIT_MS) }
+}
+
 /** Companion's month against the monthly amount the person set. Undefined without one. */
-export const monthView = (spent: number, monthlyUsd: number): BudgetView | undefined => {
+export const monthView = (spent: number, monthlyUsd: number, unpriced = 0): BudgetView | undefined => {
   if (!monthlyUsd || monthlyUsd <= 0) return undefined
   const percent = (spent / monthlyUsd) * 100
-  return { level: budgetLevel(percent), percent, text: `Companion this month: ${formatCost(spent)} of ${formatCost(monthlyUsd)}` }
+  const note = unpriced > 0 ? ` (${unpriced} session${unpriced === 1 ? '' : 's'} with no known price not counted in full)` : ''
+  return { level: budgetLevel(percent), percent, text: `Companion this month: ${formatCost(spent)} of ${formatCost(monthlyUsd)}${note}` }
 }
 
 /** A budget the person set, as the BUDGET gauge lists it: what it is and how full. */

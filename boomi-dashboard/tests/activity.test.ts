@@ -82,6 +82,8 @@ import {
   shareView,
   pruneDays,
   monthSpend,
+  monthStartOf,
+  monthUnpriced,
   monthView,
   resumeCommand,
   resumable, backgroundOf, isSettled, loginNudgeWords } from '../hooks/activity'
@@ -1264,3 +1266,24 @@ test('only the notice’s own shape is believed: a path outside a task’s outpu
 test('with the tips retired only the recap is left, and with no recap nothing shows', () => {
   expect(welcomeLine(5, undefined, 0, [])).toBeUndefined()
 })
+
+test('a month counts what it spent: a session running across months splits, and one with no split goes by its start', () => {
+  const now = Date.parse('2026-11-02T12:00:00Z')
+  const across = { id: 'a', startedAt: '2026-10-31T10:00:00Z', costUsd: 500, costByMonth: { '2026-10': 499, '2026-11': 1 }, tokens: 0, cached: 0, models: [], runs: {}, components: [] }
+  const last = { id: 'b', startedAt: '2026-10-05T10:00:00Z', costUsd: 7, tokens: 0, cached: 0, models: [], runs: {}, components: [] }
+  const here = { id: 'c', startedAt: '2026-11-01T12:00:00Z', costUsd: 3, tokens: 0, cached: 0, models: [], runs: {}, components: [] }
+  expect(monthSpend([across, last, here], now, undefined, 2)).toBe(6)
+  expect(monthSpend([across, last, here], now, 'c', 0)).toBe(1)
+})
+
+test('sessions with no known price are counted and named, and the month starts on its first', () => {
+  const now = Date.parse('2026-11-15T12:00:00Z')
+  const base = { tokens: 0, cached: 0, models: [], runs: {}, components: [], startedAt: '2026-11-02T12:00:00Z' }
+  const sessions = [{ ...base, id: 'a', costUsd: 1, hasUnknownCost: true }, { ...base, id: 'b' }, { ...base, id: 'c', costUsd: 1 }, { ...base, id: 'd', costUsd: 1, hasUnknownCost: true, startedAt: '2026-10-02T12:00:00Z' }]
+  expect(monthUnpriced(sessions, now, undefined)).toBe(2)
+  expect(monthUnpriced(sessions, now, 'a')).toBe(1)
+  expect(monthView(5, 10, 2)?.text).toContain('2 sessions with no known price')
+  expect(monthView(5, 10)?.text).toBe('Companion this month: $5.00 of $10')
+  expect(new Date(monthStartOf(now)).getDate()).toBe(1)
+})
+

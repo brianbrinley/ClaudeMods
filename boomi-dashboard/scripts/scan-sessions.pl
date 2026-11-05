@@ -136,6 +136,11 @@ for my $file (sort @files) {
     if (($o->{type} // '') eq 'cost-state') {
       # Claude Code's own running total for the session, the figure /cost shows.
       my $usd = $o->{totalCostUSD};
+      # The record has no time of its own: the last line before it dates it.
+      if (defined $usd && defined $s->{endedAt}) {
+        my $month = substr($s->{endedAt}, 0, 7);
+        $s->{totalByMonth}{$month} = $usd + 0 if !defined $s->{totalByMonth}{$month} || $usd > $s->{totalByMonth}{$month};
+      }
       if (defined $usd && (!defined $s->{costUsd} || $usd > $s->{costUsd})) {
         $s->{costUsd} = $usd + 0;
         $s->{hasUnknownModelCost} = $o->{hasUnknownModelCost} ? JSON::PP::true : JSON::PP::false;
@@ -180,6 +185,18 @@ for my $file (sort @files) {
     }
   }
   close $fh;
+}
+
+# The running total at the end of each month, as what each month added to it.
+for my $s (values %sessions) {
+  my $totals = delete $s->{totalByMonth} or next;
+  my ($before, %by) = (0);
+  for my $month (sort keys %$totals) {
+    next if $totals->{$month} <= $before;
+    $by{$month} = $totals->{$month} - $before;
+    $before = $totals->{$month};
+  }
+  $s->{costByMonth} = \%by;
 }
 
 # Only sessions that named a Companion script in a Bash command.
