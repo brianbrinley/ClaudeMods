@@ -124,8 +124,8 @@ test('scriptRuns finds the Companion scripts a command runs and what they name',
       `cd work && bash scripts/boomi-component-push.sh ${FILE} --branch dev && bash scripts/boomi-deploy.sh ${FILE} --deployment-notes "first cut"`,
     ),
   ).toEqual([
-    { kind: 'push', file: `work/${FILE}` },
-    { kind: 'deploy', file: `work/${FILE}` },
+    { kind: 'push', dir: 'work', file: `work/${FILE}` },
+    { kind: 'deploy', dir: 'work', file: `work/${FILE}` },
   ])
   expect(runsIn(`bash scripts/boomi-test-execute.sh --process-id ${ID} --test-data in.json`)).toEqual([{ kind: 'test', processId: ID }])
   expect(runsIn('bash scripts/boomi-undeploy.sh dep-123')).toEqual([{ kind: 'undeploy', deploymentId: 'dep-123' }])
@@ -134,7 +134,7 @@ test('scriptRuns finds the Companion scripts a command runs and what they name',
 
 test("scriptRuns notes Companion's other scripts, and finds scripts inside bash -c", () => {
   expect(runsIn('bash scripts/boomi-component-search.sh --name Orders')).toEqual([{ kind: 'other', script: 'component-search' }])
-  expect(runsIn(`bash -c 'cd x && bash scripts/boomi-deploy.sh ${FILE}'`)).toEqual([{ kind: 'deploy', file: `x/${FILE}` }])
+  expect(runsIn(`bash -c 'cd x && bash scripts/boomi-deploy.sh ${FILE}'`)).toEqual([{ kind: 'deploy', dir: 'x', file: `x/${FILE}` }])
 })
 
 test('scriptRuns leaves out help, connection tests, the shared library and other commands', () => {
@@ -801,9 +801,9 @@ test("the recap counts only this session's own Companion steps, and says what is
 test('the welcome line turns from the recap through every tip and back', () => {
   const recap = { endedAt: NOW - HOUR, components: 2, saves: 2, deploys: 0, tests: 0, testsFailed: 0, open: 0 }
   expect(welcomeLine(0, recap, NOW)).toEqual({ level: 'healthy', text: 'Last session 1h ago: 2 components · 2 saves · nothing left to fix' })
-  expect(welcomeLine(1, recap, NOW).text).toBe(TIPS[0])
-  expect(welcomeLine(TIPS.length + 1, recap, NOW).text).toMatch(/^Last session/)
-  expect(welcomeLine(0, undefined, NOW).text).toBe(TIPS[0])
+  expect(welcomeLine(1, recap, NOW)?.text).toBe(TIPS[0])
+  expect(welcomeLine(TIPS.length + 1, recap, NOW)?.text).toMatch(/^Last session/)
+  expect(welcomeLine(0, undefined, NOW)?.text).toBe(TIPS[0])
   for (const tip of TIPS) expect(tip.startsWith('Tip: ')).toBe(true)
 })
 
@@ -1208,10 +1208,10 @@ test('the pace in words: where the month leads, when it runs out, today, and onl
   expect(usageReadLines(usage as never)).toContain('Claude pace: on pace for $796 (72%) by the reset in 16d 4h')
 })
 
-test('the handoff nudge speaks once, only for a session that did work, and not after /handoff or when turned off', () => {
-  const base = { isOn: true, calls: 3, isNudged: false, isDone: false }
+test('the handoff nudge speaks once, only for a session where Companion did something, and not after /handoff or when turned off', () => {
+  const base = { isOn: true, steps: 3, isNudged: false, isDone: false }
   expect(shouldNudgeHandoff(base)).toBe(true)
-  expect(shouldNudgeHandoff({ ...base, calls: 0 })).toBe(false)
+  expect(shouldNudgeHandoff({ ...base, steps: 0 })).toBe(false)
   expect(shouldNudgeHandoff({ ...base, isNudged: true })).toBe(false)
   expect(shouldNudgeHandoff({ ...base, isDone: true })).toBe(false)
   expect(shouldNudgeHandoff({ ...base, isOn: false })).toBe(false)
@@ -1259,4 +1259,8 @@ test('only the notice’s own shape is believed: a path outside a task’s outpu
   expect(backgroundOf(at('/private/tmp/claude-502/proj/session/tasks/other.output'))).toBeUndefined()
   // Not in a tasks folder.
   expect(backgroundOf(at('/private/tmp/claude-502/proj/session/notes/bycnqqbkr.output'))).toBeUndefined()
+})
+
+test('with the tips retired only the recap is left, and with no recap nothing shows', () => {
+  expect(welcomeLine(5, undefined, 0, [])).toBeUndefined()
 })

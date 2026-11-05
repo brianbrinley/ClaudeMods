@@ -83,6 +83,7 @@ import {
   choiceLabel,
   choiceList,
   recapOf,
+  TIP_SESSIONS,
   welcomeLine,
   unclaimedReading,
   withoutEchoes,
@@ -118,7 +119,7 @@ import {
 } from './activity'
 import type { Attention, BudgetLine, EnvGuard, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
-import { environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, refusal, wrapperRuns } from './environment'
+import { changeFolders, environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, refusal, wrapperRuns } from './environment'
 import type { EnvCheck, Environment } from './environment'
 import { loginNudge } from './companion-user'
 import type { LoginNudge } from './companion-user'
@@ -129,7 +130,7 @@ import { componentTable, hasEarlierSteps, reportHtml, scoped, stepsToMatch, tran
 import { toCsv, toTsv } from './export'
 import { changeLines } from './changes'
 import type { BoomiFacts, ReportScope, ReportStyle } from './report-html'
-import { BACK, DONE, FIELDS, changeLine, configKey, fieldNamed, groupNamed, groupWithValue, listing, menuQuestion, parseValue, pastSpend, questionFor, sectionNamed, sectionQuestion, show, valueOf } from './config'
+import { BACK, DONE, FIELDS, QUIET_SETTINGS, changeLine, configKey, fieldNamed, groupNamed, groupWithValue, listing, menuQuestion, parseValue, pastSpend, questionFor, sectionNamed, sectionQuestion, show, valueOf } from './config'
 import type { Group, PastSpend, Value } from './config'
 import { COMPACT_SUGGESTION, CONTEXT_HINT, contextNudge, contextOffer, contextToast, isContextFull, isLargeRead, largeReadDeny, largeReadOffer, largeReadToast, mayMention, mentioned, startOffer } from './token-guard'
 import type { Mentions, TokenGuard } from './token-guard'
@@ -421,7 +422,7 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   // `flamingo` is the setting `logo` replaced: a person who had turned the flamingo off keeps the mark off.
   hasLogo: options.logo === undefined ? options.flamingo !== false : options.logo !== false,
   isBandAnimated: options.bandAnimation !== false,
-  isNudgingHandoff: options.handoffNudge !== false,
+  isNudgingHandoff: options.handoffNudge === true,
   budgetUsd: Math.max(0, Number(options.budgetUsd ?? 0) || 0),
   isSuggesting: options.suggestions !== false,
   historyDays: Math.max(1, Number(options.historyDays ?? 90) || 90),
@@ -439,9 +440,9 @@ const settingsFrom = (options: PluginOptions): Settings => ({
   envCheck: options.envCheck === 'check' || options.envCheck === 'enforce' ? options.envCheck : 'off',
   personalLogin: String(options.personalLogin ?? '').trim(),
   reportStyle: options.reportStyle === 'expressive' ? 'expressive' : 'exosphere',
-  promptCheck: options.promptCheck === 'off' || options.promptCheck === 'suggest' ? options.promptCheck : 'confirm',
+  promptCheck: options.promptCheck === 'off' || options.promptCheck === 'confirm' ? options.promptCheck : 'suggest',
   promptModel: String(options.promptModel || 'haiku').trim() || 'haiku',
-  promptRewrite: options.promptRewrite === 'manual' ? 'manual' : 'auto',
+  promptRewrite: options.promptRewrite === 'auto' ? 'auto' : 'manual',
   promptSuggested: options.promptSuggested === 'check' ? 'check' : 'skip',
   activityLogPrompt: options.activityLogPrompt === 'never' ? 'never' : 'ask',
   seatBudgetUsd: Math.max(0, Number(options.seatBudgetUsd ?? 0) || 0),
@@ -482,6 +483,18 @@ const BAND_FLAMINGO_TICK_MS = 1_000
 
 /** How long the banner shows each line of a new session's recap and tips. */
 const TIP_MS = 20_000
+
+/** Whether this person has seen the banner's tips for long enough: read once a session. */
+const tipsRetired = atom({ plugin: 'boomi-dashboard', key: 'tipsRetired' } as const, false)
+const TIP_SESSIONS_KEY = 'tipSessions'
+
+/** Counts a session in a Companion folder, and retires the banner's tips once there have been enough. */
+const countTipSession = async ($: Engine): Promise<void> => {
+  if (!(await read($, isCompanionFolder))) return
+  const seen = Number(await $.store.get(TIP_SESSIONS_KEY).catch(() => 0)) || 0
+  await update($, tipsRetired, () => seen >= TIP_SESSIONS)
+  if (seen < TIP_SESSIONS) await $.store.set(TIP_SESSIONS_KEY, seen + 1).catch(() => undefined)
+}
 
 /** How often Companion's activity log is checked for steps Claude's tool calls didn't show. */
 const LOG_CHECK_MS = 10_000
@@ -1158,7 +1171,7 @@ const envPath = async ($: Engine, settings: Settings) =>
   settings.envFile.startsWith('/') ? settings.envFile : `${await $.session.cwd()}/${settings.envFile}`
 
 /** Companion's credentials from its .env, each missing one from the environment. */
-const loadCredentials = async ($: Engine, settings: Settings): Promise<Credentials | string> => {
+const loadCredentials = async ($: Engine, settings: Settings, file?: string): Promise<Credentials | string> => {
   const fromEnv: Record<string, string | undefined> = {
     BOOMI_API_URL: await $.env.get('BOOMI_API_URL'),
     BOOMI_USERNAME: await $.env.get('BOOMI_USERNAME'),
@@ -1166,7 +1179,7 @@ const loadCredentials = async ($: Engine, settings: Settings): Promise<Credentia
     BOOMI_ACCOUNT_ID: await $.env.get('BOOMI_ACCOUNT_ID'),
     BOOMI_ENVIRONMENT_ID: await $.env.get('BOOMI_ENVIRONMENT_ID'),
   }
-  const path = await envPath($, settings)
+  const path = file ?? (await envPath($, settings))
   const fromFile = (await $.fs.exists(path)) ? parseEnv(String(await $.fs.read(path))) : {}
   const values: Record<string, string> = {}
   for (const [key, value] of Object.entries(fromEnv)) if (value) values[key] = value
@@ -1201,7 +1214,7 @@ const loadEnvironment = async ($: Engine, settings: Settings): Promise<void> => 
   const note = environment ? '' : "the .env's environment isn't in Boomi's environment list, so it can't be checked"
   await update($, envTarget, () => ({ checkedAt, environment, note }))
   if (settings.envCheck === 'enforce' && environment?.classification === 'PROD') {
-    toast($, settings, `Production is read-only for Companion: deploys, undeploys and test runs to ${environment.name} are refused.`)
+    toast($, settings, `Production is read-only for Companion: deploys, undeploys, test runs and other changes to ${environment.name} are refused.`)
   }
 }
 
@@ -1264,13 +1277,26 @@ const environmentRefusal = async ($: Engine, settings: Settings, command: string
   try {
     const changes = environmentChangesIn(command)
     const needsEnvironment = changes.length > 0 && wrapperRuns(command).length === 0
+    const cwd = await $.session.cwd()
+    // Companion reads the .env of the folder it runs from, so a `cd` before a change can point it somewhere else.
+    const folders = changeFolders(command)
+    const elsewhere = folders.filter(dir => dir && dir !== '.' && dir !== cwd)
+    // The session's own .env still counts for a change made from here, or a raw API write, whose target is unknown.
+    const isHere = !needsEnvironment || elsewhere.length === 0 || elsewhere.length < folders.length || platformWrites(command).length > 0
     let target: { environment?: Environment; note: string } | undefined
-    if (needsEnvironment) {
+    if (needsEnvironment && isHere) {
       await loadEnvironment($, settings)
       target = await read($, envTarget)
     }
-    const gate = environmentGate(command, settings.envCheck, target?.environment, target?.note || undefined, settings.envFile)
+    const gate = isHere ? environmentGate(command, settings.envCheck, target?.environment, target?.note || undefined, settings.envFile) : undefined
     if (gate || changes.length === 0) return gate
+    if (needsEnvironment) {
+      for (const dir of elsewhere) {
+        const found = await environmentIn($, settings, dir.startsWith('/') ? dir : `${cwd}/${dir}`)
+        const other = environmentGate(command, settings.envCheck, found.environment, found.note, settings.envFile)
+        if (other) return other
+      }
+    }
     // A change also needs the .env login to hold only Companion's roles. Read again, since the .env can change during a session.
     await loadCompanionLogin($, settings)
     const reason = loginRefusal((await read($, companionLogin)).check)
@@ -1278,6 +1304,16 @@ const environmentRefusal = async ($: Engine, settings: Settings, command: string
   } catch {
     return environmentGate(command, settings.envCheck, undefined, 'the environment check failed', settings.envFile)
   }
+}
+
+/** The environment the .env in another folder points at, for a command that moves there first. A folder the shell has yet to work out can't be checked. */
+const environmentIn = async ($: Engine, settings: Settings, folder: string): Promise<{ environment?: Environment; note: string }> => {
+  if (/[$~`]/.test(folder)) return { note: `the command moves to ${folder}, and the check can't tell which .env that is` }
+  const loaded = await loadCredentials($, settings, `${folder}/.env`)
+  if (typeof loaded === 'string') return { note: `the command moves to ${folder}, and the .env there can't be read` }
+  const rows = await platformClient((url, init) => $.http.fetch(url, init), loaded).environments()
+  const environment = environmentNamed(environmentsFrom(rows), loaded.environmentId)
+  return { environment, note: `the command moves to ${folder}, and that .env's environment isn't in Boomi's environment list` }
 }
 
 let isPolling = false
@@ -1633,6 +1669,8 @@ const rerun = async ($: Engine, settings: Settings, stepId: number): Promise<str
   }
   const scripts = await findScripts($)
   if (!scripts) return "Couldn't find Boomi Companion's scripts. Run any Companion script once, then try again."
+  const refused = await environmentRefusal($, settings, `bash ${scripts}/boomi-test-execute.sh`)
+  if (refused) return `Not run: ${refused.short}.`
   const run: ScriptRun = { kind: 'test', args }
   if (step.componentId) run.processId = step.componentId
   const started = await noteStart($, settings, [run])
@@ -2146,6 +2184,7 @@ const USAGE = [
   '/bc-dashboard reopen          bring closed items back',
   '/bc-dashboard earlier         show this folder\'s steps from before the last 24 hours too',
   '/bc-dashboard size <r> [c]    the pane\'s height in rows (and width in columns when docked); no numbers: the default',
+  '/bc-dashboard config quiet    turn off everything that speaks up unasked; config quiet off puts it back',
   '/bc-dashboard why [n]         read the log of a failed test or run (no number: pick one)',
   '/bc-dashboard rerun [n]       run a failed test again, the same way Claude ran it (no number: pick one)',
   '/bc-dashboard report [save]   the session as a Markdown report; save also writes it to a file',
@@ -2326,6 +2365,17 @@ const clearPromptCheck = async ($: Engine, settings: Settings) => {
   await closePromptTab($, settings)
 }
 
+/** Asks what to do with a secret in a prompt. `asTyped` is the answer that sends it as it is; no answer sends it masked. */
+const askAboutSecret = async <T,>($: Engine, typed: string, asTyped: T): Promise<T | { text: string } | { drop: string }> => {
+  const kinds = findSecrets(typed).join(' and ')
+  const answer = await $.ui
+    .ask(`Your prompt has ${kinds} in it. Once it's sent, it stays in the transcript. Send it with the secret masked?`, { header: 'Secret', options: [SEND_MASKED, EDIT_FIRST, SEND_AS_TYPED] })
+    .catch(() => undefined)
+  if (answer === SEND_AS_TYPED) return asTyped
+  if (answer === EDIT_FIRST && (await refill($, typed))) return { drop: 'Held by the dashboard: your prompt is back in the prompt box to edit.' }
+  return { text: maskPrompt(typed) }
+}
+
 /**
  * Checks a prompt the person typed in a Companion folder. Undefined lets it
  * through as typed; `text` sends another text (the `>` taken off, or the
@@ -2340,8 +2390,12 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   if (settings.promptCheck === 'off' || e.command || e.isMeta || e.turnId || !isTyped(e.origin)) return undefined
   const typed = e.text
   if (!(await read($, isCompanionFolder)) && !((await read($, companionPlugins))?.length)) return undefined
-  if (/^\s*>/.test(typed)) return { text: typed.replace(/^\s*>\s?/, '') }
   const hasSecret = findSecrets(typed).length > 0
+  // `>` skips the tips, not the secret check: once sent, a secret stays in the transcript.
+  if (/^\s*>/.test(typed)) {
+    const plain = typed.replace(/^\s*>\s?/, '')
+    return hasSecret ? askAboutSecret($, plain, { text: plain }) : { text: plain }
+  }
   // A wrap-up in words ("write a handoff for the Orders Sync process") is not work to check, whatever Boomi word it holds; a secret in one still asks.
   if (!hasSecret && isClosingOut(typed)) {
     await clearPromptCheck($, settings)
@@ -2383,15 +2437,7 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   if (settings.promptRewrite === 'auto' && tips.some(t => t.code !== 'secret')) $.clock.after(0, () => autoRewrite($, settings, at).catch(() => undefined))
 
   // A secret asks in any mode: once sent, it's in the transcript. No answer sends it masked.
-  if (hasSecret) {
-    const kinds = findSecrets(typed).join(' and ')
-    const answer = await $.ui
-      .ask(`Your prompt has ${kinds} in it. Once it's sent, it stays in the transcript. Send it with the secret masked?`, { header: 'Secret', options: [SEND_MASKED, EDIT_FIRST, SEND_AS_TYPED] })
-      .catch(() => undefined)
-    if (answer === SEND_AS_TYPED) return undefined
-    if (answer === EDIT_FIRST && (await refill($, typed))) return { drop: 'Held by the dashboard: your prompt is back in the prompt box to edit.' }
-    return { text: maskPrompt(typed) }
-  }
+  if (hasSecret) return askAboutSecret($, typed, undefined)
   if (settings.promptCheck !== 'confirm') return undefined
   // A look around changes nothing in Boomi: its tip nudges, and holds nothing on its own.
   if (tips.every(t => NUDGE_ONLY.has(t.code))) return undefined
@@ -2399,7 +2445,7 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   if (settings.promptView !== 'off' && (await showPromptTab($, tips.length))) {
     await update($, promptHeld, () => typed)
     await refreshStatus($, settings).catch(() => undefined)
-    return { drop: 'Held by the Boomi Dashboard: Claude hasn\'t seen it yet. Send it, or the upgrade, from Boomi Dashboard Prompt tips.' }
+    return { drop: 'Held by the Boomi Dashboard: Claude hasn\'t seen it yet. Send it, or the upgrade, from Boomi Dashboard Prompt tips. Start a prompt with > to skip the check. To stop holding prompts: /bc-dashboard config promptCheck suggest' }
   }
   // Where the tab can't show (the web, a narrow window), a question instead.
   const said = tips.map(t => t.text).join('; ')
@@ -2801,13 +2847,14 @@ const STOP = 'Stop'
  * command runs them in (after any cd before them). Both gates check these
  * too, so a change can't hide in a wrapper; at most five are read.
  */
-const wrapperTexts = async ($: Engine, command: string): Promise<{ path: string; text: string }[]> => {
-  const out: { path: string; text: string }[] = []
+const wrapperTexts = async ($: Engine, command: string): Promise<{ path: string; text?: string }[]> => {
+  const runs = wrapperRuns(command)
+  const out: { path: string; text?: string }[] = runs.slice(5).map(({ path }) => ({ path }))
   const cwd = await $.session.cwd()
-  for (const { path, dir } of wrapperRuns(command).slice(0, 5)) {
+  for (const { path, dir } of runs.slice(0, 5)) {
     const folder = dir.startsWith('/') ? dir : dir ? `${cwd}/${dir}` : cwd
     const full = path.startsWith('/') ? path : `${folder}/${path.replace(/^\.\//, '')}`
-    out.push({ path, text: await $.fs.read(full).then(String).catch(() => '') })
+    out.push({ path, text: await $.fs.read(full).then(String).catch(() => undefined) })
   }
   return out
 }
@@ -2816,7 +2863,9 @@ const budgetGate = async ($: Engine, settings: Settings, command: string): Promi
   if (settings.budgetEnforce === 'warn') return undefined
   const changes = [...companionChanges(command), ...platformWrites(command)]
   for (const { path, text } of await wrapperTexts($, command)) {
-    changes.push(...[...companionChanges(text), ...platformWrites(text)].map(c => `${c}, inside ${path}`))
+    // What it can't read, it can't call harmless.
+    if (text === undefined) changes.push(`run ${path}, which the dashboard couldn't read`)
+    else changes.push(...[...companionChanges(text), ...platformWrites(text)].map(c => `${c}, inside ${path}`))
   }
   if (changes.length === 0) return undefined
   const { spent, isAllowed } = await enforcementNow($, settings)
@@ -2959,6 +3008,16 @@ const configCommand = async ($: Engine, settings: Settings, target: string): Pro
   const { values, locked } = now
   const lockedNote = (label: string) => `${label} is set by your organization's settings, so it can't be changed here.`
   if (words[0] === 'list') return listing(values)
+  if (words[0] === 'quiet') {
+    const isUndo = words[1] === 'off'
+    const changes = new Map(
+      Object.entries(QUIET_SETTINGS)
+        .map(([key, value]): [string, Value] => [key, isUndo ? fieldNamed(key)!.default : value])
+        .filter(([key, value]) => !locked.has(key) && values[key] !== value),
+    )
+    const lines = changes.size > 0 ? await saveConfig($, settings, values, changes) : [`The dashboard is already ${isUndo ? 'back to its defaults' : 'quiet'}.`]
+    return [...lines, isUndo ? 'Those settings are back to their defaults.' : 'Quiet: no toasts, next-step offers, token guard mentions or Prompt tab popping open. A secret in a prompt still asks. /bc-dashboard config quiet off puts these back to their defaults.'].join('\n')
+  }
 
   // One setting, by name.
   const named = words[0] ? fieldNamed(words[0]) : undefined
@@ -3400,6 +3459,7 @@ export const register: Register = (on, options) => {
     })
 
     await setUpSession($, settings)
+    if (e.isInteractive) await countTipSession($).catch(() => undefined)
     // Offered on a timer, not here: the question must not hold the session's start up. Every interactive session, until the answer is yes or never.
     if (e.isInteractive) $.clock.after(3_000, () => offerActivityLog($, settings).catch(() => undefined))
     // The token guard's first mention, once the session has settled. Only where it's on offer and Companion works.
@@ -3543,8 +3603,8 @@ export const register: Register = (on, options) => {
   })
   for (const name of ['exit', 'quit', 'clear']) {
     on('command.run', { command: name }, async ($, e, next) => {
-      const calls = (await read($, ledger)).calls
-      if (!shouldNudgeHandoff({ isOn: settings.isNudgingHandoff, calls, isNudged: isHandoffNudged, isDone: isHandoffMade })) return next(e)
+      const steps = (await read($, dashboard)).activity.filter(a => !a.isRestored).length
+      if (!shouldNudgeHandoff({ isOn: settings.isNudgingHandoff, steps, isNudged: isHandoffNudged, isDone: isHandoffMade })) return next(e)
       isHandoffNudged = true
       return { text: handoffNudgeText(name) }
     })
@@ -3650,7 +3710,7 @@ export const register: Register = (on, options) => {
     const latest = isNew ? undefined : headline(current.activity)
     const needs = attention(current, now, settings.windowMs)
     const paused = await read($, budgetPaused)
-    const welcome = isNew && (await read($, isCompanionFolder)) ? welcomeLine(await read($, tip), (await read($, recap)) ?? undefined, now, tipsFor(await read($, companionPlugins))) : undefined
+    const welcome = isNew && (await read($, isCompanionFolder)) ? welcomeLine(await read($, tip), (await read($, recap)) ?? undefined, now, (await read($, tipsRetired)) ? [] : tipsFor(await read($, companionPlugins))) : undefined
     // A gentle nudge just above the prompt box: the dashboard suggests a clearer prompt, or holds one.
     const tipsNow = settings.promptCheck === 'off' ? null : await read($, promptTips)
     const held = await read($, promptHeld)
@@ -4164,7 +4224,7 @@ export const register: Register = (on, options) => {
         </Box>
 
         {heading('Needs attention')}
-        {needs.length === 0 && line('healthy', 'All clear.')}
+        {needs.length === 0 && line('healthy', current.activity.length === 0 ? 'Nothing to report yet. Steps show up here when Companion runs a script.' : 'All clear.')}
         {needs.map((n, i) => {
           const logKey = logKeyOf(n)
           const why = logKey ? whys[logKey] : undefined

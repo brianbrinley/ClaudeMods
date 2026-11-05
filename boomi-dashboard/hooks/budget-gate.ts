@@ -2,8 +2,8 @@
 // Companion, and what to tell Claude and the person once a budget is spent.
 // Plain functions: nothing here touches the engine.
 
-import { scriptRuns } from './activity'
-import type { BudgetLine } from './activity'
+import { scriptRuns, shellScripts } from './activity'
+import type { BudgetLine, ScriptRun } from './activity'
 
 /** What a spent budget does: warn only (as before), ask before each change, or refuse them. */
 export type Enforce = 'warn' | 'confirm' | 'block'
@@ -11,11 +11,15 @@ export type Enforce = 'warn' | 'confirm' | 'block'
 /**
  * bc-integration scripts outside the dashboard's own kinds that change
  * something, and with which subcommand when it matters. Keyed by the script's
- * name as a step has it (without `boomi-` and `.sh`).
+ * name as a step has it (without `boomi-` and `.sh`). `isAccountWide` marks a
+ * change to the account's components rather than the .env's environment, which
+ * the production check leaves alone, as it does a push.
  */
-const CHANGING: { script: string; verbs?: RegExp; what: string }[] = [
-  { script: 'folder-create', what: 'create a folder in Boomi' },
-  { script: 'branch', verbs: /^(create|delete)$/, what: 'create or delete a branch' },
+const CHANGING: { script: string; verbs?: RegExp; what: string; isAccountWide?: true }[] = [
+  { script: 'folder-create', what: 'create a folder in Boomi', isAccountWide: true },
+  { script: 'folder-rename', what: 'rename a folder in Boomi', isAccountWide: true },
+  { script: 'branch', verbs: /^(create|delete)$/, what: 'create or delete a branch', isAccountWide: true },
+  { script: 'branch', verbs: /^merge(-execute|-revert|-delete)?$/, what: 'merge branches, or change a merge request', isAccountWide: true },
   { script: 'extensions', verbs: /^set$/, what: "set the environment's extensions" },
   { script: 'wss-test', what: 'call a deployed web service (it runs the process)' },
   { script: 'event-streams-setup', verbs: /^create[-\w]*$/, what: 'create an Event Streams topic, subscription or token' },
@@ -23,9 +27,40 @@ const CHANGING: { script: string; verbs?: RegExp; what: string }[] = [
   { script: 'event-streams-setup', verbs: /^rest-produce$/, what: 'send a message to an Event Streams topic' },
 ]
 
-/** What one of bc-integration's other scripts changes with this subcommand, in words; undefined when it only reads. */
-export const integrationChange = (script: string | undefined, verb: string | undefined): string | undefined =>
-  CHANGING.find(c => c.script === script && (!c.verbs || c.verbs.test(verb ?? '')))?.what
+/**
+ * bc-integration's scripts that only read, with the subcommands that do where
+ * the script also writes. Read from bc-integration 1.0.103. A script or
+ * subcommand in neither list counts as a change, so a new release can't slip
+ * past the gates before it's listed here.
+ */
+const READS: { script: string; verbs?: RegExp }[] = [
+  { script: 'branch', verbs: /^(list|default|merge-status)?$/ },
+  { script: 'extensions', verbs: /^(get)?$/ },
+  { script: 'event-streams-setup', verbs: /^(query-tokens|list-topics|query-topic)?$/ },
+  { script: 'component-diff' },
+  { script: 'component-search' },
+  { script: 'env-check' },
+  { script: 'execution-query' },
+  { script: 'folder-list' },
+  { script: 'shared-server-info' },
+  { script: 'version-history' },
+]
+
+const matches = (entry: { script: string; verbs?: RegExp }, script: string | undefined, verb: string | undefined) =>
+  entry.script === script && (!entry.verbs || entry.verbs.test(verb ?? ''))
+
+/** What one of bc-integration's other scripts changes with this subcommand, in words; undefined when it only reads. One the dashboard doesn't know counts as a change. */
+export const integrationChange = (script: string | undefined, verb: string | undefined): string | undefined => {
+  if (!script) return undefined
+  const known = CHANGING.find(c => matches(c, script, verb))
+  if (known) return known.what
+  if (READS.some(r => matches(r, script, verb))) return undefined
+  return `run ${script}${verb ? ` ${verb}` : ''}, a Companion step the dashboard doesn't know`
+}
+
+/** Whether a change from one of bc-integration's other scripts touches the account's components, not the .env's environment. */
+export const isAccountWide = (script: string | undefined, verb: string | undefined): boolean =>
+  CHANGING.some(c => c.isAccountWide && matches(c, script, verb))
 
 /**
  * The other plugins' steps that change nothing in Boomi, though the dashboard
@@ -62,32 +97,36 @@ const KIND_WORDS: Record<string, string> = {
  * and bc-integration's other changing scripts. Reads (list, get, query,
  * status, logs, pull) are never in it.
  */
-export const companionChanges = (command: string): string[] => {
-  const out: string[] = []
-  for (const run of scriptRuns(command)) {
-    const what = run.file ?? run.processId ?? run.componentId ?? run.deploymentId ?? run.target
-    if (run.kind in KIND_WORDS) out.push(`${KIND_WORDS[run.kind]}${what ? ` (${what})` : ''}`)
-    else if (run.kind === 'other' && run.product && (NOT_A_CHANGE.has(run.script ?? '') || NOT_A_CHANGE.has(`${run.script} ${run.verb}`))) continue
-    else if (run.kind === 'other' && run.product) out.push(`${run.product} ${run.verb ?? 'change'}${run.target ? ` (${run.target})` : ''}`)
-    else if (run.kind === 'other' && run.script) {
-      const changing = integrationChange(run.script, run.verb)
-      if (changing) out.push(changing)
-    }
+export const companionChanges = (command: string): string[] => scriptRuns(command).flatMap(run => runChange(run) ?? [])
+
+/** The change one Companion step makes, in words; undefined when it only reads. */
+export const runChange = (run: ScriptRun): string | undefined => {
+  const what = run.file ?? run.processId ?? run.componentId ?? run.deploymentId ?? run.target
+  if (run.kind in KIND_WORDS) return `${KIND_WORDS[run.kind]}${what ? ` (${what})` : ''}`
+  if (run.kind !== 'other') return undefined
+  if (run.product) {
+    if (NOT_A_CHANGE.has(run.script ?? '') || NOT_A_CHANGE.has(`${run.script} ${run.verb}`)) return undefined
+    return `${run.product} ${run.verb ?? 'change'}${run.target ? ` (${run.target})` : ''}`
   }
-  return out
+  return integrationChange(run.script, run.verb)
 }
 
-/** The Platform API's hosts. */
-const PLATFORM = /\b(?:api|platform)\.boomi\.com\b/
+/** The Platform API: its hosts, its path, or Companion's own variables, such as `$BOOMI_API_URL`. */
+const PLATFORM = /\b(?:api|platform)\.boomi\.com\b|\/api\/rest\/v1\b|\$\{?BOOMI_\w+/
 
 /**
  * Calls straight to the Platform API that would change something: curl,
  * wget or HTTPie with PUT, PATCH, DELETE, or a POST that isn't a query (the
  * API's reads are POSTs to …/query and …/queryMore). A plain GET is a read.
+ * A variable set earlier in the command counts as what it holds.
  */
 export const platformWrites = (command: string): string[] => {
   const out: string[] = []
-  for (const part of command.split(/(?:&&|\|\||;|\n)/)) {
+  const vars = new Map<string, string>()
+  for (const raw of command.split(/(?:&&|\|\||;|\n)/)) {
+    const part = raw.replace(/\$(?:\{(\w+)\}|(\w+))/g, (whole, braced, bare) => vars.get(braced ?? bare) ?? whole)
+    const set = part.match(/^\s*(?:export\s+)?([A-Za-z_]\w*)=(?:"([^"]*)"|'([^']*)'|(\S*))\s*$/)
+    if (set) vars.set(set[1]!, set[2] ?? set[3] ?? set[4] ?? '')
     if (!PLATFORM.test(part) || !/\b(curl|wget|http|https|xh)\b/.test(part)) continue
     const url = part.match(/https?:\/\/[^\s'"]*boomi\.com[^\s'"]*/)?.[0] ?? ''
     // -X in any form (-X POST, -XPOST, -sX POST, --request=POST) and a body in any form (-d'{}', -d@file, --data-raw, -F, -T, --json).
@@ -99,27 +138,24 @@ export const platformWrites = (command: string): string[] => {
     const method = named ?? httpie ?? (hasMethodFlag ? 'UNKNOWN' : hasBody ? 'POST' : 'GET')
     if ((method === 'GET' || method === 'HEAD' || method === 'OPTIONS') && !hasBody) continue
     if (method === 'POST' && /\/(?:query|queryMore)(?:[?#'"\s]|$)/.test(url || part)) continue
-    const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0] || 'the Platform API'
+    const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0] || part.match(/\/api\/rest\/v1\/[^\s'"?]*/)?.[0] || 'the Platform API'
     out.push(`${method} ${path}`)
   }
   return out
 }
 
+/** Companion's own scripts, by name. */
+const COMPANION_SCRIPT = /(?:^|\/)(?:(?:boomi|datahub|bdi|agentstudio|connectordev)-[\w-]+\.(?:sh|py)|event-streams-setup\.sh)$/
+
+/** The scripts a command runs that aren't Companion's own, each with the folder it runs from: what the gates can't see into. */
+export const wrapperRuns = (command: string): { path: string; dir: string }[] => shellScripts(command).filter(run => !COMPANION_SCRIPT.test(run.path))
+
 /**
  * Local shell scripts a command runs that aren't Companion's own
- * (`bash run.sh`, `./deploy-all.sh`, `source x.sh`): what the gate reads, in
- * case one wraps a Companion change.
+ * (`bash run.sh`, `./deploy-all.sh`, `time ./x.sh`, `source x.sh`): what the
+ * gate reads, in case one wraps a Companion change.
  */
-export const wrapperScripts = (command: string): string[] => {
-  const out = new Set<string>()
-  const pattern = /(?:^|[;&|(]\s*|\b(?:bash|sh|zsh|source)\s+(?:-[a-z]+\s+)*|\.\s+)((?:\.{0,2}\/)?[\w./-]+\.(?:sh|bash))\b/g
-  for (const m of command.matchAll(pattern)) {
-    const path = m[1]!
-    if (/(?:^|\/)(?:boomi|datahub|bdi|agentstudio|connectordev)-[\w-]+\.sh$|event-streams-setup\.sh$/.test(path)) continue
-    out.add(path)
-  }
-  return [...out]
-}
+export const wrapperScripts = (command: string): string[] => [...new Set(wrapperRuns(command).map(run => run.path))]
 
 /** A budget as a sentence: "the session budget", "Companion's monthly amount". */
 const budgetName = (line: BudgetLine) =>

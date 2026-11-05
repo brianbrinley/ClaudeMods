@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.64.0",
+  "version": "0.65.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -64,8 +64,8 @@
     "handoffNudge": {
       "type": "boolean",
       "title": "Suggest /handoff on the way out",
-      "description": "The first /exit, /quit or /clear of a session that did work suggests /handoff first; typing the command again goes through",
-      "default": true
+      "description": "The first /exit, /quit or /clear of a session where Companion did something suggests /handoff first; typing the command again goes through",
+      "default": false
     },
     "recentHours": {
       "type": "number",
@@ -237,13 +237,13 @@
     "promptCheck": {
       "type": "string",
       "title": "Prompt tips",
-      "description": "Check each Boomi prompt you type for what it leaves out (which component, environment, test data, error) and suggest an upgraded one: confirm (default) holds a flagged prompt until you send it or the upgrade, suggest shows tips and sends the prompt, off never checks. A prompt with a password or token in it always asks, unless this is off",
+      "description": "Check each Boomi prompt you type for what it leaves out (which component, environment, test data, error) and suggest an upgraded one: suggest (default) shows tips and sends the prompt, confirm holds a flagged prompt until you send it or the upgrade, off never checks. A prompt with a password or token in it always asks, unless this is off",
       "options": [
         "off",
         "suggest",
         "confirm"
       ],
-      "default": "confirm"
+      "default": "suggest"
     },
     "promptView": {
       "type": "string",
@@ -264,7 +264,7 @@
         "auto",
         "manual"
       ],
-      "default": "auto"
+      "default": "manual"
     },
     "promptSuggested": {
       "type": "string",

@@ -86,6 +86,8 @@ export type ScriptRun = {
   script?: string
   /** The folder the script ran from, when the command names it: where Companion's scripts are. */
   scriptsDir?: string
+  /** The folder the command had moved to with `cd` when it ran the script: where Companion looks for its .env. */
+  dir?: string
   /** A test's arguments, so it can be run again. */
   args?: string[]
   /** Another Companion plugin's step: its product, subcommand and what it acted on, shortened and in full. */
@@ -110,7 +112,7 @@ const kindOf = (word: string): { kind: ActivityKind; script?: string } | undefin
 }
 
 /** Words that run the command after them: `bash x.sh`, `env A=1 x.sh`, `timeout 60 x.sh`. */
-const RUNNERS = new Set(['bash', 'sh', 'zsh', 'source', '.', 'exec', 'env', 'command', 'nohup', 'time', 'sudo', 'timeout', 'xargs'])
+const RUNNERS = new Set(['bash', 'sh', 'zsh', 'source', '.', 'exec', 'eval', 'env', 'command', 'nohup', 'time', 'sudo', 'timeout', 'xargs', 'parallel'])
 
 /** Shell words that start a command inside a loop or condition: `do bash x.sh`, `then ./x.sh`. */
 const KEYWORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', '{'])
@@ -122,6 +124,7 @@ const KEYWORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', 
  * (`cat boomi-deploy.sh`, `grep x boomi-deploy.sh`) is not run.
  */
 const isRun = (tokens: readonly string[], i: number): boolean => {
+  if (tokens[i - 1] === '-exec' || tokens[i - 1] === '-execdir') return true
   let start = i
   while (start > 0 && !SEPARATOR.test(tokens[start - 1]!)) start--
   for (let j = start; j < i; j++) {
@@ -205,6 +208,7 @@ export const scriptRuns = (command: string): ScriptRun[] => {
     }
     if (args.some(arg => ['-h', '--help', '--test-connection', '--list-environments'].includes(arg))) continue
     const run: ScriptRun = { kind: found.kind }
+    if (dir) run.dir = dir
     if (token.includes('/')) run.scriptsDir = joinPath(dir, token).replace(/\/[^/]+$/, '')
     if (found.script) run.script = found.script
     // One of bc-integration's other scripts: its subcommand (`branch create`, `extensions set`), which says whether it changes anything.
@@ -230,6 +234,46 @@ export const scriptRuns = (command: string): ScriptRun[] => {
     runs.push(run)
   }
   return runs
+}
+
+/** Shells whose next word is a script, whatever it's called. */
+const SHELLS = new Set(['bash', 'sh', 'zsh'])
+
+/** A path run as a program from a folder of the person's own: `./x`, `../x`, `~/x`, `$HOME/x`. A system tool's absolute path is not one. */
+const OWN_PATH = /^(?:\.{1,2}\/|~\/|\$\{?\w+\}?\/)/
+
+/**
+ * Every script a shell command runs by path or through a shell, with the
+ * folder it runs from: past `time`, `nohup`, `env`, `FOO=1` and the like, and
+ * inside `bash -c '...'` and `eval`. A script only named as an argument isn't
+ * run. Scripts in other languages started by their interpreter
+ * (`python3 x.py`) aren't found.
+ */
+export const shellScripts = (command: string): { path: string; dir: string }[] => {
+  const out: { path: string; dir: string }[] = []
+  const tokens = expandVariables(words(command))
+  let dir = ''
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!
+    const before = tokens[i - 1] ?? ''
+    const isCode = /^-[a-z]*c$/.test(before) || before === 'eval'
+    if (isCode && /\s/.test(token)) {
+      out.push(...shellScripts(dir ? `cd ${dir} && ${token}` : token))
+      continue
+    }
+    const following = tokens[i + 1]
+    if ((token === 'cd' || token === 'pushd') && isRun(tokens, i) && following && !SEPARATOR.test(following)) {
+      dir = joinPath(dir, following)
+      continue
+    }
+    if (SEPARATOR.test(token) || !isRun(tokens, i)) continue
+    if (RUNNERS.has(token) || KEYWORDS.has(token) || token.startsWith('-') || /^\d+[smh]?$/.test(token) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue
+    let start = i
+    while (start > 0 && !SEPARATOR.test(tokens[start - 1]!)) start--
+    const isAfterShell = !isCode && tokens.slice(start, i).some(word => SHELLS.has(word))
+    if (/\.(?:sh|bash)$/.test(token) || OWN_PATH.test(token) || isAfterShell) out.push({ path: token, dir })
+  }
+  return out
 }
 
 /**
@@ -1739,7 +1783,7 @@ export const BAND_FLAMINGO: readonly string[] = ['🦩', '🦩', '🦩', '🦩',
 export const bandFlamingoAt = (tick: number): string => BAND_FLAMINGO[Math.max(0, Math.floor(tick)) % BAND_FLAMINGO.length]!
 
 /** Whether the first /exit, /quit or /clear of a session should suggest /handoff: the nudge is on, the session did work, and it hasn't nudged or been handed off yet. */
-export const shouldNudgeHandoff = (s: { isOn: boolean; calls: number; isNudged: boolean; isDone: boolean }): boolean => s.isOn && s.calls > 0 && !s.isNudged && !s.isDone
+export const shouldNudgeHandoff = (s: { isOn: boolean; steps: number; isNudged: boolean; isDone: boolean }): boolean => s.isOn && s.steps > 0 && !s.isNudged && !s.isDone
 
 /** What the nudge says in place of the command, which runs the next time it's typed. */
 export const handoffNudgeText = (command: string): string => {
@@ -2372,10 +2416,13 @@ export const tipsFor = (plugins: readonly CompanionPlugin[] | null | undefined):
  * The line the banner shows at turn `n` of its rotation: the last session's
  * recap first, when there is one, then each tip in turn.
  */
-export const welcomeLine = (n: number, recap: SessionRecap | undefined, now: number, tips: readonly string[] = TIPS): { level?: Level; text: string } => {
+export const welcomeLine = (n: number, recap: SessionRecap | undefined, now: number, tips: readonly string[] = TIPS): { level?: Level; text: string } | undefined => {
   const lines: { level?: Level; text: string }[] = [...(recap ? [recapLine(recap, now)] : []), ...tips.map(text => ({ text }))]
-  return lines[((n % lines.length) + lines.length) % lines.length]!
+  return lines.length > 0 ? lines[((n % lines.length) + lines.length) % lines.length] : undefined
 }
+
+/** How many sessions in a Companion folder show the banner's tips. After that they've been seen, and only the recap is left. */
+export const TIP_SESSIONS = 15
 
 // --- Companion's activity log -------------------------------------------------------
 

@@ -4,7 +4,7 @@ import { companionChanges } from '../hooks/budget-gate'
 
 /**
  * Every script and subcommand of Boomi Companion's six plugins, read from
- * their current releases (bc-integration 1.0.83, bc-marketplace 0.2.10,
+ * their current releases (bc-integration 1.0.103, bc-marketplace 0.2.10,
  * bc-datahub 0.2.12, bc-bdi 0.2.5, bc-agentstudio 0.1.42, bc-connectordev
  * 0.0.50): whether the dashboard records it as a step, and whether a spent
  * budget (budgetEnforce confirm or block) stops it. A new release that adds a
@@ -174,6 +174,13 @@ const COVERAGE: [script: string, subcommand: string, isStep: boolean, isGated: b
   ['boomi-branch.sh', 'list', true, false],
   ['boomi-branch.sh', 'create', true, true],
   ['boomi-branch.sh', 'delete', true, true],
+  ['boomi-branch.sh', 'default', true, false],
+  ['boomi-branch.sh', 'merge', true, true],
+  ['boomi-branch.sh', 'merge-status', true, false],
+  ['boomi-branch.sh', 'merge-execute', true, true],
+  ['boomi-branch.sh', 'merge-revert', true, true],
+  ['boomi-branch.sh', 'merge-delete', true, true],
+  ['boomi-folder-rename.sh', '', true, true],
   ['boomi-version-history.sh', '', true, false],
   ['boomi-component-diff.sh', '', true, false],
   ['boomi-extensions.sh', 'get', true, false],

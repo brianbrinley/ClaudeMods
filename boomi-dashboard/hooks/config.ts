@@ -89,7 +89,7 @@ export const GROUPS: readonly Group[] = [
         { key: 'banner', label: 'Banner above the prompt', about: 'The latest Companion step and what needs attention; at the start of a session, the last session’s recap and tips.', kind: 'boolean', default: true },
         { key: 'toasts', label: 'Toasts', about: 'A pop-up when a step fails, a deploy or test finishes, or a watched component changes.', kind: 'boolean', default: true },
         { key: 'suggestions', label: 'Suggest the next step', about: 'With a component saved but not deployed, or deployed but not tested, offer that step in the prompt box (Tab takes it).', kind: 'boolean', default: true },
-        { key: 'handoffNudge', label: 'Suggest /handoff on the way out', about: 'The first /exit, /quit or /clear of a session that did work suggests /handoff first, which saves a summary for the next session; typing the command again goes through.', kind: 'boolean', default: true },
+        { key: 'handoffNudge', label: 'Suggest /handoff on the way out', about: 'The first /exit, /quit or /clear of a session where Companion did something suggests /handoff first, which saves a summary for the next session; typing the command again goes through.', kind: 'boolean', default: false },
         { key: 'promptView', label: 'Prompt tab', about: 'Auto opens the Prompt tab beside the pane when a prompt gets tips; manual only from /bc-dashboard prompt or the pane’s Prompt tab button; off never.', kind: 'choice', options: ['auto', 'manual', 'off'], default: 'auto' },
       ],
     },
@@ -97,8 +97,8 @@ export const GROUPS: readonly Group[] = [
       name: 'Prompt tips',
       header: 'Prompts',
       fields: [
-        { key: 'promptCheck', label: 'Prompt tips', about: 'Check each Boomi prompt for what it leaves out and suggest an upgrade. Confirm holds a flagged prompt until you send it or the upgrade; suggest shows tips and sends it. A password or token in a prompt always asks unless this is off.', kind: 'choice', options: ['off', 'suggest', 'confirm'], default: 'confirm' },
-        { key: 'promptRewrite', label: 'Rewrite prompts automatically', about: 'Auto has the prompt model polish a prompt that gets tips, in the background, right after the checks; it costs a few cents at most per prompt. Manual rewrites only when you press Upgrade with a model or run /bc-dashboard prompt upgrade.', kind: 'choice', options: ['auto', 'manual'], default: 'auto' },
+        { key: 'promptCheck', label: 'Prompt tips', about: 'Check each Boomi prompt for what it leaves out and suggest an upgrade. Confirm holds a flagged prompt until you send it or the upgrade; suggest shows tips and sends it. A password or token in a prompt always asks unless this is off.', kind: 'choice', options: ['off', 'suggest', 'confirm'], default: 'suggest' },
+        { key: 'promptRewrite', label: 'Rewrite prompts automatically', about: 'Auto has the prompt model polish a prompt that gets tips, in the background, right after the checks; it costs a few cents at most per prompt. Manual rewrites only when you press Upgrade with a model or run /bc-dashboard prompt upgrade.', kind: 'choice', options: ['auto', 'manual'], default: 'manual' },
         { key: 'promptSuggested', label: 'Prompts taken from a suggestion', about: 'Skip leaves a suggestion from the prompt box (Claude’s guess after a turn, or the dashboard’s next step), taken with Tab and sent as it was, unchecked: no tips, no hold, no rewrite. Check treats it like any other prompt.', kind: 'choice', options: ['skip', 'check'], default: 'skip' },
         { key: 'promptModel', label: 'Prompt rewrite model', about: 'The model that rewrites a prompt: automatically after the checks, or when you ask.', kind: 'text', default: 'haiku' },
         { key: 'promptSkip', label: 'Prompt checks to skip', about: 'Checks to leave out, separated by commas: subject, environment, test, production, steps, error, build, map, secret, aim.', kind: 'text', default: '' },
@@ -143,6 +143,16 @@ export const FIELDS: readonly Field[] = GROUPS.flatMap(g => g.fields)
 
 export const PLUGIN = 'boomi-dashboard'
 export const configKey = (field: Field) => `${PLUGIN}.${field.key}`
+
+/** What /bc-dashboard config quiet sets: everything that speaks up unasked. Prompt tips stay on `suggest`, so a secret in a prompt still asks. */
+export const QUIET_SETTINGS: Readonly<Record<string, Value>> = {
+  toasts: false,
+  suggestions: false,
+  handoffNudge: false,
+  tokenGuard: 'off',
+  promptCheck: 'suggest',
+  promptView: 'manual',
+}
 
 /** A field by its name, as plugin.json or the menu spells it, in any case. */
 export const fieldNamed = (name: string): Field | undefined => {
