@@ -94,6 +94,17 @@ write_lines("$root/-work-orders/$built.jsonl",
 my ($titled) = @{ $json->decode(`perl $script --root $root`)->{sessions} };
 is($titled->{title}, 'Orders sync build', "keeps the session's own title");
 
+# A session running across months: the running total, split by the month each part was spent in.
+my $across = 'c0000000-0000-4000-8000-000000000003';
+write_lines("$root/-work-across/$across.jsonl",
+  reply(session => $across, at => '2026-10-31T10:00:00Z', id => 'msg_a', request => 'req_a', content => [$bash->('bash scripts/boomi-deploy.sh a.xml')]),
+  { type => 'cost-state', sessionId => $across, totalCostUSD => 4, hasUnknownModelCost => JSON::PP::false },
+  reply(session => $across, at => '2026-11-01T09:00:00Z', id => 'msg_b', request => 'req_b', content => [$bash->('bash scripts/boomi-deploy.sh a.xml')]),
+  { type => 'cost-state', sessionId => $across, totalCostUSD => 5.5, hasUnknownModelCost => JSON::PP::true });
+my ($split) = grep { $_->{id} eq $across } @{ $json->decode(`perl $script --root $root`)->{sessions} };
+is_deeply($split->{costByMonth}, { '2026-10' => 4, '2026-11' => 1.5 }, 'splits a session\'s cost by month');
+ok($split->{hasUnknownModelCost}, 'keeps that part of its use had no price');
+
 my $later = `perl $script --root $root --since 99999999999999`;
 is(scalar @{ $json->decode($later)->{sessions} }, 0, '--since skips older transcripts');
 

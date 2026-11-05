@@ -212,7 +212,7 @@ Two optional settings under `/config` give Companion work a budget of its own. B
 **BUDGET** in the pane shows every budget you've set, `budgetUsd` included. The fullest one gets the meter, and each gets a line, such as `✓ month: $32.10 of $50`, `◐ share, today: 84% of 30%` or `✓ session: $1.25 of $5.00`. If you haven't set a budget, it doesn't show.
 
 - **A share, with `companionShare`:** the percent of your weekly limit that Companion is allowed to use over `companionSharePeriod`. That's `week` (the last 7 days), `day` (today, a seventh of the share) or `month` (this month, the month's days in sevenths). At 30% per day, Companion gets 4.3% of your weekly limit each day: `Companion today: 2.1% of your weekly limit, 49% of its 4.3%`. From a session's first Companion step, the dashboard tracks how far the weekly limit climbs each day, and adds up the Companion sessions on this machine.
-- **An amount, with `companionMonthlyUsd`:** a dollar amount for this calendar month's Companion sessions, measured in Claude Code's own cost figures. That's the earlier sessions from **Past Companion sessions** (scanned for you about once an hour), plus this one as it happens.
+- **An amount, with `companionMonthlyUsd`:** a dollar amount for this calendar month's Companion sessions, measured in Claude Code's own cost figures. That's the earlier sessions from **Past Companion sessions** (scanned for you every half hour, so what another session on this computer spends counts too), plus this one as it happens. A session running across two months counts in each, by when it was spent. All of this month is read, whatever `historyDays` says. A session using a model with no known price, such as a local one, can't be counted in full, and the gauge says how many there are.
 
 Your limit is shared, so during a Companion session, anything else using Claude at the same time counts too, on this machine or another one. Sessions on other machines, and Claude Code on the web, don't get added up.
 
@@ -286,6 +286,7 @@ Numbers go in without quotes. The period is `"day"`, `"week"` or `"month"`. Leav
 **`budgetGrace`** (a percent, `0` by default) lets work run a little past a budget before enforcement kicks in. `10` means it starts at 110%.
 
 **What you see:**
+- If the session's spend can't be read and `budgetUsd` is set, or the check itself fails, a change is refused, since nothing shows the budget has room. Reads still run.
 - A refused change shows as `⚠ Blocked by budget` in Claude's latest steps and under **Needs attention**, naming the budget and how far over it is.
 - The status line and the banner say `⛔ budget reached, Companion changes paused`, and you get one toast when it starts.
 - Every override you allow in `confirm` mode is recorded as a step. It's listed under **Budget overrides** in `/bc-dashboard report` and the HTML report, and shown next to the change it let through under **Platform changes**, so you have an audit trail.
@@ -518,7 +519,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to 
 | `personalLogin` | empty | Your own Boomi login, if you have one. The pane flags Companion when its `.env` signs in with it, and when the `.env` login otherwise looks like a person's (first.last@domain). The pane and the status line also flag a `.env` login that matches the email of the Claude account you're signed into. That email comes from the engine's session identity where it has one, else from the `emailAddress` in Claude Code's login record (`~/.claude.json`), which you can edit, so it's a claim and not verified. Companion should have a dedicated login. It's a nudge only: nothing is refused for it. |
 | `envFile` | `.env` | Companion's `.env`, relative to the working directory. |
 | `componentsDir` | `active-development` | Where Companion keeps component XML. |
-| `pollSeconds` | `60` | How often to check the watched components. `0` turns it off. |
+| `pollSeconds` | `60` | How often to check the watched components. `0` turns it off. When Boomi can't be reached, the pane says so and the wait doubles each time, up to half an hour. `/bc-dashboard poll` always checks now. |
 | `activityLog` | `true` | Read [Companion's activity log](#companions-activity-log) as a second source. |
 | `activityLogPrompt` | `ask` | Whether to offer, at the start of a session in a Companion folder, to add `BOOMI_COMPANION_LOG_ACTIVITY=1` to its `.env`. `ask` offers until you say yes or never; `never` stops the offer. |
 | `toasts` | `true` | Toasts for failures, finished deploys and tests, and watched changes. |
