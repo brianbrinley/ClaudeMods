@@ -34,6 +34,7 @@ import {
   budgetOf,
   nextStep,
   compareWatched,
+  pollOutcome,
   componentOf,
   componentPath,
   components,
@@ -101,6 +102,9 @@ import {
   monthSpend,
   monthView,
   monthOf,
+  monthStartOf,
+  isExpired,
+  monthUnpriced,
   dayOf,
   pruneDays,
   limitViews,
@@ -305,6 +309,7 @@ let isSafeModeKnown = true
  */
 const readBreakdown = async ($: Engine) => {
   const now = await $.clock.now()
+  if (await isLocalModel($)) return
   const kept = (await $.store.get(BREAKDOWN_KEY).catch(() => undefined)) as { breakdown: UsageBreakdownSeen; checkedAt: number; days?: SpendDays } | undefined
   if (kept && isFresh(kept.checkedAt, now, BREAKDOWN_MS)) {
     if (kept.checkedAt !== (await read($, usageBreakdown))?.checkedAt) await update($, usageBreakdown, () => kept)
@@ -461,7 +466,8 @@ const PANE = 'boomi-dashboard'
 const PROMPT_PANE = 'boomi-dashboard-prompt'
 const WATCH_KEY = 'watched'
 const SCRIPTS_KEY = 'scriptsDir'
-const DOCS_KEY = 'docIndex'
+/** Where versions up to 0.65 kept the docs index, the store's largest entry by far. It's now built once a session, when a rewrite first needs it. */
+const OLD_DOCS_KEY = 'docIndex'
 const THEME_KEY = 'theme'
 const HISTORY_KEY = 'history'
 const UPGRADE_KEY = 'upgradeCheckedAt'
@@ -653,7 +659,12 @@ const trackShare = async ($: Engine, settings: Settings, usage: Usage) => {
 const companionBudget = async ($: Engine, settings: Settings, usage: Usage): Promise<Usage['companion']> => {
   const week = shareView((await read($, share))?.days, settings.companionShare, settings.companionSharePeriod, usage.now ?? (await $.clock.now()))
   const month = settings.companionMonthlyUsd
-    ? monthView(monthSpend((await read($, history)).sessions, usage.now ?? (await $.clock.now()), await $.session.id().catch(() => undefined), usage.usd), settings.companionMonthlyUsd)
+    ? await (async () => {
+        const sessions = (await read($, history)).sessions
+        const now = usage.now ?? (await $.clock.now())
+        const currentId = await $.session.id().catch(() => undefined)
+        return monthView(monthSpend(sessions, now, currentId, usage.usd), settings.companionMonthlyUsd, monthUnpriced(sessions, now, currentId))
+      })()
     : undefined
   return week || month ? { ...(week ? { week } : {}), ...(month ? { month } : {}) } : undefined
 }
@@ -734,7 +745,30 @@ const saveActivity = async ($: Engine, settings: Settings) => {
     // The recap is this session's once it has worked with Companion; until then the last one's stands.
     const last = recapOf(current, now, settings.windowMs, (await usageOf($)).usd) ?? (await read($, recap)) ?? undefined
     await $.store.set(await activityKey($), { savedAt: now, activity: list.slice(-KEPT_STEPS), closedSteps, seenRuns, recap: last })
-  } catch {}
+  } catch {
+    // Once a session: the steps still show, but won't be there next time.
+    if (!isSaveFailureSaid) {
+      isSaveFailureSaid = true
+      toast($, settings, `${STATUS.warning.icon} The dashboard couldn't save this folder's steps, so they won't come back next session.`)
+    }
+  }
+}
+
+let isSaveFailureSaid = false
+
+/** How long a folder's saved steps are kept without a session there. */
+const ACTIVITY_KEPT_MS = 90 * 86_400_000
+
+/** Clears what the store no longer needs: the old docs index, and the steps of folders not worked in for a long time. */
+const tidyStore = async ($: Engine): Promise<void> => {
+  await $.store.delete(OLD_DOCS_KEY).catch(() => undefined)
+  const now = await $.clock.now()
+  const mine = await activityKey($)
+  for (const key of await $.store.keys()) {
+    if (!key.startsWith('activity:') || key === mine) continue
+    const saved = (await $.store.get(key).catch(() => undefined)) as { savedAt?: number } | undefined
+    if (typeof saved?.savedAt === 'number' && isExpired(saved.savedAt, now, ACTIVITY_KEPT_MS)) await $.store.delete(key).catch(() => undefined)
+  }
 }
 
 /**
@@ -1167,6 +1201,36 @@ const followQuarantine = async ($: Engine, settings: Settings, checks: readonly 
 
 // --- The Platform API --------------------------------------------------------
 
+/** Whether this session talks to a model on this machine (claude-local): Anthropic's small models and /usage aren't there. */
+const isLocalModel = async ($: Engine): Promise<boolean> =>
+  /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?:[:/]|$)/.test((await $.env.get('ANTHROPIC_BASE_URL').catch(() => undefined)) ?? '')
+
+/** How long the dashboard's own model calls may take. */
+const MODEL_TIMEOUT_MS = 60_000
+
+/** How long a Boomi call may take. The engine's fetch has no limit of its own, so a dead network would otherwise wait for good. */
+const BOOMI_TIMEOUT_MS = 15_000
+
+/** The Platform API client, with every call held to the time limit. */
+const boomiClient = ($: Engine, credentials: Credentials) =>
+  platformClient(
+    (url, init) =>
+      new Promise((resolve, reject) => {
+        const stop = $.clock.after(BOOMI_TIMEOUT_MS, () => reject(new Error(`Boomi didn't answer within ${BOOMI_TIMEOUT_MS / 1000} seconds`)))
+        $.http.fetch(url, init).then(
+          response => {
+            stop.cancel()
+            resolve(response)
+          },
+          error => {
+            stop.cancel()
+            reject(error)
+          },
+        )
+      }),
+    credentials,
+  )
+
 const envPath = async ($: Engine, settings: Settings) =>
   settings.envFile.startsWith('/') ? settings.envFile : `${await $.session.cwd()}/${settings.envFile}`
 
@@ -1203,7 +1267,7 @@ const loadEnvironment = async ($: Engine, settings: Settings): Promise<void> => 
     await update($, envTarget, () => ({ checkedAt, environment: undefined, note: loaded }))
     return
   }
-  const rows = await platformClient((url, init) => $.http.fetch(url, init), loaded)
+  const rows = await boomiClient($, loaded)
     .environments()
     .catch(() => undefined)
   if (!rows) {
@@ -1258,7 +1322,7 @@ const loadCompanionLogin = async ($: Engine, settings: Settings): Promise<void> 
     await update($, companionLogin, () => ({ nudge, source }))
     return
   }
-  const client = platformClient((url, init) => $.http.fetch(url, init), loaded)
+  const client = boomiClient($, loaded)
   const check = await Promise.all([client.userRoleIds(loaded.username), client.roles()])
     .then(([linked, rows]) => loginCheck(linked, accountRolesFrom(rows)))
     .catch((): LoginCheck => ({ level: 'warning', text: "Couldn't read the .env login's roles from Boomi" }))
@@ -1311,12 +1375,15 @@ const environmentIn = async ($: Engine, settings: Settings, folder: string): Pro
   if (/[$~`]/.test(folder)) return { note: `the command moves to ${folder}, and the check can't tell which .env that is` }
   const loaded = await loadCredentials($, settings, `${folder}/.env`)
   if (typeof loaded === 'string') return { note: `the command moves to ${folder}, and the .env there can't be read` }
-  const rows = await platformClient((url, init) => $.http.fetch(url, init), loaded).environments()
+  const rows = await boomiClient($, loaded).environments()
   const environment = environmentNamed(environmentsFrom(rows), loaded.environmentId)
   return { environment, note: `the command moves to ${folder}, and that .env's environment isn't in Boomi's environment list` }
 }
 
 let isPolling = false
+/** Polls in a row where nothing could be read, and when the next timed one may run. */
+let pollFailures = 0
+let pollAgainAt = 0
 
 /**
  * Checks the watched components' versions in Boomi and toasts a change by
@@ -1324,8 +1391,9 @@ let isPolling = false
  * this also read the environment's process runs; that's set aside for now,
  * see IDEAS.md.)
  */
-const poll = async ($: Engine, settings: Settings): Promise<void> => {
+const poll = async ($: Engine, settings: Settings, isTimed = false): Promise<void> => {
   if (isPolling || (await read($, dashboard)).watched.length === 0) return
+  if (isTimed && (await $.clock.now()) < pollAgainAt) return
   isPolling = true
   try {
     const checkedAt = await $.clock.now()
@@ -1334,7 +1402,7 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
       await update($, dashboard, c => ({ ...c, platform: { ...OFF, message: loaded, checkedAt } }))
       return
     }
-    const client = platformClient((url, init) => $.http.fetch(url, init), loaded)
+    const client = boomiClient($, loaded)
     const before = await read($, dashboard)
     const watched: Watched[] = []
     for (const w of before.watched) {
@@ -1351,10 +1419,13 @@ const poll = async ($: Engine, settings: Settings): Promise<void> => {
         watched.push({ ...w, error: messageOf(error) })
       }
     }
+    const read_ = pollOutcome(watched, pollFailures, settings.pollSeconds * 1000)
+    pollFailures = read_.failures
+    pollAgainAt = checkedAt + read_.waitMs
     // A watch added or removed while this poll ran stands.
     await update($, dashboard, c => ({
       ...c,
-      platform: { phase: 'ok' as const, message: 'Connected.', checkedAt, runs: [] },
+      platform: { phase: read_.phase, message: read_.message, checkedAt, runs: [] },
       watched: c.watched.map(w => watched.find(fresh => fresh.componentId === w.componentId) ?? w),
     }))
   } finally {
@@ -1787,12 +1858,16 @@ const runScan = async ($: Engine, args: string[]) => {
  * transcript can be far over the 4 MiB a mod may read at once, so a script
  * reads them a line at a time and prints only each session's totals.
  */
+const HISTORY_FRESH_MS = 30 * 60_000
+
 const scanHistory = async ($: Engine, settings: Settings): Promise<HistoryState> => {
   await update($, history, (h): HistoryState => ({ ...h, phase: 'loading', error: undefined }))
   const now = await $.clock.now()
   let state: HistoryState
   try {
-    const ran = await runScan($, ['--since', String(now - settings.historyDays * 86_400_000)])
+    // A monthly amount needs all of this month, however short the history is set.
+    const since = now - settings.historyDays * 86_400_000
+    const ran = await runScan($, ['--since', String(settings.companionMonthlyUsd > 0 ? Math.min(since, monthStartOf(now)) : since)])
     if (!ran) {
       state = { phase: 'error', error: PERL_MISSING }
     } else if (ran.exitCode !== 0) {
@@ -2036,7 +2111,7 @@ const boomiFacts = async ($: Engine, settings: Settings, view: Dashboard): Promi
   const loaded = await loadCredentials($, settings).catch(() => 'unavailable')
   if (typeof loaded === 'string') return { components: {}, note: `Boomi's own details aren't included: ${loaded}` }
   const facts: BoomiFacts = { accountId: loaded.accountId, environmentId: loaded.environmentId, apiHost: loaded.apiUrl.replace(/^https?:\/\//, ''), components: {} }
-  const client = platformClient((url, init) => $.http.fetch(url, init), loaded)
+  const client = boomiClient($, loaded)
   const ids = components(view.activity).flatMap(row => (row.componentId ? [row.componentId] : []))
   const [name, found] = await Promise.all([
     client.accountName().catch(() => undefined),
@@ -2434,7 +2509,7 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   }
   if (settings.promptView === 'auto') await showPromptTab($, tips.length)
   // A timer, not a bare call: the model call outlives this hook, which would abort it. A secret alone has nothing to rewrite.
-  if (settings.promptRewrite === 'auto' && tips.some(t => t.code !== 'secret')) $.clock.after(0, () => autoRewrite($, settings, at).catch(() => undefined))
+  if (settings.promptRewrite === 'auto' && tips.some(t => t.code !== 'secret') && !(await isLocalModel($))) $.clock.after(0, () => autoRewrite($, settings, at).catch(() => undefined))
 
   // A secret asks in any mode: once sent, it's in the transcript. No answer sends it masked.
   if (hasSecret) return askAboutSecret($, typed, undefined)
@@ -2595,8 +2670,7 @@ const companionDocs = async ($: Engine): Promise<{ index: DocIndex; installed: R
   const installed = await installedCompanion($)
   let index = docIndex
   if (!index) {
-    const stored = (await $.store.get(DOCS_KEY).catch(() => undefined)) as DocIndex | undefined
-    index = stored?.built === 1 ? stored : EMPTY_INDEX
+    index = EMPTY_INDEX
   }
   if (!isCurrent(index, installed)) {
     const files: DocIndex['files'] = {}
@@ -2607,7 +2681,6 @@ const companionDocs = async ($: Engine): Promise<{ index: DocIndex; installed: R
       }
     }
     index = { built: 1, plugins: installed, files }
-    await $.store.set(DOCS_KEY, index).catch(() => undefined)
   }
   docIndex = index
   return { index, installed }
@@ -2700,6 +2773,7 @@ const rewritePrompt = async ($: Engine, settings: Settings, note?: string, isFil
     prompt: rewriteRequest(tips.masked, facts, tips.tips, tries[0]!.text, { context: contextLines(components, sections), note: note?.trim() || undefined, previous }),
     maxTokens: 1000,
     effort: 'low',
+    timeoutMs: MODEL_TIMEOUT_MS,
   })
   if (!reply.isAnswered) {
     return `${settings.promptModel} couldn't rewrite it (${reply.reason}). Your prompt is safe, and the upgrade from the checks is still there: /bc-dashboard prompt use.`
@@ -2749,6 +2823,7 @@ const guideCommand = async ($: Engine, settings: Settings, rest: string): Promis
       prompt: refreshRequest(s.plugin, s.stamped, s.installed, GUIDE.filter(e => e.plugin === s.plugin), notes, headings),
       maxTokens: 1500,
       effort: 'low',
+      timeoutMs: MODEL_TIMEOUT_MS,
     })
     drafts.push(reply.isAnswered ? refreshText(s.plugin, s.installed, reply.text, settings.promptModel) : `${s.plugin}: ${settings.promptModel} couldn't draft it (${reply.reason}). Nothing was changed.`)
   }
@@ -2859,6 +2934,13 @@ const wrapperTexts = async ($: Engine, command: string): Promise<{ path: string;
   return out
 }
 
+/** The answer when the spend can't be read: with enforcement on, a change is refused, since nothing shows the budget has room. */
+const budgetUnreadable = (settings: Settings, command: string): { deny: string; short: string } | undefined => {
+  if (settings.budgetEnforce === 'warn') return undefined
+  const changes = [...companionChanges(command), ...platformWrites(command)]
+  return changes.length > 0 ? refusal("the dashboard couldn't read what's been spent, so it can't tell whether the budget has room", changes.join('; ')) : undefined
+}
+
 const budgetGate = async ($: Engine, settings: Settings, command: string): Promise<{ deny: string; short: string } | undefined> => {
   if (settings.budgetEnforce === 'warn') return undefined
   const changes = [...companionChanges(command), ...platformWrites(command)]
@@ -2868,6 +2950,8 @@ const budgetGate = async ($: Engine, settings: Settings, command: string): Promi
     else changes.push(...[...companionChanges(text), ...platformWrites(text)].map(c => `${c}, inside ${path}`))
   }
   if (changes.length === 0) return undefined
+  // A session budget needs the session's spend: without a reading, that isn't $0.
+  if (settings.budgetUsd > 0 && !(await read($, budgetAllowed)) && (await usageOf($)).now === undefined) return budgetUnreadable(settings, command)
   const { spent, isAllowed } = await enforcementNow($, settings)
   if (spent.length === 0 || isAllowed) return undefined
   const refuse = (isChosen = false) => ({ deny: denyMessage(spent, changes, settings.budgetEnforce, isChosen), short: blockedDetail(spent) })
@@ -3363,8 +3447,11 @@ let setUpFor: string | undefined
 
 const setUpSession = async ($: Engine, settings: Settings) => {
   setUpFor = await $.session.id().catch(() => undefined)
-  await loadEnvironment($, settings).catch(() => undefined)
-  await loadCompanionLogin($, settings).catch(() => undefined)
+  // On a timer, not here: a slow Boomi mustn't hold the session's start or the first prompt after /clear. The production check reads these again for itself.
+  $.clock.after(0, async () => {
+    await loadEnvironment($, settings).catch(() => undefined)
+    await loadCompanionLogin($, settings).catch(() => undefined)
+  })
   // The watch list outlives the session; restore it the first time.
   // A theme or size kept in the store (by 0.33.0 and earlier, or where /config refused it) moves to /config once it will take it.
   appearanceCache = undefined
@@ -3460,6 +3547,7 @@ export const register: Register = (on, options) => {
 
     await setUpSession($, settings)
     if (e.isInteractive) await countTipSession($).catch(() => undefined)
+    $.clock.after(10_000, () => tidyStore($).catch(() => undefined))
     // Offered on a timer, not here: the question must not hold the session's start up. Every interactive session, until the answer is yes or never.
     if (e.isInteractive) $.clock.after(3_000, () => offerActivityLog($, settings).catch(() => undefined))
     // The token guard's first mention, once the session has settled. Only where it's on offer and Companion works.
@@ -3477,36 +3565,41 @@ export const register: Register = (on, options) => {
     }
     // A command Claude Code moved to the background: its steps settle when its output file has the result.
     $.clock.every(BACKGROUND_CHECK_MS, () => settleBackground($, settings).catch(() => undefined))
-    // The Prompt tab's spinner: it turns only while a rewrite runs, so the pane isn't redrawn the rest of the time.
-    $.clock.every(SPIN_MS, async () => {
-      if (await read($, promptBusy)) await update($, spin, n => n + 1)
-    })
-    // The flamingo's scene: what it does next is checked every half second, in Whimsical only.
-    if (settings.hasLogo) {
-      // It stands in one place, working or not; the pane redraws only when the scene changes.
-      $.clock.every(FLAMINGO_TICK_MS, async () => {
-        if (markOf(await drawnThemeOf($, settings)) !== 'flamingo') return
-        sceneTick++
-        if (JSON.stringify(sceneAt(sceneTick)) !== JSON.stringify(sceneAt(await read($, frame)))) await update($, frame, () => sceneTick)
+    // What only moves a drawing: nothing draws in a headless run.
+    if (e.isInteractive) {
+      // The Prompt tab's spinner: it turns only while a rewrite runs, so the pane isn't redrawn the rest of the time.
+      $.clock.every(SPIN_MS, async () => {
+        if (await read($, promptBusy)) await update($, spin, n => n + 1)
       })
-    }
-    // The banner's flamingo: a sparkle in its place for a second in five; the banner redraws only when that changes.
-    if (settings.isBanded && settings.isBandAnimated && settings.hasLogo) {
-      $.clock.every(BAND_FLAMINGO_TICK_MS, async () => {
-        if (markOf(await drawnThemeOf($, settings)) !== 'flamingo') return
-        bandTick++
-        if (bandFlamingoAt(bandTick) !== bandFlamingoAt(await read($, bandFrame))) await update($, bandFrame, () => bandTick)
-      })
+      // The flamingo's scene: what it does next is checked every half second, in Whimsical only.
+      if (settings.hasLogo) {
+        // It stands in one place, working or not; the pane redraws only when the scene changes.
+        $.clock.every(FLAMINGO_TICK_MS, async () => {
+          if (markOf(await drawnThemeOf($, settings)) !== 'flamingo') return
+          sceneTick++
+          if (JSON.stringify(sceneAt(sceneTick)) !== JSON.stringify(sceneAt(await read($, frame)))) await update($, frame, () => sceneTick)
+        })
+      }
+      // The banner's flamingo: a sparkle in its place for a second in five; the banner redraws only when that changes.
+      if (settings.isBanded && settings.isBandAnimated && settings.hasLogo) {
+        $.clock.every(BAND_FLAMINGO_TICK_MS, async () => {
+          if (markOf(await drawnThemeOf($, settings)) !== 'flamingo') return
+          bandTick++
+          if (bandFlamingoAt(bandTick) !== bandFlamingoAt(await read($, bandFrame))) await update($, bandFrame, () => bandTick)
+        })
+      }
     }
     if (settings.pollSeconds > 0) {
-      $.clock.after(2_000, () => poll($, settings))
-      $.clock.every(settings.pollSeconds * 1000, () => poll($, settings))
+      $.clock.after(2_000, () => poll($, settings).catch(() => undefined))
+      $.clock.every(settings.pollSeconds * 1000, () => poll($, settings, true).catch(() => undefined))
     }
 
     // A new session's banner turns through the last session's recap and the tips until Companion does something.
-    $.clock.every(TIP_MS, async () => {
-      if (!(await read($, dashboard)).activity.some(a => !a.isRestored)) await update($, tip, n => n + 1)
-    })
+    if (e.isInteractive) {
+      $.clock.every(TIP_MS, async () => {
+        if (!(await read($, dashboard)).activity.some(a => !a.isRestored)) await update($, tip, n => n + 1)
+      })
+    }
     // Which Companion plugins are here: the pane's sections and the tips follow them. Read once, just after the start.
     $.clock.after(1_000, () => notePlugins($))
     await readActivityLog($, settings)
@@ -3515,14 +3608,17 @@ export const register: Register = (on, options) => {
     if (settings.isCheckingUpdates) await restoreUpdate($).catch(() => undefined)
     $.clock.after(15_000, () => nudgeUpgrade($, settings).catch(() => undefined))
     // A monthly Companion amount counts earlier sessions' costs: read them once, soon after the start.
+    // And again while the session runs, so what another session spends counts too.
     if (settings.companionMonthlyUsd > 0) {
-      $.clock.after(5_000, async () => {
+      const rescan = async () => {
         const known = await read($, history)
         const today = monthOf(await $.clock.now())
-        if (known.phase !== 'loading' && (known.scannedAt === undefined || monthOf(known.scannedAt) !== today || (await $.clock.now()) - known.scannedAt > 3_600_000)) {
+        if (known.phase !== 'loading' && (known.scannedAt === undefined || monthOf(known.scannedAt) !== today || (await $.clock.now()) - known.scannedAt > HISTORY_FRESH_MS)) {
           await scanHistory($, settings).catch(() => undefined)
         }
-      })
+      }
+      $.clock.after(5_000, () => rescan().catch(() => undefined))
+      $.clock.every(HISTORY_FRESH_MS, () => rescan().catch(() => undefined))
     }
     return started
   })
@@ -3535,7 +3631,7 @@ export const register: Register = (on, options) => {
     // A spent budget, with budgetEnforce confirm or block, stops Companion changes before they run.
     // Production read-only (envCheck enforce) comes first: a refused change never reaches the budget question.
     const envRefusal = await environmentRefusal($, settings, command).catch(() => environmentGate(command, settings.envCheck, undefined, 'the environment check failed', settings.envFile))
-    const gate = envRefusal ?? (await budgetGate($, settings, command).catch(() => undefined))
+    const gate = envRefusal ?? (await budgetGate($, settings, command).catch(() => budgetUnreadable(settings, command)))
     const runs = scriptRuns(command)
     const checks = bdiStatusChecks(command)
     const deploys = datahubStatusChecks(command)
@@ -3681,19 +3777,22 @@ export const register: Register = (on, options) => {
   })
 
   // Working while Claude is on a turn, idle between turns.
+  // Only the main loop's turns: a subagent ending says nothing about whether the session is idle.
   on('turn.start', async ($, e, next) => {
-    await update($, isWorking, () => true).catch(() => undefined)
+    if (!e.agentId) await update($, isWorking, () => true).catch(() => undefined)
     return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    if (e.agentId) return done
     await update($, isWorking, () => false).catch(() => undefined)
     void refreshStatus($, settings)
     if (e.reason === 'answer') {
       void nudgeContext($, settings, isContextArmed, guardMentions)
         .catch(() => false)
         .then(isNudged => (isNudged ? undefined : suggestNext($, settings)))
+        .catch(() => undefined)
     }
     return done
   })

@@ -2,6 +2,16 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.66.0
+
+- **Boomi can't hang the session.** Every Boomi call now has a 15-second limit, and the production and login checks at the start of a session run in the background, so a slow or dead network doesn't hold up the start or the first prompt after `/clear`. The production check still reads them for itself before a change.
+- **Polling tells the truth.** The pane said `Connected.` even when every watched component failed. Now it names the failure and waits longer between tries, up to half an hour. A hung call can no longer stop polling for good. `/bc-dashboard poll` always checks now.
+- **A budget check that can't tell doesn't let changes through.** With `budgetEnforce` on `confirm` or `block`, a change is refused if the check fails, or if `budgetUsd` is set and the session's spend can't be read. Reads still run.
+- **The monthly amount counts more of what was spent.** A session running across two months now counts in each, all of this month is read whatever `historyDays` says, and earlier sessions are read again every half hour so a parallel session's spend counts. Sessions with no known price are named on the gauge, since they count low. A month is split by the transcript's dates, in UTC, so a few hours around a month's end can land either side.
+- **The store stays small.** The docs index, about 95% of what the dashboard kept, is no longer saved: it's built once a session, when a rewrite first needs it, and the old copy is deleted. Steps of folders not worked in for 90 days are cleared. If this folder's steps can't be saved, a toast says so once, where before it failed silently.
+- **Local models are left alone.** With `ANTHROPIC_BASE_URL` on this machine (`claude-local`), the `/usage` check doesn't run, and `promptRewrite auto` doesn't try a model that isn't there. The dashboard's own model calls now have a 60-second limit.
+- **Subagents.** A subagent finishing no longer marks the session idle or offers a next step. Headless runs no longer start the timers that only move a drawing.
+
 ## 0.65.0
 
 Three defaults changed, so prompts stop being held, nothing calls a model unasked, and `/exit` and `/clear` aren't interrupted. To have the old behaviour back: `/bc-dashboard config promptCheck confirm`, `/bc-dashboard config promptRewrite auto` and `/bc-dashboard config handoffNudge on`.

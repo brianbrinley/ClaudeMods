@@ -499,3 +499,22 @@ Use a test `.env` pointed at a TEST environment, and a second folder whose `.env
   **Pass:** no toasts or offers, then the settings are back. **Fail:** something still pops up, other than a secret question.
 - [ ] **W10. First look.** In a new folder with no earlier sessions, open the pane.
   **Pass:** it says `Nothing to report yet`. **Fail:** it says `All clear`.
+
+## X. Dependability (boomi-dashboard 0.66.0)
+
+- [ ] **X1. No network at the start.** Set `envCheck` to `check`, block `api.boomi.com` or go offline, and start a session.
+  **Pass:** the prompt is ready at once, and within about 15 seconds the pane says the environment couldn't be read. **Fail:** the session hangs at the start.
+- [ ] **X2. No network while watching.** Watch a component, then go offline and wait for two polls.
+  **Pass:** the pane names the failure, not `Connected.`, and after going back online `/bc-dashboard poll` shows it connected. **Fail:** it says `Connected.`, or polling never comes back.
+- [ ] **X3. A real monthly figure.** Set `companionMonthlyUsd`, and compare the gauge with `/bc-dashboard history` for this month.
+  **Pass:** they agree, allowing for the current session. **Fail:** the gauge is lower than the sessions it should count.
+- [ ] **X4. Two sessions.** With `companionMonthlyUsd` set, spend in a second session in another terminal, end it, and wait 30 minutes in the first.
+  **Pass:** the first session's gauge goes up. **Fail:** it stays where it was until the next start.
+- [ ] **X5. The store.** Start a session on 0.66.0, wait 15 seconds, and look at `~/.claude/plugins/store/boomi-dashboard_*.json`.
+  **Pass:** no `docIndex` key, and the file is far smaller than before. **Fail:** the key is still there.
+- [ ] **X6. A rewrite without the saved index.** Press **Upgrade with a model** on a prompt with tips, twice in one session.
+  **Pass:** the first says what it read, and the second doesn't pause again to build the index. **Fail:** a long pause each time, or no guidance read.
+- [ ] **X7. `claude-local`.** Run a session in `claude-local` for 20 minutes with `promptRewrite` on `auto`, then check Ollama's log.
+  **Pass:** no `claude-haiku` 404s and no `/usage` child runs from this session. **Fail:** either shows up.
+- [ ] **X8. Subagents.** Ask Claude to run a subagent while Companion work has left a next step to offer.
+  **Pass:** the offer appears when the main turn ends, not when the subagent does. **Fail:** it appears mid-turn.

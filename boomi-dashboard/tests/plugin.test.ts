@@ -2,6 +2,8 @@ import type { CommandRunInput, On, RenderElement, RenderPropsOf } from 'claude-c
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
 
+import { pollOutcome } from '../hooks/activity'
+
 const dashboard = (args = '') => ({ command: 'bc-dashboard', args }) as CommandRunInput
 
 const ID = '1a2b3c4d-1111-2222-3333-444455556666'
@@ -33,6 +35,8 @@ type WorldOptions = {
   startedAt?: number
   /** How full the context is, read each time the session's usage is. */
   contextPercent?: () => number
+  /** The session's usage can't be read. */
+  isUsageUnreadable?: boolean
 }
 
 /** The panes the plugin asked to open in the test running now. */
@@ -66,7 +70,7 @@ const world = (on: On, files: Record<string, string> = {}, options: WorldOptions
     toasts.push(String(e.text))
     return { value: undefined }
   })
-  on('session.usage', async () => ({
+  on('session.usage', async () => options.isUsageUnreadable ? ({ deny: 'unavailable' } as never) : ({
     value: { startedAt: options.startedAt ?? 0, context: { window: 200_000, percent: options.contextPercent?.() ?? 12 }, rateLimits: options.limits?.() ?? [], cost: { usd: 1.25 } },
   }))
   return toasts
@@ -3090,9 +3094,8 @@ test('a rewrite reads Companion’s docs in subfolders through an index kept for
   expect(requests[0]!.prompt).toContain('[bc-integration/guides/boomi_error_reference.md: Debugging a failed deploy]')
   expect(requests[0]!.prompt).toContain('the environment extension that is missing')
   // The index holds pointers, not Companion's text, and is kept for the next session.
-  const kept = JSON.stringify(store.docIndex)
-  expect(kept).toContain('Debugging a failed deploy')
-  expect(kept).not.toContain('the environment extension that is missing')
+  // Built for the session and kept in memory: it's far too big for the store.
+  expect(store.docIndex).toBeUndefined()
   const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
   expect(await tab.find({ text: "Read Companion's guidance: bc-integration 1.0.90" })).toBeDefined()
   // Companion has moved on from the guide's 1.0.83: the tab says so.
@@ -3903,3 +3906,112 @@ for (const [seen, isShown] of [[0, true], [15, false]] as const) {
     expect((await band.find({ text: /BC Dashboard/ })) !== undefined).toBe(isShown)
   })
 }
+
+// --- Dependability ------------------------------------------------------------------
+
+test('a Boomi that never answers ends a poll with the reason, and the next timed poll waits longer', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  mock.store(on)
+  mock.env(on, CREDENTIALS)
+  let answers = true
+  let calls = 0
+  on('http.fetch', async () => {
+    calls++
+    if (answers) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result: [{ name: 'Orders Sync', version: '3', modifiedBy: 'me@example.com', modifiedDate: '2026-10-12T11:00:00Z' }] }) } }
+    return await new Promise<never>(() => undefined)
+  })
+  await $.command.run(dashboard(`watch ${FILE}`))
+  answers = false
+  const polled = $.command.run(dashboard('poll'))
+  await clock.advance(15_000)
+  expect((await polled).text).toContain("Boomi didn't answer within 15 seconds")
+  // The poll isn't stuck: a later one by hand runs, while the timed ones are backing off.
+  const before = calls
+  const again = $.command.run(dashboard('poll'))
+  await clock.advance(15_000)
+  await again
+  expect(calls).toBe(before + 1)
+  await $.command.run(dashboard('text'))
+})
+
+test('pollOutcome: connected if anything was read; otherwise the wait doubles, up to half an hour', () => {
+  const failed = [{ error: 'HTTP 500' }]
+  expect(pollOutcome([], 3, 60_000)).toEqual({ phase: 'ok', message: 'Connected.', failures: 0, waitMs: 0 })
+  expect(pollOutcome([{}, ...failed], 3, 60_000).phase).toBe('ok')
+  expect(pollOutcome([{ error: 'not found in Boomi' }], 0, 60_000).phase).toBe('ok')
+  expect(pollOutcome(failed, 0, 60_000)).toEqual({ phase: 'error', message: "Couldn't reach Boomi: HTTP 500", failures: 1, waitMs: 120_000 })
+  expect(pollOutcome(failed, 1, 60_000).waitMs).toBe(240_000)
+  expect(pollOutcome(failed, 9, 60_000).waitMs).toBe(1_800_000)
+})
+
+test('block: when what is spent can’t be read, a change is refused and a read still runs', { options: { budgetUsd: 1, budgetEnforce: 'block' } }, async ($, on) => {
+  world(on, { [FILE]: ORDERS }, { isUsageUnreadable: true })
+  mock.store(on)
+  const ran = shell(on, 'ok')
+  expect((await $.tool.call({ tool: 'Bash', command: DEPLOY })).deny).toContain("couldn't read what's been spent")
+  expect(ran).toEqual([])
+  expect((await $.tool.call({ tool: 'Bash', command: 'bash scripts/boomi-component-pull.sh --component-id x' })).deny).toBeUndefined()
+  // The status line and the save carry on in the background: let them finish first.
+  await $.command.run(dashboard('text'))
+  await clock.advance(5_000)
+  await $.command.run(dashboard('text'))
+})
+
+test('the store is tidied: the old docs index goes, and so do the steps of folders long unused', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  const store: Record<string, unknown> = {
+    docIndex: { built: 1 },
+    'activity:/work': { savedAt: 0 },
+    'activity:/old': { savedAt: NOW - 91 * 86_400_000 },
+    'activity:/recent': { savedAt: NOW - 89 * 86_400_000 },
+    watch: [],
+  }
+  on('store.keys', async () => ({ value: Object.keys(store) }) as never)
+  on('store.delete', async (_$, e) => {
+    delete store[e.key]
+    return { value: undefined } as never
+  })
+  await startSession($, on, store)
+  await clock.advance(10_000)
+  await $.command.run(dashboard('text'))
+  expect(Object.keys(store)).not.toContain('docIndex')
+  expect(Object.keys(store)).not.toContain('activity:/old')
+  expect(Object.keys(store)).toContain('activity:/recent')
+  expect(Object.keys(store)).toContain('activity:/work')
+  expect(Object.keys(store)).toContain('watch')
+})
+
+test('on a local model, promptRewrite auto makes no model call', { options: { promptRewrite: 'auto' } }, async ($, on) => {
+  let calls = 0
+  on('model.complete', async () => {
+    calls++
+    return { value: { isAnswered: true, text: 'x', usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } as never
+  })
+  mock.env(on, { ANTHROPIC_BASE_URL: 'http://localhost:11434' })
+  const { typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
+  await typed(VAGUE)
+  await clock.advance(1)
+  expect(calls).toBe(0)
+  await $.command.run(dashboard('text'))
+})
+
+test('a subagent’s turn ending doesn’t offer the next step in the main session’s place', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  mock.store(on)
+  shell(on, "SUCCESS: Pushed component 'Orders Sync' — now version 4")
+  const offered: string[] = []
+  on('prompt.suggest', async (_$, e) => {
+    offered.push(String(e.text))
+    return { isShown: true } as never
+  })
+  on('turn.complete', async () => ({ text: '' }))
+  await $.tool.call({ tool: 'Bash', command: PUSH })
+  await $.turn.complete({ reason: 'answer', turnId: 't1', answer: '', agentId: 'a-1' } as never)
+  await clock.advance(1)
+  expect(offered).toEqual([])
+  await $.turn.complete({ reason: 'answer', turnId: 't2', answer: '' } as never)
+  await clock.advance(1)
+  expect(offered.length).toBeGreaterThan(0)
+  await $.command.run(dashboard('text'))
+})
+
