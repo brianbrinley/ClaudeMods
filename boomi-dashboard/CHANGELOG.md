@@ -2,6 +2,23 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.65.0
+
+Three defaults changed, so prompts stop being held, nothing calls a model unasked, and `/exit` and `/clear` aren't interrupted. To have the old behaviour back: `/bc-dashboard config promptCheck confirm`, `/bc-dashboard config promptRewrite auto` and `/bc-dashboard config handoffNudge on`.
+
+- **Prompts go through.** `promptCheck` now defaults to `suggest`: a flagged prompt gets tips and is sent. `confirm` still holds it, and its message now says how to skip the check and how to stop holding. A secret in a prompt still asks first.
+- **No background rewrites.** `promptRewrite` now defaults to `manual`: a model rewrites a prompt when you ask, not for every prompt that gets tips.
+- **`/exit` and `/clear` go straight through.** `handoffNudge` is now off by default. On, it speaks only after Companion has done something, not after any model call in any folder.
+- **`/bc-dashboard config quiet`** turns off toasts, next-step offers, token guard mentions and the Prompt tab opening by itself. `config quiet off` puts them back to their defaults.
+- **The banner's tips retire** after 15 sessions in a Companion folder, leaving the last session's recap. The pane says `Nothing to report yet` until Companion first does something, in place of `All clear`.
+- **The production check covers more.** With `envCheck` on `enforce`, it now also refuses the other plugins' changes (Data Hub and BDI among them), `extensions set`, web service calls, Event Streams changes and **Run again**. The login check covers the same changes. Before, these went through despite the "read-only" message.
+- **It checks the right `.env`.** A command that moves to another folder first is checked against the `.env` there, which is the one Companion reads. A folder it can't work out is refused.
+- **More Companion changes are recognized.** Branch merges and folder renames now count for the budget gate and the report's Platform changes. Any Companion script or subcommand the dashboard doesn't know counts as a change, so a new release can't slip past the gates.
+- **Scripts are found however they're started:** `time`, `nohup`, `env`, `sudo`, `timeout`, `FOO=1`, quotes, `~/` and `$HOME/`, `bash -c`, `eval`, `find -exec`, and executables without an extension. For the budget gate, a script it can't read now counts as a change.
+- **Raw Platform API writes through a variable** are now seen: `curl -X POST "$BOOMI_API_URL/…"`, or a URL set earlier in the command.
+- **Secrets:** Boomi's `BOOMI_TOKEN.…` format and a password or token given in words ("the token is …") are now caught and masked, and a prompt starting with `>` no longer skips the check.
+- **Admin roles:** a role's privileges are read in Boomi's nested form as well as a plain list, so an account admin role isn't missed. Not yet confirmed against a live account.
+
 ## 0.64.0
 
 - **A token guard you can turn on.** A new setting, `tokenGuard` (`/bc-dashboard config tokens`). It stays out of your way until you choose it: `offer`, the default, stops nothing and warns about nothing. To turn it on: `/bc-dashboard config tokenGuard suggest`.

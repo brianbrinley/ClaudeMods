@@ -58,9 +58,14 @@ const SECRETS: readonly { kind: string; find: RegExp; hide: (text: string) => st
   { kind: 'an auth header', find: /\b(Bearer|Basic) [A-Za-z0-9+/=._~-]{8,}/, hide: t => t.replace(/\b(Bearer|Basic) [A-Za-z0-9+/=._~-]{8,}/g, '$1 ****') },
   {
     kind: 'a password or token',
-    find: /\b(password|passwd|pwd|secret|token|api[_ -]?key|BOOMI_API_TOKEN)\s*[=:]\s*['"]?[^\s'"]{4,}/i,
-    hide: t => t.replace(/\b(password|passwd|pwd|secret|token|api[_ -]?key|BOOMI_API_TOKEN)(\s*[=:]\s*['"]?)[^\s'"]{4,}/gi, '$1$2****'),
+    // `password: x`, `token=x`, or in words where the value has a digit in it: `password hunter2`, `the token is <guid>`.
+    find: /\b(?:password|passwd|pwd|secret|token|api[_ -]?key|BOOMI_API_TOKEN)(?:\s*[=:]\s*['"]?[^\s'"]{4,}|(?:\s+is)?\s+['"]?(?=[^\s'"]*\d)[^\s'"]{6,})/i,
+    hide: t =>
+      t
+        .replace(/\b(password|passwd|pwd|secret|token|api[_ -]?key|BOOMI_API_TOKEN)(\s*[=:]\s*['"]?)[^\s'"]{4,}/gi, '$1$2****')
+        .replace(/\b(password|passwd|pwd|secret|token|api[_ -]?key)((?:\s+is)?\s+['"]?)(?=[^\s'"]*\d)[^\s'"]{6,}/gi, '$1$2****'),
   },
+  { kind: 'a Boomi API token', find: /\bBOOMI_TOKEN\.[^\s:]+:[^\s'"]{8,}/, hide: t => t.replace(/\bBOOMI_TOKEN\.([^\s:]+):[^\s'"]{8,}/g, 'BOOMI_TOKEN.$1:****') },
   { kind: 'a private key', find: /-----BEGIN [A-Z ]*PRIVATE KEY-----/, hide: t => t.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[private key]') },
   { kind: 'an AWS key', find: /\bAKIA[0-9A-Z]{16}\b/, hide: t => t.replace(/\bAKIA[0-9A-Z]{16}\b/g, 'AKIA****') },
 ]
