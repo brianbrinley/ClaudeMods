@@ -19,13 +19,20 @@ const privilegeName = (raw: unknown): string => {
   return ''
 }
 
+/** A role's privileges, as a plain list or as Boomi's `{ Privilege: [...] }`, which holds a lone privilege without the list. */
+const privilegesOf = (raw: unknown): unknown[] => {
+  if (Array.isArray(raw)) return raw
+  const inner = raw && typeof raw === 'object' ? (raw as { Privilege?: unknown }).Privilege : undefined
+  return Array.isArray(inner) ? inner : inner === undefined ? [] : [inner]
+}
+
 /** The `Role/query` rows as roles: ID, name and privileges. */
 export const accountRolesFrom = (rows: readonly Record<string, unknown>[]): AccountRole[] =>
   rows
     .map(raw => ({
       id: String(raw.id ?? ''),
       name: String(raw.name ?? ''),
-      privileges: Array.isArray(raw.Privileges) ? raw.Privileges.map(privilegeName).filter(Boolean) : [],
+      privileges: privilegesOf(raw.Privileges).map(privilegeName).filter(Boolean),
     }))
     .filter(role => role.id)
 

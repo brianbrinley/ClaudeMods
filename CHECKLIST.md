@@ -474,3 +474,28 @@ When an item passes, tick it here. When every item in a section passes, the sect
   **Pass:** three areas, then three sections each, three questions in Tokens, and each way back lands on the menu above. **Fail:** more than five questions in a row, or a way back lands somewhere else.
 - [ ] **V12. Straight to a section.** Run `/bc-dashboard config tokens`, then `/bc-dashboard config budget`.
   **Pass:** the first opens the Tokens questions, the second the Budget sections with **Done** as the way out. **Fail:** either starts somewhere else.
+
+## W. Safer gates and fewer interruptions (boomi-dashboard 0.65.0)
+
+Use a test `.env` pointed at a TEST environment, and a second folder whose `.env` points at PROD, with `envCheck` on `enforce`. Nothing here should change production: the point is that it's refused.
+
+- [ ] **W1. Other plugins' changes.** Ask Claude to run `boomi-extensions.sh set` or a Data Hub deploy with the `.env` on PROD.
+  **Pass:** refused before it runs, naming the environment. **Fail:** it runs.
+- [ ] **W2. Another folder's `.env`.** From the TEST folder, ask Claude to run `cd <prod folder> && bash <scripts>/boomi-deploy.sh <file>`.
+  **Pass:** refused, naming the production environment. **Fail:** it runs, or the refusal names the test one.
+- [ ] **W3. A `cd` in an earlier command.** Ask Claude to `cd <prod folder>` as one command, then deploy as the next.
+  **Pass:** note which `.env` the check read, and whether it's refused. README lists this as not seen, so a refusal means the README can be corrected. **Fail:** nothing to fail; record the result.
+- [ ] **W4. A wrapper.** Ask Claude to run `time ./deploy-all.sh` with any script of that name.
+  **Pass:** refused as a script the check can't see into. **Fail:** it runs.
+- [ ] **W5. Real role shape.** With `envCheck` on `check` and a login holding an account admin role, start a session.
+  **Pass:** the pane shows it as critical, naming the role. **Fail:** anything else: Boomi's privileges come back in a shape the check doesn't read.
+- [ ] **W6. Tips, not holds.** Start a session with the defaults and type "deploy it".
+  **Pass:** Claude gets the prompt, the tips show, and no Haiku call appears. **Fail:** it's held, or a rewrite starts by itself.
+- [ ] **W7. The way out.** With the defaults, do some Companion work and type `/clear`.
+  **Pass:** it clears the first time. **Fail:** a `/handoff` suggestion appears.
+- [ ] **W8. A secret after `>`.** Type `> deploy it, password=abc12345`.
+  **Pass:** the secret question appears, and the prompt sent has no `>`. **Fail:** it's sent with no question.
+- [ ] **W9. Quiet.** Run `/bc-dashboard config quiet`, start a new session and do some Companion work, then run `/bc-dashboard config quiet off`.
+  **Pass:** no toasts or offers, then the settings are back. **Fail:** something still pops up, other than a secret question.
+- [ ] **W10. First look.** In a new folder with no earlier sessions, open the pane.
+  **Pass:** it says `Nothing to report yet`. **Fail:** it says `All clear`.

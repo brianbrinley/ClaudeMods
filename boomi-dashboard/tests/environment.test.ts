@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { environmentChanges, environmentGate, environmentNamed, environmentsFrom, wrapperRuns } from '../hooks/environment'
+import { changeFolders, environmentChanges, environmentGate, environmentNamed, environmentsFrom, wrapperRuns } from '../hooks/environment'
 import type { Environment } from '../hooks/environment'
 import { guardrails } from '../hooks/activity'
 
@@ -83,7 +83,7 @@ test('a script the command runs is found, with the folder it runs from after any
     { path: 'run.sh', dir: '' },
     { path: './go.sh', dir: '/opt/x' },
   ])
-  expect(wrapperRuns('cd deploy && cd .. && source env.sh')).toEqual([{ path: 'env.sh', dir: 'deploy/..' }])
+  expect(wrapperRuns('cd deploy && cd .. && source env.sh')).toEqual([{ path: 'env.sh', dir: '' }])
   expect(wrapperRuns(`${S}/boomi-deploy.sh x.xml`)).toEqual([])
 })
 
@@ -110,4 +110,87 @@ test('enforce never refuses a push, a check or a command that changes nothing', 
   expect(environmentGate(PUSH, 'enforce', PROD)).toBeUndefined()
   expect(environmentGate(`${S}/boomi-deploy.sh --help`, 'enforce', undefined)).toBeUndefined()
   expect(environmentGate('ls -la', 'enforce', undefined)).toBeUndefined()
+})
+
+test('enforce refuses every Companion change that reaches the environment, not only deploys', () => {
+  for (const command of [
+    'bash scripts/datahub-deployment.sh deploy x',
+    'bash scripts/agentstudio-deployment.sh deploy x',
+    'bash scripts/bdi-flow.sh run x',
+    'bash scripts/boomi-extensions.sh set --file x.json',
+    'bash scripts/boomi-wss-test.sh x',
+    'bash scripts/event-streams-setup.sh rest-produce x',
+    'bash scripts/event-streams-setup.sh create-topic x',
+    'bash scripts/boomi-brand-new.sh x',
+  ]) {
+    expect(environmentGate(command, 'enforce', PROD)?.short).toContain('Production is PROD')
+    expect(environmentGate(command, 'enforce', TEST_ENV)).toBeUndefined()
+  }
+})
+
+test('enforce leaves reads, a run being cancelled, and changes to the account\'s components alone', () => {
+  for (const command of [
+    PUSH,
+    'bash scripts/boomi-extensions.sh get',
+    'bash scripts/event-streams-setup.sh list-topics',
+    'bash scripts/boomi-execution-query.sh --process-id p',
+    'bash scripts/boomi-branch.sh list',
+    'bash scripts/boomi-branch.sh merge --source a --dest b',
+    'bash scripts/boomi-folder-rename.sh a b',
+    'bash scripts/bdi-flow.sh cancel x',
+  ]) {
+    expect(environmentGate(command, 'enforce', PROD)).toBeUndefined()
+  }
+})
+
+test('enforce finds a script of the command\'s own however it is started', () => {
+  for (const command of [
+    './deploy-all.sh',
+    'time ./deploy-all.sh',
+    'nohup ./deploy-all.sh',
+    'env ./deploy-all.sh',
+    'exec ./deploy-all.sh',
+    'sudo ./deploy-all.sh',
+    'timeout 60 ./deploy-all.sh',
+    'FOO=1 ./deploy-all.sh',
+    'bash "./deploy-all.sh"',
+    'bash ~/deploy-all.sh',
+    'bash $HOME/deploy-all.sh',
+    'bash deploy-all',
+    './deploy-all',
+    "bash -c './deploy-all.sh'",
+    "bash -c 'cd x && ./deploy-all.sh'",
+    'eval ./deploy-all.sh',
+    'find . -name x -exec ./deploy-all.sh {} ;',
+    'S=boomi; bash deploy-$S.sh',
+  ]) {
+    expect(environmentGate(command, 'enforce', TEST_ENV)?.short).toContain("a script the check can't see into")
+  }
+})
+
+test('a script only named, a system tool, sourcing the .env and a Companion script are not scripts of the command\'s own', () => {
+  for (const command of ['cat ./deploy-all.sh', 'grep x run.sh', '/usr/bin/git status', 'source .env', 'git status', 'bash scripts/boomi-env-check.sh', 'python3 scripts/boomi-profile-inspect.py x', './scripts/boomi-profile-inspect.py x', 'echo "./deploy-all.sh"', 'bash -c true']) {
+    expect(wrapperRuns(command)).toEqual([])
+  }
+})
+
+test('enforce refuses a raw Platform API write through a variable, and leaves its reads alone', () => {
+  for (const command of [
+    'curl -X POST "$BOOMI_API_URL/api/rest/v1/$BOOMI_ACCOUNT_ID/DeployedPackage" -d @x',
+    'U=https://api.boomi.com/api/rest/v1/a/DeployedPackage; curl -X POST $U -d @x',
+    'export U="https://api.boomi.com/x" && curl -X DELETE "$U"',
+    'curl -X POST https://example.com/api/rest/v1/a/DeployedPackage -d @x',
+  ]) {
+    expect(environmentGate(command, 'enforce', PROD)).toBeDefined()
+  }
+  expect(environmentGate('curl "$BOOMI_API_URL/api/rest/v1/a/Environment/e"', 'enforce', PROD)).toBeUndefined()
+  expect(environmentGate('curl -X POST "$BOOMI_API_URL/api/rest/v1/a/Process/query" -d @q.json', 'enforce', PROD)).toBeUndefined()
+  expect(environmentGate('curl -X POST https://example.com/hook -d x', 'enforce', PROD)).toBeUndefined()
+})
+
+test('the folders a change runs from are where Companion finds its .env', () => {
+  expect(changeFolders(DEPLOY)).toEqual([''])
+  expect(changeFolders('cd ../prod-workspace && bash ../scripts/boomi-deploy.sh a.xml')).toEqual(['../prod-workspace'])
+  expect(changeFolders('cd /work/prod; bash scripts/boomi-deploy.sh a.xml; cd /work/dev; bash scripts/boomi-undeploy.sh d')).toEqual(['/work/prod', '/work/dev'])
+  expect(changeFolders('cd /work/prod && bash scripts/boomi-component-push.sh a.xml')).toEqual([])
 })

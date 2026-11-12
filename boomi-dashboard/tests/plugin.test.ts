@@ -3010,7 +3010,7 @@ const answers = (requests: { system?: string; prompt?: string }[]) => (on: Param
     return { value: { isAnswered: true, text: REWRITTEN, usage: { input_tokens: 900, output_tokens: 80, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } as never
   })
 
-test('auto: a prompt with tips is rewritten in the background, the checks’ upgrade first and the model’s after, with why', async ($, on) => {
+test('auto: a prompt with tips is rewritten in the background, the checks’ upgrade first and the model’s after, with why', { options: { promptRewrite: 'auto' } }, async ($, on) => {
   const requests: { system?: string; prompt?: string }[] = []
   answers(requests)(on)
   const { typed } = await promptWorld($, on)
@@ -3032,7 +3032,7 @@ test('auto: a prompt with tips is rewritten in the background, the checks’ upg
   expect(await after.find({ text: /try 2 of 2/ })).toBeDefined()
 })
 
-test('auto: it never fills the prompt box, and a model that fails leaves the checks’ upgrade', async ($, on) => {
+test('auto: it never fills the prompt box, and a model that fails leaves the checks’ upgrade', { options: { promptRewrite: 'auto' } }, async ($, on) => {
   on('model.complete', async () => ({ value: { isAnswered: false, reason: 'api-error', status: 500, error: 'server', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }) as never)
   const { typed } = await promptWorld($, on)
   await typed(VAGUE)
@@ -3079,7 +3079,7 @@ const companionInstalled = (on: On) =>
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
 
-test('a rewrite reads Companion’s docs in subfolders through an index kept for the version, and says what it read', async ($, on) => {
+test('a rewrite reads Companion’s docs in subfolders through an index kept for the version, and says what it read', { options: { promptRewrite: 'auto' } }, async ($, on) => {
   const requests: { system?: string; prompt?: string }[] = []
   answers(requests)(on)
   companionInstalled(on)
@@ -3128,7 +3128,7 @@ const showsSuggestions = (on: On) => on('prompt.suggest', async () => ({ isShown
 /** The prompt box shows `text` dim as a suggestion, as the engine does after a turn. */
 const suggest = ($: Engine, text: string) => $.prompt.suggest({ text })
 
-test('a suggestion taken as it was is not checked: no tips, no hold, no rewrite, and it is counted', async ($, on) => {
+test('a suggestion taken as it was is not checked: no tips, no hold, no rewrite, and it is counted', { options: { promptCheck: 'confirm', promptRewrite: 'auto' } }, async ($, on) => {
   showsSuggestions(on)
   const requests: { system?: string; prompt?: string }[] = []
   answers(requests)(on)
@@ -3157,7 +3157,7 @@ test('a suggestion the person edited is checked like any other prompt', async ($
   expect((await $.command.run(dashboard('prompt'))).text).toContain('"it"')
 })
 
-test('check: promptSuggested check treats a taken suggestion like any other prompt', { options: { promptSuggested: 'check' } }, async ($, on) => {
+test('check: promptSuggested check treats a taken suggestion like any other prompt', { options: { promptSuggested: 'check', promptCheck: 'confirm', promptRewrite: 'auto' } }, async ($, on) => {
   showsSuggestions(on)
   const { typed } = await promptWorld($, on)
   await suggest($, VAGUE)
@@ -3188,7 +3188,7 @@ test('the dashboard’s own next-step suggestion, taken as it was, is skipped th
   expect((await $.command.run(dashboard('prompt'))).text).toContain('suggestions taken as they were')
 })
 
-test('while the model writes the upgrade, the tab and the pane say so, with a spinner that turns, and it clears when the upgrade arrives', async ($, on) => {
+test('while the model writes the upgrade, the tab and the pane say so, with a spinner that turns, and it clears when the upgrade arrives', { options: { promptRewrite: 'auto' } }, async ($, on) => {
   let release = () => {}
   const gate = new Promise<void>(resolve => {
     release = resolve
@@ -3248,7 +3248,7 @@ const BAND_TARGET = { component: 'AbovePrompt', props: BAND } as const
 test('confirm: with the Prompt tab shown, a flagged prompt is held until it is sent from there', { options: { promptCheck: 'confirm' } }, async ($, on) => {
   const { asked, sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
   const result = await typed(VAGUE)
-  expect(result).toEqual({ drop: "Held by the Boomi Dashboard: Claude hasn't seen it yet. Send it, or the upgrade, from Boomi Dashboard Prompt tips." })
+  expect(result).toEqual({ drop: "Held by the Boomi Dashboard: Claude hasn't seen it yet. Send it, or the upgrade, from Boomi Dashboard Prompt tips. Start a prompt with > to skip the check. To stop holding prompts: /bc-dashboard config promptCheck suggest" })
   expect(asked).toEqual([])
   expect(sent).toEqual([])
   const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
@@ -3381,11 +3381,27 @@ test('Regenerate reads the folder’s components and the person’s note, and ev
   expect(await tab.find({ text: /Try 1: build the QTC process\./ })).toBeDefined()
 })
 
-test('by default a flagged prompt is held: confirm is the default', async ($, on) => {
+test('by default a flagged prompt gets tips and goes through, and the model is not called on its own', async ($, on) => {
+  let calls = 0
+  on('model.complete', async () => {
+    calls++
+    return { value: { isAnswered: true, text: 'x', usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } as never
+  })
   const { sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
-  expect(await typed(VAGUE)).toEqual({ drop: "Held by the Boomi Dashboard: Claude hasn't seen it yet. Send it, or the upgrade, from Boomi Dashboard Prompt tips." })
-  expect(sent).toEqual([])
-  expect((await $.command.run(dashboard('prompt'))).text).toContain('Prompt tips (promptCheck: confirm)')
+  expect(await typed(VAGUE)).toEqual({ text: VAGUE })
+  expect(sent).toEqual([VAGUE])
+  expect(calls).toBe(0)
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('Prompt tips (promptCheck: suggest)')
+})
+
+test('a > skips the tips but not the secret check: the > comes off whichever way it goes', async ($, on) => {
+  const { asked, sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
+  await typed('> deploy it')
+  expect(sent.at(-1)).toBe('deploy it')
+  expect(asked).toEqual([])
+  await typed('> deploy it, password=hunter2abc')
+  expect(asked).toHaveLength(1)
+  expect(sent.at(-1)).toBe('deploy it, password=****')
 })
 
 test('a long note is drawn once, in its field, and each try shows the note it followed', { options: { promptCheck: 'suggest' } }, async ($, on) => {
@@ -3753,3 +3769,137 @@ test('a read that failed mentions nothing', async ($, on) => {
   expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBe('not allowed')
   expect(guardToasts(toasts)).toEqual([])
 })
+
+// --- Production read-only, end to end -------------------------------------------
+
+const envFile = (id: string) => `BOOMI_API_URL=https://api.boomi.com\nBOOMI_USERNAME=BOOMI_TOKEN.bot@example.com\nBOOMI_API_TOKEN=t-1\nBOOMI_ACCOUNT_ID=acct-1\nBOOMI_ENVIRONMENT_ID=${id}\n`
+
+/** A session whose .env points at the test environment, with another workspace's .env pointing at production. */
+const enforceWorld = (on: On) => {
+  // Named from /work, so the session's .env isn't also taken for one in another folder.
+  world(on, { [FILE]: ORDERS, 'work/.env': envFile('e-test'), 'prod-workspace/.env': envFile('e-prod'), 'test-workspace/.env': envFile('e-test') })
+  mock.store(on)
+  mock.env(on, { HOME: '/home/me' })
+  on('http.fetch', async (_$, e) => {
+    const result = e.url.includes('/Environment/query')
+      ? [
+          { id: 'e-test', name: 'Test', classification: 'TEST' },
+          { id: 'e-prod', name: 'Production', classification: 'PROD' },
+        ]
+      : []
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
+  })
+  return shell(on, "SUCCESS: Deployed 'Orders Sync' (package: p-1)")
+}
+
+test('enforce: a cd to a workspace on production is checked against that workspace’s .env, not the session’s', { options: { envCheck: 'enforce' } }, async ($, on) => {
+  const ran = enforceWorld(on)
+  const refused = await $.tool.call({ tool: 'Bash', command: `cd prod-workspace && bash ../scripts/boomi-deploy.sh ${FILE}` })
+  expect(refused.deny).toContain('Production is PROD')
+  expect(ran).toEqual([])
+  expect((await $.tool.call({ tool: 'Bash', command: `cd test-workspace && bash ../scripts/boomi-deploy.sh ${FILE}` })).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', command: `cd /work && bash scripts/boomi-deploy.sh ${FILE}` })).deny).toBeUndefined()
+  expect(ran).toHaveLength(2)
+  await $.command.run(dashboard('text'))
+})
+
+test('enforce: a cd the check can’t follow, or to a folder with no .env, is refused', { options: { envCheck: 'enforce' } }, async ($, on) => {
+  const ran = enforceWorld(on)
+  expect((await $.tool.call({ tool: 'Bash', command: `cd $WORKSPACE && bash ../scripts/boomi-deploy.sh ${FILE}` })).deny).toContain("can't tell which .env")
+  expect((await $.tool.call({ tool: 'Bash', command: `cd elsewhere && bash ../scripts/boomi-deploy.sh ${FILE}` })).deny).toContain("can't be read")
+  expect(ran).toEqual([])
+})
+
+test('enforce: a change on the session’s own production .env is refused, a Data Hub deploy too', { options: { envCheck: 'enforce' } }, async ($, on) => {
+  world(on, { [FILE]: ORDERS, '.env': envFile('e-prod') })
+  mock.store(on)
+  mock.env(on, { HOME: '/home/me' })
+  on('http.fetch', async () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result: [{ id: 'e-prod', name: 'Production', classification: 'PROD' }] }) } }))
+  const ran = shell(on, 'ok')
+  expect((await $.tool.call({ tool: 'Bash', command: 'bash scripts/datahub-deployment.sh deploy m-1' })).deny).toContain('Production is PROD')
+  expect((await $.tool.call({ tool: 'Bash', command: 'bash scripts/boomi-extensions.sh set --file x.json' })).deny).toContain('Production is PROD')
+  expect(ran).toEqual([])
+  expect((await $.tool.call({ tool: 'Bash', command: 'bash scripts/boomi-extensions.sh get' })).deny).toBeUndefined()
+  await $.command.run(dashboard('text'))
+})
+
+test('block: a wrapper the dashboard can’t read counts as a change', { options: { budgetUsd: 1, budgetEnforce: 'block' } }, async ($, on) => {
+  const { ran } = spentWorld(on)
+  const refused = await $.tool.call({ tool: 'Bash', command: 'time ./gone.sh' })
+  expect(refused.deny).toContain("run ./gone.sh, which the dashboard couldn't read")
+  expect(ran).toEqual([])
+})
+
+// --- Getting out of the way -------------------------------------------------------
+
+test('/exit goes straight through by default, even after Companion has done something', async ($, on) => {
+  const { ran } = spentWorld(on)
+  const seen: string[] = []
+  on('command.run', { command: 'exit' }, async (_$, e) => {
+    seen.push(e.command)
+    return { text: 'left' }
+  })
+  await $.tool.call({ tool: 'Bash', command: DEPLOY })
+  expect(ran).toHaveLength(1)
+  expect((await $.command.run({ command: 'exit', args: '' } as CommandRunInput)).text).toBe('left')
+  expect(seen).toEqual(['exit'])
+  await $.command.run(dashboard('text'))
+})
+
+test('handoffNudge on: only after a Companion step, and only once', { options: { handoffNudge: true } }, async ($, on) => {
+  spentWorld(on)
+  on('command.run', { command: 'clear' }, async () => ({ text: 'cleared' }))
+  const clear = { command: 'clear', args: '' } as CommandRunInput
+  expect((await $.command.run(clear)).text).toBe('cleared')
+  await $.tool.call({ tool: 'Bash', command: DEPLOY })
+  expect((await $.command.run(clear)).text).toContain('Before you clear: /handoff')
+  expect((await $.command.run(clear)).text).toBe('cleared')
+  await $.command.run(dashboard('text'))
+})
+
+test('the pane says nothing has happened yet before the first step, and All clear after it', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  mock.store(on)
+  shell(on, "SUCCESS: Deployed 'Orders Sync' (package: p-1)")
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /Nothing to report yet/ })).toBeDefined()
+  expect(await pane.find({ text: /All clear/ })).toBeUndefined()
+  await $.tool.call({ tool: 'Bash', command: DEPLOY })
+  await $.command.run(dashboard('text'))
+  expect(await pane.find({ text: /All clear/ })).toBeDefined()
+})
+
+test('config quiet turns off what speaks up unasked and leaves the secret check; config quiet off puts it back', async ($, on) => {
+  const { sets } = configWorld(on, { toasts: true, suggestions: true, handoffNudge: true, tokenGuard: 'offer', promptCheck: 'confirm', promptView: 'auto' }, [])
+  const quiet = await $.command.run(dashboard('config quiet'))
+  expect(quiet.text).toContain('A secret in a prompt still asks')
+  expect(Object.fromEntries(sets)).toEqual({
+    'boomi-dashboard.toasts': false,
+    'boomi-dashboard.suggestions': false,
+    'boomi-dashboard.handoffNudge': false,
+    'boomi-dashboard.tokenGuard': 'off',
+    'boomi-dashboard.promptCheck': 'suggest',
+    'boomi-dashboard.promptView': 'manual',
+  })
+})
+
+test('a locked setting stays as the organization set it under config quiet', async ($, on) => {
+  const { sets } = configWorld(on, { toasts: true, suggestions: true }, [], ['toasts'])
+  await $.command.run(dashboard('config quiet'))
+  expect(sets.map(([key]) => key)).not.toContain('boomi-dashboard.toasts')
+})
+
+for (const [seen, isShown] of [[0, true], [15, false]] as const) {
+  test(`after ${seen} sessions in a Companion folder the banner ${isShown ? 'shows' : 'no longer shows'} its tips`, async ($, on) => {
+    world(on, { [FILE]: ORDERS, 'active-development': '' })
+    on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
+      const { Box } = $.ui.resolve(e)
+      return h(Box, {}) as RenderElement
+    })
+    const store: Record<string, unknown> = { tipSessions: seen }
+    await startSession($, on, store)
+    expect(store.tipSessions).toBe(isShown ? 1 : 15)
+    const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+    expect((await band.find({ text: /BC Dashboard/ })) !== undefined).toBe(isShown)
+  })
+}
