@@ -270,6 +270,10 @@ export type PastSession = {
   endedAt?: string
   /** Claude Code's own cost for the session, when its transcript recorded one. */
   costUsd?: number
+  /** That cost by the month it was spent (`YYYY-MM`, as the transcript dates it), when the scan could split it. */
+  costByMonth?: Record<string, number>
+  /** Part of its use had no known price, such as a local model's: the cost reads low. */
+  hasUnknownCost?: boolean
   /** New tokens (input, output, cache writes) and cache reads. */
   tokens: number
   cached: number
