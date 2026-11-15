@@ -502,10 +502,10 @@ Use a test `.env` pointed at a TEST environment, and a second folder whose `.env
 
 ## X. Boomi Companion updates (boomi-dashboard 0.66.0)
 
-*In a real Claude Code session in a Companion folder, with the Companion plugins installed from the `boomi-companion` marketplace. The check reads each plugin's tags on its GitHub repository, so X2 and X3 need a newer Companion release than the installed one. Until one exists, mark them as waiting rather than failing.*
+*In a real Claude Code session in a Companion folder, with the Companion plugins installed from the `boomi-companion` marketplace. The check reads each plugin's `plugin.json` on the default branch of its GitHub repository, so X2 and X3 need a newer Companion release than the installed one. Until one exists, mark them as waiting rather than failing.*
 
 - [ ] **X1. Up to date.** Run `/bc-dashboard upgrade companion --check`.
-  **Pass:** the output says the Companion plugins are up to date and names each one. **Fail:** it says something is behind when the tags say it isn't, or shows an error for a plugin that is reachable.
+  **Pass:** the output says the Companion plugins are up to date and names each one. **Fail:** it says something is behind when the repository's `plugin.json` says it isn't, or shows an error for a plugin that is reachable.
 - [ ] **X2. A newer version is toasted once.** When a newer Companion tag exists, start a new session (after the daily check is due, or with `updateCheckHours` set to 0 then back to 24).
   **Pass:** one toast names the plugin and the new version, and says to run `/bc-dashboard upgrade companion`; a later session toasts nothing for the same version. **Fail:** no toast, or a toast on every session.
 - [ ] **X3. Declining changes nothing.** Run `/bc-dashboard upgrade companion`, then pick **Cancel**.

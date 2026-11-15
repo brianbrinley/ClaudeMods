@@ -4,7 +4,7 @@
 
 ## 0.66.0
 
-- **Boomi Companion updates work like the dashboard's.** At most once every `updateCheckHours`, the dashboard reads the newest version of each installed Companion plugin from its repository's tags, and toasts a newer one once. It never installs. `/bc-dashboard upgrade companion` shows what is behind, asks, then runs Claude Code's own `claude plugin update` for each. Claude Code's confirmation for a changed install command is not accepted on your behalf. `--check` only reads. The `updateCheck` setting covers both.
+- **Boomi Companion updates work like the dashboard's.** At most once every `updateCheckHours`, the dashboard reads the newest version of each installed Companion plugin from the `plugin.json` on its repository's default branch, and toasts a newer one once. It never installs. `/bc-dashboard upgrade companion` shows what is behind, asks, then runs Claude Code's own `claude plugin update` for each. Claude Code's confirmation for a changed install command is not accepted on your behalf. `--check` only reads. The `updateCheck` setting covers both.
 ## 0.65.0
 
 Three defaults changed, so prompts stop being held, nothing calls a model unasked, and `/exit` and `/clear` aren't interrupted. To have the old behaviour back: `/bc-dashboard config promptCheck confirm`, `/bc-dashboard config promptRewrite auto` and `/bc-dashboard config handoffNudge on`.

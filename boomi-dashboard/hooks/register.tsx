@@ -140,7 +140,7 @@ import { BOOMI_MARK_PNG, drawsPictures } from './boomi-mark'
 import { PALETTES, THEMES, THEME_NAMES, THEME_LABELS, THEME_OPTIONS, isDarkAppearance, markOf, resolveTheme, themeFromOptions, themeNamed } from './themes'
 import type { DrawnTheme, Family } from './themes'
 import { COMPANION_PLUGINS, hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
-import { COMPANION_MARKETPLACE, asCompanionSeen, companionCheckText, companionUpdates, latestTag, pluginId, repoUrl, tagVersions } from './companion-upgrade'
+import { COMPANION_MARKETPLACE, asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoUrl } from './companion-upgrade'
 import { RESTART, asUpdateSeen, changelogBetween, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
@@ -3192,17 +3192,10 @@ const latestCompanion = async ($: Engine, plugins: readonly CompanionPlugin[]): 
   const unreachable: string[] = []
   for (const p of plugins) {
     const url = repoUrl(catalog, p.name)
-    // Run from / with no global or system git config, and only https allowed: a repository config in the session's folder can't rewrite the URL.
-    const ran = url
-      ? await $.process
-          .run(['git', '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always', 'ls-remote', '--tags', '--refs', '--', url], {
-            cwd: '/',
-            timeoutMs: 30_000,
-            env: { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
-          })
-          .catch(() => undefined)
-      : undefined
-    latest[p.name] = ran?.exitCode === 0 ? latestTag(tagVersions(ran.stdout)) : undefined
+    const manifest = url ? manifestUrl(url) : undefined
+    const res = manifest ? await $.http.fetch(manifest, { headers: { Accept: 'application/json' } }).catch(() => undefined) : undefined
+    const text = res?.ok ? await res.text().catch(() => undefined) : undefined
+    latest[p.name] = manifestVersion(text)
     if (!latest[p.name]) unreachable.push(p.name)
   }
   return { latest, unreachable }

@@ -1,6 +1,6 @@
 // Boomi Companion's plugins: whether a newer version is on its repository, and
 // what `/bc-dashboard upgrade companion` says before it asks. The check reads
-// the repository's tags (git ls-remote, never a clone); the install is Claude
+// the repository's plugin.json on its default branch (one HTTPS read); the install is Claude
 // Code's own `claude plugin update`, run only after a yes. Plain functions:
 // nothing here touches the engine.
 
@@ -20,16 +20,17 @@ const parse = (text: string | undefined): unknown => {
   }
 }
 
-/** The versions among `git ls-remote --tags --refs` lines (`<sha>\trefs/tags/<version>`). */
-export const tagVersions = (output: string): string[] =>
-  output.split('\n').flatMap(line => {
-    const tag = line.match(/refs\/tags\/v?(\d[\w.-]*)\s*$/)
-    return tag ? [tag[1]!] : []
-  })
+/** The raw URL of a GitHub repository's plugin manifest on its default branch: what claude plugin update installs. */
+export const manifestUrl = (repo: string): string | undefined => {
+  const m = repo.match(/^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(\.git)?$/)
+  return m ? `https://raw.githubusercontent.com/${m[1]}/${m[2]}/HEAD/.claude-plugin/plugin.json` : undefined
+}
 
-/** The newest version among the tags, or undefined when there are none. */
-export const latestTag = (versions: readonly string[]): string | undefined =>
-  versions.reduce<string | undefined>((best, v) => (best === undefined || compareVersions(v, best) > 0 ? v : best), undefined)
+/** The version in a plugin manifest's text, or undefined when there isn't a plausible one. */
+export const manifestVersion = (text: string | undefined): string | undefined => {
+  const version = asObject(parse(text))?.version
+  return typeof version === 'string' && /^\d[\w.-]*$/.test(version) ? version : undefined
+}
 
 /** A GitHub repository over https, as the catalog may name it: owner/name, with or without .git. Anything else (a leading dash, file:, ssh:, another host) is refused. */
 const GITHUB_HTTPS = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\.git)?$/

@@ -1,18 +1,21 @@
 import { expect, test } from 'claude-code/testing'
-import { asCompanionSeen, companionCheckText, companionUpdates, latestTag, pluginId, repoUrl, tagVersions } from '../hooks/companion-upgrade'
+import { asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoUrl } from '../hooks/companion-upgrade'
 
 const SHA = 'c7240f64daee879ab93a6f989d9ab4d367b87d40'
 
-test('tags on the remote are read as versions; other refs are left out', () => {
-  const out = [`${SHA}\trefs/tags/1.0.102`, `${SHA}\trefs/tags/v1.0.103`, `${SHA}\trefs/tags/nightly`, `${SHA}\trefs/heads/main`].join('\n')
-  expect(tagVersions(out)).toEqual(['1.0.102', '1.0.103'])
-  expect(tagVersions('')).toEqual([])
+test('the plugin manifest is read from the repository\'s default branch', () => {
+  expect(manifestUrl('https://github.com/OfficialBoomi/bc-integration.git')).toBe('https://raw.githubusercontent.com/OfficialBoomi/bc-integration/HEAD/.claude-plugin/plugin.json')
+  expect(manifestUrl('https://github.com/OfficialBoomi/bc-datahub')).toBe('https://raw.githubusercontent.com/OfficialBoomi/bc-datahub/HEAD/.claude-plugin/plugin.json')
+  expect(manifestUrl('https://example.com/x.git')).toBeUndefined()
+  expect(manifestUrl('--upload-pack=touch /tmp/x')).toBeUndefined()
 })
 
-test('the newest tag is the highest version by number, not by text', () => {
-  expect(latestTag(['1.0.9', '1.0.10', '1.0.2'])).toBe('1.0.10')
-  expect(latestTag(['1.0.102', '1.0.103'])).toBe('1.0.103')
-  expect(latestTag([])).toBeUndefined()
+test('the version is read from the manifest, and a missing or odd one is no version', () => {
+  expect(manifestVersion('{"name":"bc-integration","version":"1.0.103"}')).toBe('1.0.103')
+  expect(manifestVersion('{"name":"bc-integration"}')).toBeUndefined()
+  expect(manifestVersion('{"version":"../../x"}')).toBeUndefined()
+  expect(manifestVersion('not json')).toBeUndefined()
+  expect(manifestVersion(undefined)).toBeUndefined()
 })
 
 test('a plugin is published from the repository its marketplace entry names', () => {
