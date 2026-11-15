@@ -31,6 +31,8 @@ type WorldOptions = {
   limits?: () => { kind: string; percentUsed: number; resetsAt?: string }[]
   /** When the session started, as the engine reports it: epoch milliseconds. */
   startedAt?: number
+  /** How full the context is, read each time the session's usage is. */
+  contextPercent?: () => number
 }
 
 /** The panes the plugin asked to open in the test running now. */
@@ -65,7 +67,7 @@ const world = (on: On, files: Record<string, string> = {}, options: WorldOptions
     return { value: undefined }
   })
   on('session.usage', async () => ({
-    value: { startedAt: options.startedAt ?? 0, context: { window: 200_000, percent: 12 }, rateLimits: options.limits?.() ?? [], cost: { usd: 1.25 } },
+    value: { startedAt: options.startedAt ?? 0, context: { window: 200_000, percent: options.contextPercent?.() ?? 12 }, rateLimits: options.limits?.() ?? [], cost: { usd: 1.25 } },
   }))
   return toasts
 }
@@ -2187,20 +2189,23 @@ const configWorld = (on: On, values: Record<string, unknown>, answers: (string |
 test('/bc-dashboard config walks the budget with figures from past sessions, and saves at Done', async ($, on) => {
   // Past sessions cost $3.50 and $1.25: twice the typical one is $2.50, the costliest $3.50.
   const { sets, asked } = configWorld(on, { budgetUsd: 0, companionMonthlyUsd: 0, companionShare: 0 }, [
+    'Budget',
     'Budgets',
     '$2.50 (twice a typical session)',
     'Keep off',
     '30%',
     'Month',
     'Keep off',
-    'Keep warn',
-    'done',
+    'Back to the menu',
+    'Done',
   ])
   const answer = await $.command.run(dashboard('config'))
-  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget 1/7', 'Budget 2/7', 'Budget 3/7', 'Budget 4/7', 'Budget 5/7', 'Budget 6/7', 'Settings'])
-  expect(asked[1]!.options.map(o => o.label)).toEqual(['Keep off', '$2.50 (twice a typical session)', '$3.50 (your costliest session)', 'Back to the menu'])
-  expect(asked[1]!.question).toContain('cost $1.25 typically, $3.50 at most')
-  expect(asked[7]!.question).toContain('3 changes so far. Pick a group, or type done to save and finish.')
+  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget', 'Budgets 1/5', 'Budgets 2/5', 'Budgets 3/5', 'Budgets 4/5', 'Budgets 5/5', 'Budget', 'Settings'])
+  expect(asked[1]!.options.map(o => o.label)).toEqual(['Budgets', 'Limits and production', 'Tokens', 'Back to the menu'])
+  expect(asked[2]!.options.map(o => o.label)).toEqual(['Keep off', '$2.50 (twice a typical session)', '$3.50 (your costliest session)', 'Back to the menu'])
+  expect(asked[2]!.question).toContain('cost $1.25 typically, $3.50 at most')
+  expect(asked[7]!.question).toContain('3 changes so far, saved when you pick Done.')
+  expect(asked[8]!.question).toContain('3 changes so far, saved when you pick Done.')
   expect(sets).toEqual([
     ['boomi-dashboard.budgetUsd', 2.5],
     ['boomi-dashboard.companionShare', 30],
@@ -2213,10 +2218,10 @@ test('/bc-dashboard config walks the budget with figures from past sessions, and
 
 test('/bc-dashboard config skips the share period with no share, goes back to the menu, and asks again after a typo', async ($, on) => {
   const { sets, asked } = configWorld(on, { budgetUsd: 5, companionShare: 0 }, ['lots', '7', 'Back to the menu'])
-  const answer = await $.command.run(dashboard('config budget'))
+  const answer = await $.command.run(dashboard('config budgets'))
   expect(asked[0]!.options.map(o => o.label)).toEqual(['Keep $5.00', '$2.50 (twice a typical session)', 'Off', 'Back to the menu'])
   expect(asked[1]!.question).toMatch(/^"lots" didn't work: Session budget takes a number \(0 for off\)\. Session budget:/)
-  expect(asked[2]!.header).toBe('Budget 2/7')
+  expect(asked[2]!.header).toBe('Budgets 2/5')
   expect(sets).toEqual([['boomi-dashboard.budgetUsd', 7]])
   expect(answer.text).toBe('Saved to /config:\n  Session budget: $5.00 → $7.00')
 })
@@ -2231,19 +2236,34 @@ test('/bc-dashboard config sets one setting by name, and lists them where it can
   expect((await $.command.run(dashboard('config wibble'))).text).toMatch(/^No setting or group called wibble\./)
   // The dialog dismissed at once, as in a -p run: every setting, and how to change one.
   const listed = (await $.command.run(dashboard('config'))).text
-  expect(listed).toContain('Budgets:\n  budgetUsd             off  (default)')
+  expect(listed).toContain('Budget:\n  budgetUsd             off  (default)')
   expect(listed).toContain('/bc-dashboard config <setting> <value>')
   expect(sets).toHaveLength(1)
 })
 
+test('/bc-dashboard config goes from an area to a section and back, and never asks more than five in a row', async ($, on) => {
+  const { sets, asked } = configWorld(on, {}, ['Tokens', 'Suggest', 'Keep 40 KB', 'Keep 50%', 'Done'])
+  const answer = await $.command.run(dashboard('config budget'))
+  expect(asked.map(q => q.header)).toEqual(['Budget', 'Tokens 1/3', 'Tokens 2/3', 'Tokens 3/3', 'Budget'])
+  expect(asked[0]!.options.map(o => o.label)).toEqual(['Budgets', 'Limits and production', 'Tokens', 'Done'])
+  expect(sets).toEqual([['boomi-dashboard.tokenGuard', 'suggest']])
+  expect(answer.text).toBe('Saved to /config:\n  Token guard: offer → suggest')
+})
+
+test('/bc-dashboard config goes straight to a section by its name', async ($, on) => {
+  const { asked } = configWorld(on, {}, ['Keep offer', 'Back to the menu'])
+  expect((await $.command.run(dashboard('config tokens'))).text).toBe('Nothing changed.')
+  expect(asked.map(q => q.header)).toEqual(['Tokens 1/3', 'Tokens 2/3'])
+})
+
 test('/bc-dashboard config closed before Done with nothing picked changes nothing', async ($, on) => {
-  const { sets } = configWorld(on, { toasts: true }, ['Look and reports', 'Keep auto', undefined])
+  const { sets } = configWorld(on, { toasts: true }, ['Pane and banner', 'Look', 'Keep auto', undefined])
   expect((await $.command.run(dashboard('config'))).text).toBe('Nothing changed.')
   expect(sets).toEqual([])
 })
 
 test('/bc-dashboard config keeps what was picked when the menu closes before Done, and the pane takes the colors', async ($, on) => {
-  const { sets } = configWorld(on, { toasts: true }, ['Look and reports', 'Exosphere-dark', undefined])
+  const { sets } = configWorld(on, { toasts: true }, ['Pane and banner', 'Look', 'Exosphere-dark', undefined])
   const saved = await $.command.run(dashboard('config'))
   expect(sets).toEqual([['boomi-dashboard.paneTheme', 'exosphere-dark']])
   expect(saved.text).toBe('Saved to /config:\n  Theme: auto → exosphere-dark\nThe menu closed before Done; what you picked before it closed is saved.')
@@ -2990,7 +3010,7 @@ const answers = (requests: { system?: string; prompt?: string }[]) => (on: Param
     return { value: { isAnswered: true, text: REWRITTEN, usage: { input_tokens: 900, output_tokens: 80, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } as never
   })
 
-test('auto: a prompt with tips is rewritten in the background, the checks’ upgrade first and the model’s after, with why', async ($, on) => {
+test('auto: a prompt with tips is rewritten in the background, the checks’ upgrade first and the model’s after, with why', { options: { promptRewrite: 'auto' } }, async ($, on) => {
   const requests: { system?: string; prompt?: string }[] = []
   answers(requests)(on)
   const { typed } = await promptWorld($, on)
@@ -3012,7 +3032,7 @@ test('auto: a prompt with tips is rewritten in the background, the checks’ upg
   expect(await after.find({ text: /try 2 of 2/ })).toBeDefined()
 })
 
-test('auto: it never fills the prompt box, and a model that fails leaves the checks’ upgrade', async ($, on) => {
+test('auto: it never fills the prompt box, and a model that fails leaves the checks’ upgrade', { options: { promptRewrite: 'auto' } }, async ($, on) => {
   on('model.complete', async () => ({ value: { isAnswered: false, reason: 'api-error', status: 500, error: 'server', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }) as never)
   const { typed } = await promptWorld($, on)
   await typed(VAGUE)
@@ -3059,7 +3079,7 @@ const companionInstalled = (on: On) =>
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
 
-test('a rewrite reads Companion’s docs in subfolders through an index kept for the version, and says what it read', async ($, on) => {
+test('a rewrite reads Companion’s docs in subfolders through an index kept for the version, and says what it read', { options: { promptRewrite: 'auto' } }, async ($, on) => {
   const requests: { system?: string; prompt?: string }[] = []
   answers(requests)(on)
   companionInstalled(on)
@@ -3108,7 +3128,7 @@ const showsSuggestions = (on: On) => on('prompt.suggest', async () => ({ isShown
 /** The prompt box shows `text` dim as a suggestion, as the engine does after a turn. */
 const suggest = ($: Engine, text: string) => $.prompt.suggest({ text })
 
-test('a suggestion taken as it was is not checked: no tips, no hold, no rewrite, and it is counted', async ($, on) => {
+test('a suggestion taken as it was is not checked: no tips, no hold, no rewrite, and it is counted', { options: { promptCheck: 'confirm', promptRewrite: 'auto' } }, async ($, on) => {
   showsSuggestions(on)
   const requests: { system?: string; prompt?: string }[] = []
   answers(requests)(on)
@@ -3137,7 +3157,7 @@ test('a suggestion the person edited is checked like any other prompt', async ($
   expect((await $.command.run(dashboard('prompt'))).text).toContain('"it"')
 })
 
-test('check: promptSuggested check treats a taken suggestion like any other prompt', { options: { promptSuggested: 'check' } }, async ($, on) => {
+test('check: promptSuggested check treats a taken suggestion like any other prompt', { options: { promptSuggested: 'check', promptCheck: 'confirm', promptRewrite: 'auto' } }, async ($, on) => {
   showsSuggestions(on)
   const { typed } = await promptWorld($, on)
   await suggest($, VAGUE)
@@ -3168,7 +3188,7 @@ test('the dashboard’s own next-step suggestion, taken as it was, is skipped th
   expect((await $.command.run(dashboard('prompt'))).text).toContain('suggestions taken as they were')
 })
 
-test('while the model writes the upgrade, the tab and the pane say so, with a spinner that turns, and it clears when the upgrade arrives', async ($, on) => {
+test('while the model writes the upgrade, the tab and the pane say so, with a spinner that turns, and it clears when the upgrade arrives', { options: { promptRewrite: 'auto' } }, async ($, on) => {
   let release = () => {}
   const gate = new Promise<void>(resolve => {
     release = resolve
@@ -3228,7 +3248,7 @@ const BAND_TARGET = { component: 'AbovePrompt', props: BAND } as const
 test('confirm: with the Prompt tab shown, a flagged prompt is held until it is sent from there', { options: { promptCheck: 'confirm' } }, async ($, on) => {
   const { asked, sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
   const result = await typed(VAGUE)
-  expect(result).toEqual({ drop: "Held by the Boomi Dashboard: Claude hasn't seen it yet. Send it, or the upgrade, from Boomi Dashboard Prompt tips." })
+  expect(result).toEqual({ drop: "Held by the Boomi Dashboard: Claude hasn't seen it yet. Send it, or the upgrade, from Boomi Dashboard Prompt tips. Start a prompt with > to skip the check. To stop holding prompts: /bc-dashboard config promptCheck suggest" })
   expect(asked).toEqual([])
   expect(sent).toEqual([])
   const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
@@ -3361,11 +3381,27 @@ test('Regenerate reads the folder’s components and the person’s note, and ev
   expect(await tab.find({ text: /Try 1: build the QTC process\./ })).toBeDefined()
 })
 
-test('by default a flagged prompt is held: confirm is the default', async ($, on) => {
+test('by default a flagged prompt gets tips and goes through, and the model is not called on its own', async ($, on) => {
+  let calls = 0
+  on('model.complete', async () => {
+    calls++
+    return { value: { isAnswered: true, text: 'x', usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } as never
+  })
   const { sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
-  expect(await typed(VAGUE)).toEqual({ drop: "Held by the Boomi Dashboard: Claude hasn't seen it yet. Send it, or the upgrade, from Boomi Dashboard Prompt tips." })
-  expect(sent).toEqual([])
-  expect((await $.command.run(dashboard('prompt'))).text).toContain('Prompt tips (promptCheck: confirm)')
+  expect(await typed(VAGUE)).toEqual({ text: VAGUE })
+  expect(sent).toEqual([VAGUE])
+  expect(calls).toBe(0)
+  expect((await $.command.run(dashboard('prompt'))).text).toContain('Prompt tips (promptCheck: suggest)')
+})
+
+test('a > skips the tips but not the secret check: the > comes off whichever way it goes', async ($, on) => {
+  const { asked, sent, typed } = await promptWorld($, on, () => undefined, { 'active-development': '' }, { isPlaced: true })
+  await typed('> deploy it')
+  expect(sent.at(-1)).toBe('deploy it')
+  expect(asked).toEqual([])
+  await typed('> deploy it, password=hunter2abc')
+  expect(asked).toHaveLength(1)
+  expect(sent.at(-1)).toBe('deploy it, password=****')
 })
 
 test('a long note is drawn once, in its field, and each try shows the note it followed', { options: { promptCheck: 'suggest' } }, async ($, on) => {
@@ -3570,5 +3606,300 @@ for (const theme of ['exosphere-light', 'exosphere-dark'] as const) {
     const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
     expect(await pane.find({ text: /Test of Orders Sync ended ERROR/ })).toBeDefined()
     console.log(`PANE-TREE ${theme} ${JSON.stringify(await pane.drawn())}`)
+  })
+}
+
+// --- Token guard -----------------------------------------------------------------
+
+const LARGE = 'x'.repeat(50 * 1024)
+
+/** A Companion folder with a large file in it, the Read tool beneath the plugin, and the context's fill as the test sets it. */
+const guarded = (on: On, percent: () => number = () => 12) => {
+  const toasts = world(on, { 'active-development': '', 'big.xml': LARGE, 'small.xml': 'x', 'big.png': LARGE }, { contextPercent: percent })
+  const reads: string[] = []
+  on('tool.call', { tool: 'Read' }, async (_$, e) => {
+    reads.push(String(e.file_path))
+    return { result: { type: 'text', file: { filePath: String(e.file_path), content: '' } } as never }
+  })
+  const suggestions: string[] = []
+  on('prompt.suggest', async (_$, e) => {
+    suggestions.push(e.text)
+    return { isShown: true }
+  })
+  on('turn.complete', async () => ({ text: '' }))
+  return { toasts, reads, suggestions }
+}
+
+/** One finished turn, with what it set off in the background settled. */
+const turnEnds = async ($: Engine, id: string) => {
+  await $.turn.complete({ reason: 'answer', turnId: id, answer: '' } as never)
+  await $.command.run(dashboard('text'))
+}
+
+test('a whole read of a large file is refused once with the way to read less, and the same read then goes ahead', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  const { toasts, reads } = guarded(on)
+  await startSession($, on, {})
+  const first = await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  expect(first.deny).toContain('offset and limit')
+  expect(reads).toEqual([])
+  expect(toasts.some(t => t.includes('read part of big.xml'))).toBe(true)
+  const second = await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  expect(second.deny).toBeUndefined()
+  expect(reads).toEqual(['/work/big.xml'])
+})
+
+test('a ranged read, a small file and a picture are never refused', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  const { reads } = guarded(on)
+  await startSession($, on, {})
+  for (const input of [{ file_path: '/work/big.xml', limit: 20 }, { file_path: '/work/small.xml' }, { file_path: '/work/big.png' }]) {
+    expect((await $.tool.call({ tool: 'Read', ...input })).deny).toBeUndefined()
+  }
+  expect(reads).toHaveLength(3)
+})
+
+test('tokenGuard off reads the whole file and never warns', { options: { tokenGuard: 'off' } }, async ($, on) => {
+  const { toasts, reads, suggestions } = guarded(on, () => 90)
+  await startSession($, on, {})
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBeUndefined()
+  await turnEnds($, 't1')
+  expect(reads).toEqual(['/work/big.xml'])
+  expect(toasts.some(t => t.includes('Context'))).toBe(false)
+  expect(suggestions).toEqual([])
+})
+
+test('outside a Companion folder the guard leaves reads and the context alone', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  const toasts = world(on, { 'big.xml': LARGE }, { contextPercent: () => 90 })
+  const reads: string[] = []
+  on('tool.call', { tool: 'Read' }, async (_$, e) => {
+    reads.push(String(e.file_path))
+    return { result: { type: 'text', file: { filePath: String(e.file_path), content: '' } } as never }
+  })
+  on('turn.complete', async () => ({ text: '' }))
+  await startSession($, on, {})
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBeUndefined()
+  await turnEnds($, 't1')
+  expect(reads).toEqual(['/work/big.xml'])
+  expect(toasts.some(t => t.includes('Context'))).toBe(false)
+})
+
+test('a full context warns and offers /compact once, and again only after it has dropped', { options: { tokenGuard: 'suggest' } }, async ($, on) => {
+  let percent = 40
+  const { toasts, suggestions } = guarded(on, () => percent)
+  await startSession($, on, {})
+  await turnEnds($, 't1')
+  expect(suggestions).toEqual([])
+  percent = 55
+  await turnEnds($, 't2')
+  await turnEnds($, 't3')
+  expect(suggestions).toEqual(['/compact keep the current goal and the remaining steps'])
+  expect(toasts.filter(t => t.includes('Context 55% full'))).toHaveLength(1)
+  percent = 20
+  await turnEnds($, 't4')
+  percent = 60
+  await turnEnds($, 't5')
+  expect(suggestions).toHaveLength(2)
+})
+
+test('with suggestions off, a full context only warns', { options: { tokenGuard: 'suggest', suggestions: false } }, async ($, on) => {
+  const { toasts, suggestions } = guarded(on, () => 70)
+  await startSession($, on, {})
+  await turnEnds($, 't1')
+  expect(toasts.some(t => t.includes('Context 70% full'))).toBe(true)
+  expect(suggestions).toEqual([])
+})
+
+/** A little over the 30 minutes between mentions, in steps the test clock can take with the dashboard's timers running. */
+const halfAnHourPasses = async () => {
+  for (let i = 0; i < 4; i++) await clock.advance(8 * 60_000)
+}
+const guardToasts = (toasts: string[]) => toasts.filter(t => t.includes('/bc-dashboard config tokenGuard suggest'))
+
+test('out of the box a session mentions the guard as it starts, and a large read goes ahead with no mention right after', async ($, on) => {
+  const { toasts, reads } = guarded(on)
+  await startSession($, on, {})
+  expect(guardToasts(toasts)).toHaveLength(0)
+  await clock.advance(3_000)
+  expect(guardToasts(toasts)).toEqual([expect.stringContaining('Optional:')])
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBeUndefined()
+  expect(reads).toEqual(['/work/big.xml'])
+  expect(guardToasts(toasts)).toHaveLength(1)
+})
+
+test('after 30 minutes a large read or a full context mentions it again, three times a session at most', async ($, on) => {
+  const { toasts, suggestions } = guarded(on, () => 70)
+  await startSession($, on, {})
+  await clock.advance(3_000)
+  await halfAnHourPasses()
+  await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  expect(guardToasts(toasts)[1]).toContain('Claude read all of big.xml')
+  await turnEnds($, 't1')
+  expect(guardToasts(toasts)).toHaveLength(2)
+  await halfAnHourPasses()
+  await turnEnds($, 't2')
+  expect(guardToasts(toasts)[2]).toContain('Context 70% full')
+  await halfAnHourPasses()
+  await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  await turnEnds($, 't3')
+  expect(guardToasts(toasts)).toHaveLength(3)
+  expect(toasts.some(t => t.includes('/compact keeps'))).toBe(false)
+  expect(suggestions).toEqual([])
+})
+
+test('tokenGuard off, or already on, never mentions it', { options: { tokenGuard: 'off' } }, async ($, on) => {
+  const { toasts } = guarded(on, () => 70)
+  await startSession($, on, {})
+  await clock.advance(3_000)
+  await halfAnHourPasses()
+  await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })
+  await turnEnds($, 't1')
+  expect(guardToasts(toasts)).toEqual([])
+})
+
+test('outside a Companion folder it is never mentioned', async ($, on) => {
+  const toasts = world(on, {}, { contextPercent: () => 70 })
+  await startSession($, on, {})
+  await clock.advance(3_000)
+  expect(guardToasts(toasts)).toEqual([])
+})
+
+test('a read that failed mentions nothing', async ($, on) => {
+  const toasts = world(on, { 'active-development': '', 'big.xml': LARGE })
+  on('tool.call', { tool: 'Read' }, async () => ({ deny: 'not allowed' }))
+  await startSession($, on, {})
+  expect((await $.tool.call({ tool: 'Read', file_path: '/work/big.xml' })).deny).toBe('not allowed')
+  expect(guardToasts(toasts)).toEqual([])
+})
+
+// --- Production read-only, end to end -------------------------------------------
+
+const envFile = (id: string) => `BOOMI_API_URL=https://api.boomi.com\nBOOMI_USERNAME=BOOMI_TOKEN.bot@example.com\nBOOMI_API_TOKEN=t-1\nBOOMI_ACCOUNT_ID=acct-1\nBOOMI_ENVIRONMENT_ID=${id}\n`
+
+/** A session whose .env points at the test environment, with another workspace's .env pointing at production. */
+const enforceWorld = (on: On) => {
+  // Named from /work, so the session's .env isn't also taken for one in another folder.
+  world(on, { [FILE]: ORDERS, 'work/.env': envFile('e-test'), 'prod-workspace/.env': envFile('e-prod'), 'test-workspace/.env': envFile('e-test') })
+  mock.store(on)
+  mock.env(on, { HOME: '/home/me' })
+  on('http.fetch', async (_$, e) => {
+    const result = e.url.includes('/Environment/query')
+      ? [
+          { id: 'e-test', name: 'Test', classification: 'TEST' },
+          { id: 'e-prod', name: 'Production', classification: 'PROD' },
+        ]
+      : []
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result }) } }
+  })
+  return shell(on, "SUCCESS: Deployed 'Orders Sync' (package: p-1)")
+}
+
+test('enforce: a cd to a workspace on production is checked against that workspace’s .env, not the session’s', { options: { envCheck: 'enforce' } }, async ($, on) => {
+  const ran = enforceWorld(on)
+  const refused = await $.tool.call({ tool: 'Bash', command: `cd prod-workspace && bash ../scripts/boomi-deploy.sh ${FILE}` })
+  expect(refused.deny).toContain('Production is PROD')
+  expect(ran).toEqual([])
+  expect((await $.tool.call({ tool: 'Bash', command: `cd test-workspace && bash ../scripts/boomi-deploy.sh ${FILE}` })).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', command: `cd /work && bash scripts/boomi-deploy.sh ${FILE}` })).deny).toBeUndefined()
+  expect(ran).toHaveLength(2)
+  await $.command.run(dashboard('text'))
+})
+
+test('enforce: a cd the check can’t follow, or to a folder with no .env, is refused', { options: { envCheck: 'enforce' } }, async ($, on) => {
+  const ran = enforceWorld(on)
+  expect((await $.tool.call({ tool: 'Bash', command: `cd $WORKSPACE && bash ../scripts/boomi-deploy.sh ${FILE}` })).deny).toContain("can't tell which .env")
+  expect((await $.tool.call({ tool: 'Bash', command: `cd elsewhere && bash ../scripts/boomi-deploy.sh ${FILE}` })).deny).toContain("can't be read")
+  expect(ran).toEqual([])
+})
+
+test('enforce: a change on the session’s own production .env is refused, a Data Hub deploy too', { options: { envCheck: 'enforce' } }, async ($, on) => {
+  world(on, { [FILE]: ORDERS, '.env': envFile('e-prod') })
+  mock.store(on)
+  mock.env(on, { HOME: '/home/me' })
+  on('http.fetch', async () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ result: [{ id: 'e-prod', name: 'Production', classification: 'PROD' }] }) } }))
+  const ran = shell(on, 'ok')
+  expect((await $.tool.call({ tool: 'Bash', command: 'bash scripts/datahub-deployment.sh deploy m-1' })).deny).toContain('Production is PROD')
+  expect((await $.tool.call({ tool: 'Bash', command: 'bash scripts/boomi-extensions.sh set --file x.json' })).deny).toContain('Production is PROD')
+  expect(ran).toEqual([])
+  expect((await $.tool.call({ tool: 'Bash', command: 'bash scripts/boomi-extensions.sh get' })).deny).toBeUndefined()
+  await $.command.run(dashboard('text'))
+})
+
+test('block: a wrapper the dashboard can’t read counts as a change', { options: { budgetUsd: 1, budgetEnforce: 'block' } }, async ($, on) => {
+  const { ran } = spentWorld(on)
+  const refused = await $.tool.call({ tool: 'Bash', command: 'time ./gone.sh' })
+  expect(refused.deny).toContain("run ./gone.sh, which the dashboard couldn't read")
+  expect(ran).toEqual([])
+})
+
+// --- Getting out of the way -------------------------------------------------------
+
+test('/exit goes straight through by default, even after Companion has done something', async ($, on) => {
+  const { ran } = spentWorld(on)
+  const seen: string[] = []
+  on('command.run', { command: 'exit' }, async (_$, e) => {
+    seen.push(e.command)
+    return { text: 'left' }
+  })
+  await $.tool.call({ tool: 'Bash', command: DEPLOY })
+  expect(ran).toHaveLength(1)
+  expect((await $.command.run({ command: 'exit', args: '' } as CommandRunInput)).text).toBe('left')
+  expect(seen).toEqual(['exit'])
+  await $.command.run(dashboard('text'))
+})
+
+test('handoffNudge on: only after a Companion step, and only once', { options: { handoffNudge: true } }, async ($, on) => {
+  spentWorld(on)
+  on('command.run', { command: 'clear' }, async () => ({ text: 'cleared' }))
+  const clear = { command: 'clear', args: '' } as CommandRunInput
+  expect((await $.command.run(clear)).text).toBe('cleared')
+  await $.tool.call({ tool: 'Bash', command: DEPLOY })
+  expect((await $.command.run(clear)).text).toContain('Before you clear: /handoff')
+  expect((await $.command.run(clear)).text).toBe('cleared')
+  await $.command.run(dashboard('text'))
+})
+
+test('the pane says nothing has happened yet before the first step, and All clear after it', async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  mock.store(on)
+  shell(on, "SUCCESS: Deployed 'Orders Sync' (package: p-1)")
+  const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
+  expect(await pane.find({ text: /Nothing to report yet/ })).toBeDefined()
+  expect(await pane.find({ text: /All clear/ })).toBeUndefined()
+  await $.tool.call({ tool: 'Bash', command: DEPLOY })
+  await $.command.run(dashboard('text'))
+  expect(await pane.find({ text: /All clear/ })).toBeDefined()
+})
+
+test('config quiet turns off what speaks up unasked and leaves the secret check; config quiet off puts it back', async ($, on) => {
+  const { sets } = configWorld(on, { toasts: true, suggestions: true, handoffNudge: true, tokenGuard: 'offer', promptCheck: 'confirm', promptView: 'auto' }, [])
+  const quiet = await $.command.run(dashboard('config quiet'))
+  expect(quiet.text).toContain('A secret in a prompt still asks')
+  expect(Object.fromEntries(sets)).toEqual({
+    'boomi-dashboard.toasts': false,
+    'boomi-dashboard.suggestions': false,
+    'boomi-dashboard.handoffNudge': false,
+    'boomi-dashboard.tokenGuard': 'off',
+    'boomi-dashboard.promptCheck': 'suggest',
+    'boomi-dashboard.promptView': 'manual',
+  })
+})
+
+test('a locked setting stays as the organization set it under config quiet', async ($, on) => {
+  const { sets } = configWorld(on, { toasts: true, suggestions: true }, [], ['toasts'])
+  await $.command.run(dashboard('config quiet'))
+  expect(sets.map(([key]) => key)).not.toContain('boomi-dashboard.toasts')
+})
+
+for (const [seen, isShown] of [[0, true], [15, false]] as const) {
+  test(`after ${seen} sessions in a Companion folder the banner ${isShown ? 'shows' : 'no longer shows'} its tips`, async ($, on) => {
+    world(on, { [FILE]: ORDERS, 'active-development': '' })
+    on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
+      const { Box } = $.ui.resolve(e)
+      return h(Box, {}) as RenderElement
+    })
+    const store: Record<string, unknown> = { tipSessions: seen }
+    await startSession($, on, store)
+    expect(store.tipSessions).toBe(isShown ? 1 : 15)
+    const band = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+    expect((await band.find({ text: /BC Dashboard/ })) !== undefined).toBe(isShown)
   })
 }

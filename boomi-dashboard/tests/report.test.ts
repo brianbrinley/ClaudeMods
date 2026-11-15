@@ -246,7 +246,7 @@ test("a session's budget: a meter and a warning in the summary near it, and how 
   const view = scoped(DASHBOARD, 'session')
   const base = { session: 'cccccccc-3333', sessionId: 'cccccccc-3333', date: '2026-10-14', scope: 'session' as const }
   const none = reportHtml(view, { ...base, usage: { usd: 0.4 }, budgets: [] }, NOW, 24 * HOUR)
-  expect(none).toContain('No budget set</span> <span class="na-how">Run <code>/bc-dashboard config budget</code> to set one')
+  expect(none).toContain('No budget set</span> <span class="na-how">Run <code>/bc-dashboard config budgets</code> to set one')
   expect(none).not.toContain('class="meter')
   const unmeasured = reportHtml(view, { ...base, usage: { usd: 0.4 }, budgets: [{ label: 'share', level: 'healthy', percent: 0, detail: 'this login reports no weekly limit', isUnmeasured: true }] }, NOW, 24 * HOUR)
   expect(unmeasured).toContain('<li class="meter meter-none"><div class="meter-head"><span>Companion&#39;s share (limit)</span><span class="na">not measured</span></div><div class="sub">this login reports no weekly limit')

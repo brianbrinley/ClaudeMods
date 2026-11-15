@@ -104,3 +104,15 @@ test('a spent monthly Claude budget is named as that, not as a Companion share',
   const spent = [{ label: 'Claude budget', level: 'critical', percent: 101, detail: '$1111 of $1100 this month' }] as BudgetLine[]
   expect(spentText(spent)).toBe('your monthly Claude budget ($1111 of $1100 this month, 101%)')
 })
+
+test('a Companion script or subcommand the dashboard does not know counts as a change', () => {
+  expect(companionChanges('bash scripts/boomi-branch.sh merge --source a --dest b')).toHaveLength(1)
+  expect(companionChanges('bash scripts/boomi-branch.sh merge-execute --id x')).toHaveLength(1)
+  expect(companionChanges('bash scripts/boomi-branch.sh merge-revert --id x')).toHaveLength(1)
+  expect(companionChanges('bash scripts/boomi-branch.sh merge-delete --id x')).toHaveLength(1)
+  expect(companionChanges('bash scripts/boomi-folder-rename.sh a b')).toHaveLength(1)
+  expect(companionChanges('bash scripts/boomi-branch.sh merge-status --id x')).toEqual([])
+  expect(companionChanges('bash scripts/boomi-branch.sh default')).toEqual([])
+  expect(companionChanges('bash scripts/boomi-brand-new.sh x')[0]).toContain("a Companion step the dashboard doesn't know")
+  expect(companionChanges('bash scripts/boomi-extensions.sh rollback')[0]).toContain('extensions rollback')
+})

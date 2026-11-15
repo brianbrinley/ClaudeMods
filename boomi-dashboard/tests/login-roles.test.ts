@@ -50,3 +50,14 @@ test('privileges are read as names whether Boomi sends strings or objects', () =
   ])
   expect(loginCheck(['b'], roles).level).toBe('critical')
 })
+
+test('a role\'s privileges are read from a plain list and from Boomi\'s nested form, a lone one too', () => {
+  const roles = accountRolesFrom([
+    { id: '1', name: 'Nested', Privileges: { Privilege: [{ name: 'ACCOUNT_ADMIN' }, { name: 'API' }] } },
+    { id: '2', name: 'Lone', Privileges: { Privilege: { name: 'API' } } },
+    { id: '3', name: 'Plain', Privileges: [{ name: 'API' }] },
+    { id: '4', name: 'None' },
+  ])
+  expect(roles.map(r => r.privileges)).toEqual([['ACCOUNT_ADMIN', 'API'], ['API'], ['API'], []])
+  expect(loginCheck(['1'], roles).level).toBe('critical')
+})

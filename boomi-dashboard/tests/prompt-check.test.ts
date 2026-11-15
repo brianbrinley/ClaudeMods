@@ -224,3 +224,14 @@ test('the counts say how many suggestions were taken, and a checked prompt keeps
   expect(countsLine(NO_COUNTS)).not.toContain('suggestions taken')
   expect(countsAfter(counts, undefined, []).suggested).toBe(2)
 })
+
+test('a Boomi token, and a password or token given in words, are secrets, and masked', () => {
+  const guid = '12345678-1234-1234-1234-123456789abc'
+  for (const text of [`BOOMI_TOKEN.me@x.com:${guid}`, `the token is ${guid}`, `token ${guid}`, 'password hunter2', 'the password is hunter2']) {
+    expect(findSecrets(text).length).toBeGreaterThan(0)
+    expect(maskPrompt(text)).not.toContain(text.includes('hunter2') ? 'hunter2' : guid)
+  }
+  for (const text of ['the password reset flow', 'the token expired', 'the token is expired', 'rotate the api key', 'a secret process']) {
+    expect(findSecrets(text)).toEqual([])
+  }
+})

@@ -16,7 +16,7 @@
 - **Pick up where you left off.** A new session opens with what the last one did and what it left broken. **Past Companion sessions** shows what earlier work cost.
 - **It's not just for integration.** Data Hub deploys, BDI flow runs, Agentstudio agents, custom connector releases and Marketplace recipes all show up as steps. Their failures land under **Needs attention**, and each product gets its own slice of the spend.
 - **Catch work done outside the chat.** Companion's activity log adds script runs from a terminal, and watched components let you know when someone else changes them in Boomi.
-- **Write better prompts for Boomi work.** Every prompt you type gets checked for the things Boomi work needs and prompts tend to leave out: which component "it" is, the environment, the test data, the error. You get an upgraded prompt right away, built from what the session already knows. A model then polishes it in the background. Anything Claude would have stopped to ask becomes a `[decide: …]` placeholder, with a short note on why it matters. It never gets in your way, except to check with you before a password or token ends up in the transcript.
+- **Write better prompts for Boomi work.** Every prompt you type gets checked for the things Boomi work needs and prompts tend to leave out: which component "it" is, the environment, the test data, the error. You get an upgraded prompt right away, built from what the session already knows. Ask, and a model polishes it. Anything Claude would have stopped to ask becomes a `[decide: …]` placeholder, with a short note on why it matters. Your prompt still goes straight through, unless you turn on `confirm` to hold it first. The one thing that always stops to ask is a password or token about to end up in the transcript.
 - **Hand it off.** `/bc-dashboard report` writes the session up in Markdown for a pull request, a ticket or whoever picks it up next. `report html` turns it into a web page with charts that you can send to anyone.
 
 ## Install
@@ -99,6 +99,8 @@ A banner above the prompt shows the latest step and what needs attention, and th
 ◆ BC Dashboard Tip: Why? on a failed test reads its log; Ask Claude to fix drafts the request │ $0.00 this session   [ Open ]  [ Hide ]
 ```
 
+Some of the tips are about keeping tokens down: `/clear` between tasks, the current task in a short `CLAUDE.md`, `/compact` with what to keep, searches and line ranges instead of whole files, `/context` to see what's using your tokens, and the [token guard](#token-guard).
+
 If Claude Code can tell which Companion plugins are turned on, the first tip lists them, and you won't see tips for plugins you don't have:
 
 ```text
@@ -171,6 +173,23 @@ Spend is the session's cost as `/cost` reports it. On a Claude seat, that's what
 
 **Budget:** if you set `budgetUsd`, the status line, the summary and the SPEND gauge warn you from 80% (`◐ 84% of the $5.00 budget`) and again once it's spent, with one toast at each point. Out of the box that's all it does, and nothing gets stopped. To make a spent budget actually pause or stop Companion's changes, see [Budget enforcement](#budget-enforcement).
 
+### Token guard
+
+The token guard is there if you want help keeping a session's tokens down. It's yours to turn on, and works only where Companion does:
+
+```text
+/bc-dashboard config tokenGuard suggest
+```
+
+Or go through its settings with `/bc-dashboard config tokens`.
+
+Until you do, nothing is stopped and nothing warns. `tokenGuard` starts on `offer`: a toast names the setting as a session starts, and comes back only when Claude has just read a large file whole or the context has filled, at most three times a session and 30 minutes apart. `off` stays silent.
+
+With it on:
+
+- **Large reads.** When Claude asks for all of a file over `largeReadKb` (40 KB, about 10K tokens), the read is refused once, and Claude is told to search or read a range. If it needs the whole file, the same read again goes ahead, so nothing is out of reach. Images, PDFs and notebooks are left alone.
+- **A filling context.** At `contextWarnPercent` (50%), a toast says so, the prompt box offers `/compact` (Tab takes it), and the pane's CONTEXT gauge shows `◐ /compact or /clear soon`. It warns once each time the context gets there. It compacts nothing itself. If you set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, keep this below the point they compact at.
+
 ### Your Claude usage limits
 
 On a Claude seat (Pro, Max, Team or Enterprise), the dashboard reads your usage limits as Claude Code reports them, with no setup: the 5-hour and weekly windows, plus your admin's spend limit if there is one.
@@ -210,7 +229,7 @@ There are three budgets. You can set any of them, or none. By default they only 
 
 Not sure where to start? On a Pro or Max seat, try `companionShare`, since your limit is what runs out. On an API key, try `companionMonthlyUsd`, since your bill is what grows.
 
-**With the dashboard (easiest):** run `/bc-dashboard config budget`. It walks through each budget in turn, starting from your current value, and suggests figures based on what your past Companion sessions cost, such as "twice a typical session" or "a quarter above the last 30 days". Pick one, keep what you have, or type your own under **Other**. Your changes are saved to `/config` and take effect right away.
+**With the dashboard (easiest):** run `/bc-dashboard config budgets`. It walks through each budget in turn, starting from your current value, and suggests figures based on what your past Companion sessions cost, such as "twice a typical session" or "a quarter above the last 30 days". Pick one, keep what you have, or type your own under **Other**. Your changes are saved to `/config` and take effect right away.
 
 **In `/config`:**
 
@@ -259,8 +278,9 @@ Numbers go in without quotes. The period is `"day"`, `"week"` or `"month"`. Leav
 | `block` | It refuses every Companion change outright. |
 
 **What counts as a Companion change:** creating, saving (pushing), deploying, undeploying and test-running a component. bc-integration's other scripts that change things count too: creating a folder, creating or deleting a branch, setting extensions, calling a deployed web service, creating Event Streams topics, subscriptions, tokens or connections, and sending a message to a topic. So do the other plugins' subcommands that change something, which are the same ones the dashboard counts as steps. Two more things are gated:
-- A call straight to the Platform API that changes something: PUT, PATCH, DELETE, or a POST that isn't a query, sent to `api.boomi.com` with curl, wget or HTTPie.
-- A local script that Claude runs (`bash run-all.sh`) that contains any of the above. The dashboard reads the script first.
+- A call straight to the Platform API that changes something: PUT, PATCH, DELETE, or a POST that isn't a query, sent to `api.boomi.com`, a `/api/rest/v1/` path or a `$BOOMI_…` address with curl, wget or HTTPie.
+- A Companion script or subcommand the dashboard doesn't know yet: until it's listed, it counts as a change.
+- A local script that Claude runs (`bash run-all.sh`) that contains any of the above. The dashboard reads the script first, and one it can't read counts as a change.
 
 **What's never stopped:** reads (list, get, query, status, logs, pull, search, and the Platform API's GETs and `…/query` POSTs); checks and scaffolding on your own machine (a connector's descriptor lint, doctor, init and validate); downloads (a Marketplace bundle's supporting materials); cancelling a BDI run, since that only stops spending; and the dashboard's own tools, including **Why?** and **Run again** when you press them in the pane. A change that's already running when the budget runs out always gets to finish.
 
@@ -275,11 +295,11 @@ Numbers go in without quotes. The period is `"day"`, `"week"` or `"month"`. Leav
 
 **Limits:** the gate only reads the commands Claude runs through the Bash tool. It can't see changes made any other way, such as a script that builds its command at run time, a program in another language, or work you do yourself in a terminal. The refusal message tells Claude not to try.
 
-**To set it up,** run `/bc-dashboard config budget` and answer the **When a budget is spent** and **Grace past a budget** questions, or set `budgetEnforce` and `budgetGrace` in `/config`.
+**To set it up,** run `/bc-dashboard config limits` and answer the **When a budget is spent** and **Grace past a budget** questions, or set `budgetEnforce` and `budgetGrace` in `/config`.
 
 ## Prompt tips
 
-In a Companion folder, the dashboard checks each prompt you type for things Boomi work needs that the prompt leaves out, and suggests a better version. The checks are plain rules with no model call, so they're free. The upgrade starts out the same way, from rules. Then a model (`promptModel`, haiku by default) rewrites it in the background, which costs a few cents at most per prompt. `promptRewrite manual` turns that part off.
+In a Companion folder, the dashboard checks each prompt you type for things Boomi work needs that the prompt leaves out, and suggests a better version. The checks are plain rules with no model call, so they're free. The upgrade starts out the same way, from rules. You can then ask a model (`promptModel`, haiku by default) to rewrite it, which costs a few cents at most per prompt. `promptRewrite auto` does that in the background for every prompt that gets tips.
 
 | Check | Fires on | The tip names |
 |---|---|---|
@@ -320,7 +340,7 @@ The upgrade only adds what the session actually knows, written as sentences. Any
 
 - **Use the upgrade** puts it in the prompt box, **Copy** copies it, and **Dismiss** closes the tab.
 - A long prompt or upgrade is trimmed to fit the pane so the buttons stay in view, with `▼ 14 more lines` and **Show all**, then **Jump to the buttons** and **Fit to the pane**.
-- **The model's rewrite** shows up on its own a moment after the tips (`promptRewrite auto`, the default). While it's working, the upgrade card says `HAIKU IS WRITING A BETTER ONE…` with a spinner, and the pane's prompt-tips row says `upgrading it…`. The quick version stays put until the new one lands. It arrives as the next try, with a **Why it changed** note underneath: up to three lines on what it added or asked, and why that matters for Boomi work. **Upgrade with a model**, and after that **Regenerate**, asks for another. With `promptRewrite manual`, it only runs when you press the button or run `/bc-dashboard prompt upgrade`. You can type a note under the buttons (`shorter`, `ask for a listener`, `split into steps`) and press Enter to regenerate with it in mind. Long notes wrap in the field. Every try is kept, and **◀** and **▶** step through them, each with the note it followed.
+- **The model's rewrite** comes when you press the button or run `/bc-dashboard prompt upgrade`, or on its own a moment after the tips with `promptRewrite auto`. While it's working, the upgrade card says `HAIKU IS WRITING A BETTER ONE…` with a spinner, and the pane's prompt-tips row says `upgrading it…`. The quick version stays put until the new one lands. It arrives as the next try, with a **Why it changed** note underneath: up to three lines on what it added or asked, and why that matters for Boomi work. **Upgrade with a model**, and after that **Regenerate**, asks for another. You can type a note under the buttons (`shorter`, `ask for a listener`, `split into steps`) and press Enter to regenerate with it in mind. Long notes wrap in the field. Every try is kept, and **◀** and **▶** step through them, each with the note it followed.
 
 **What a rewrite reads,** besides your masked prompt and the session's facts:
 - **Components in this folder** whose names share words with the prompt (up to 8, from the component XML under `componentsDir`). That way "the Salesforce connection" can name the one you actually have. It only uses a name where the prompt clearly means it.
@@ -342,15 +362,15 @@ The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Promp
 
 | `promptCheck` | A prompt with tips |
 |---|---|
-| `confirm` (default) | **Holds it,** so Claude doesn't see it yet. The Prompt tab and the banner say `⏸ Held`, with **Send the upgrade**, **Send as typed**, **Edit in the prompt box** and **Discard**, and the status line says `⏸ prompt held`. A new prompt replaces a held one. Where the tab can't show (the web, a narrow window), you get a question instead, and closing it sends the prompt as typed. |
-| `suggest` | Goes to Claude as typed. The tips show afterwards, with the nudge above the prompt box. |
+| `confirm` | **Holds it,** so Claude doesn't see it yet. The Prompt tab and the banner say `⏸ Held`, with **Send the upgrade**, **Send as typed**, **Edit in the prompt box** and **Discard**, and the status line says `⏸ prompt held`. A new prompt replaces a held one. Where the tab can't show (the web, a narrow window), you get a question instead, and closing it sends the prompt as typed. |
+| `suggest` (default) | Goes to Claude as typed. The tips show afterwards, with the nudge above the prompt box. |
 | `off` | Nothing is checked. |
 
 **A secret always gets a question, even in `suggest`,** because once it's sent, it stays in the transcript. You can **Send it with the secret masked**, **Edit it first** or **Send it as typed**. Closing the question sends it masked.
 
-**What's left alone:** slash commands, prompts you type while Claude is working, messages from other sessions and background tasks, short replies ("yes", "keep going"), prompts without any Boomi words in them, and anything outside a Companion folder. Start a prompt with `>` to send it unchecked (the `>` gets removed).
+**What's left alone:** slash commands, prompts you type while Claude is working, messages from other sessions and background tasks, short replies ("yes", "keep going"), prompts without any Boomi words in them, and anything outside a Companion folder. Start a prompt with `>` to send it without tips (the `>` gets removed). A secret in it still asks first.
 
-**Closing out.** Ending the session is never held, tipped or rewritten. `/exit`, `/quit`, `/clear` and `/handoff` go straight through, and they let go of a prompt the dashboard was holding. So does a wrap-up in your own words, such as "write a handoff for the Orders Sync process" or "wrap it up", even though it names a process. A secret in one still asks first.
+**Closing out.** Ending the session is never held, tipped or rewritten. `/exit`, `/quit`, `/clear` and `/handoff` go straight through (with `handoffNudge` on, the first `/exit`, `/quit` or `/clear` after Companion did something suggests `/handoff` instead), and they let go of a prompt the dashboard was holding. So does a wrap-up in your own words, such as "write a handoff for the Orders Sync process" or "wrap it up", even though it names a process. A secret in one still asks first.
 
 **Suggestions you take.** Sometimes the prompt box shows a dim suggestion, either Claude's own guess after a turn or the dashboard's next step. If you take it with Tab and send it as it is, it isn't your wording, so it isn't checked: no tips, no hold, no rewrite and no model call. If you edit a suggestion, it's checked like any other prompt, and a secret in one still gets a question. Each suggestion only counts once. The count shows in `/bc-dashboard prompt` and the session report (`2 of Claude's suggestions taken as they were`). `promptSuggested check` treats them like any other prompt. Claude Code doesn't say where a prompt came from, so the dashboard recognizes a taken suggestion by matching the words.
 
@@ -366,9 +386,9 @@ The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Promp
 
 Credentials come from Companion's `.env`, or failing that, from environment variables: `BOOMI_API_URL`, `BOOMI_USERNAME`, `BOOMI_API_TOKEN`, `BOOMI_ACCOUNT_ID`. The token only ever goes into a request's `Authorization` header. The dashboard never stores, shows or logs it, and its error messages only include the HTTP status. Without credentials, everything else still works.
 
-**The production check** (`envCheck`, off by default) is the one other read of the `.env`'s environment: at the start of a session it asks Boomi for the environment list, and keeps only the environment's name, ID and classification. With `enforce`, a Companion deploy, undeploy or test run to an environment that isn't TEST or DEV is refused before it runs, and so is one to an environment the list doesn't show. A command that runs a `.sh` or `.bash` script of its own (a deploy wrapper or a local helper, not Companion's) is refused too, since the check can't see what that script does. Run Companion's scripts directly, or turn the check off for that work. The refusal says why and tells Claude to stop and tell you. A push is never refused by this check.
+**The production check** (`envCheck`, off by default) is the one other read of the `.env`'s environment: at the start of a session it asks Boomi for the environment list, and keeps only the environment's name, ID and classification. With `enforce`, a change that reaches an environment that isn't TEST or DEV is refused before it runs, and so is one to an environment the list doesn't show: a deploy, undeploy or test run, the other plugins' changes (Data Hub, BDI, Agentstudio and the rest), extensions set, web service calls, Event Streams changes, **Run again**, and any Companion script the dashboard doesn't know yet. A command that moves to another folder first is checked against the `.env` there, since that's the one Companion reads. A command that runs a script of its own (a deploy wrapper or a local helper, not Companion's) is refused too, however it's started, since the check can't see what that script does. Run Companion's scripts directly, or turn the check off for that work. The refusal says why and tells Claude to stop and tell you. A push is never refused by this check, nor is a change to the account's components rather than the environment: folders, and creating or merging branches.
 
-**This is a best-effort guard, not a sandbox.** It doesn't see a script in another language (Python, Node, Perl), an executable without an extension, `bash -c` or `eval`, a `.env` named through quotes, globs or variables, or a write made by a tool the check doesn't recognize. Any of those can run a Boomi change that the check never sees. Keep the production check as one layer. The control that holds regardless of the shell is a Boomi-side role for the AI user with no deploy rights in production, which is still to be built.
+**This is a best-effort guard, not a sandbox.** It doesn't see a script in another language started by its interpreter (`python3 x.py`), a program on your `PATH`, a `cd` made in an earlier command, a `.env` named through quotes, globs or variables, a Platform API URL held in a variable set outside the command, a test run's runtime (`BOOMI_TEST_ATOM_ID`), or a write made by a tool the check doesn't recognize. Any of those can run a Boomi change that the check never sees. Keep the production check as one layer. The control that holds regardless of the shell is a Boomi-side role for the AI user with no deploy rights in production, such as `CR-Boomi-Companion-Prod-ReadOnly`.
 
 Up to 0.10.0 the dashboard also checked the environment's process runs. That's been set aside for now and will be back; see [IDEAS](../IDEAS.md#dashboard-follow-ups).
 
@@ -427,7 +447,7 @@ Boomi Companion sessions on this machine, last 90 days:
 
 The page follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system. It uses Exosphere's Exo III color tokens in light and dark (switch with the moon or sun button at the top, or let it follow your system), Poppins headings, Noto Sans text, and Exosphere's cards, badges and alerts. Every status shows its icon and its label, never color alone.
 
-**Another style:** set `reportStyle` to `expressive` (in `/config` or `/bc-dashboard config look`), or add `--style expressive` for a single report. That report uses this repository's own Valence theme, Miami Deco: Sand by day and Midnight Navy by night, Poiret One for the title, Josefin Sans headings, Deco Gold rules, and Flamingo marking the sessions. Status keeps Valence's fixed colors, with its icon and label. Stick with `exosphere`, the default, for anything Boomi people will read.
+**Another style:** set `reportStyle` to `expressive` (in `/config` or `/bc-dashboard config checks`), or add `--style expressive` for a single report. That report uses this repository's own Valence theme, Miami Deco: Sand by day and Midnight Navy by night, Poiret One for the title, Josefin Sans headings, Deco Gold rules, and Flamingo marking the sessions. Status keeps Valence's fixed colors, with its icon and label. Stick with `exosphere`, the default, for anything Boomi people will read.
 
 - **Charts** only appear when they add something: outcomes and spend by product when the work spans two or more products, cost over the session in a one-session report, and, in an all-sessions report with at least two sessions, each session's cost and how its steps went (click a session to open its steps). Each chart has hover details and a **Show the data** table, and each product keeps the same color in every chart.
 - **Tables** of custom connectors and Agentstudio agents can be sorted by clicking a column.
@@ -439,7 +459,7 @@ The page follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system
 
 Each row has the component's name, type, folder, ID and version in Boomi, its last deploy (how it went, when, and the package ID), its last test (how it went, when, and the execution ID), its cost, and its link in Boomi. In Claude Code, `/bc-dashboard components` copies the same table, `components csv` copies it as CSV, and `components save` also writes a `.csv` file into the workspace. If a name would be read as a formula by a spreadsheet, it's pasted as plain text.
 
-**Platform changes** lists every change the session made in Boomi, oldest first, so you have an audit trail for a change ticket. That covers creates, saves, deploys, undeploys and tests; folders, branches and extensions created, deleted or set; Event Streams topics, subscriptions, tokens and messages; web service calls; and the other plugins' changes. Edits, pulls, reads (`branch list`, `extensions get`) and local checks are left out. Each row shows when the change ran, what it did, how it went, and the ID it left behind (a version, package, execution or run). If a budget override let it through, the row says which one: allowed once or for the session, and which budget was spent. A change the budget gate refused shows as `⚠ blocked by budget, not run`. The same buttons copy or save it, as `boomi-changes-<date>.csv`, and the Markdown report includes it as a table.
+**Platform changes** lists every change the session made in Boomi, oldest first, so you have an audit trail for a change ticket. That covers creates, saves, deploys, undeploys and tests; folders and branches created, renamed, deleted or merged; extensions set; Event Streams topics, subscriptions, tokens and messages; web service calls; and the other plugins' changes. Edits, pulls, reads (`branch list`, `extensions get`) and local checks are left out. Each row shows when the change ran, what it did, how it went, and the ID it left behind (a version, package, execution or run). If a budget override let it through, the row says which one: allowed once or for the session, and which budget was spent. A change the budget gate refused shows as `⚠ blocked by budget, not run`. The same buttons copy or save it, as `boomi-changes-<date>.csv`, and the Markdown report includes it as a table.
 
 **To print it or keep it as a PDF,** press **Print or save as PDF** at the top of the page, or use your browser's Print and choose **Save as PDF**. The printout:
 - always uses the light theme, whatever's on screen;
@@ -473,7 +493,7 @@ When you're online, the page loads its fonts from Google Fonts. Offline, it fall
 | `/bc-dashboard review [n]` | | What drove a past session's cost, and what to change next time. Without a number, it asks which of the most expensive ones. |
 | `/bc-dashboard theme [name]` | | Picks the pane's theme, or lists them. |
 | `/bc-dashboard components [csv] [save]` | | Copies every component with its IDs, tab-separated for a spreadsheet (`csv` copies it as CSV, and `save` also writes a `.csv` file). |
-| `/bc-dashboard config [budget\|companion\|look\|prompts]` | | Goes through the dashboard's settings one question at a time, or just one group of them (type `done` under Other to save and finish). `config <setting> <value>` sets one, such as `config budgetUsd 5`, and `config list` shows them all. |
+| `/bc-dashboard config [area\|section]` | | Goes through the dashboard's settings a few questions at a time: pick an area (`budget`, `pane`, `data`), then a section of at most five questions, or name a section to go straight there (`budgets`, `limits`, `tokens`, `look`, `nudges`, `prompts`, `history`, `checks`, `files`). `config <setting> <value>` sets one, such as `config budgetUsd 5`, and `config list` shows them all. |
 | `/bc-dashboard prompt [use\|upgrade\|guide [refresh]]` | | Your last Boomi prompt's [tips](#prompt-tips) and an upgraded version. `use` puts it in the prompt box, `upgrade` has a model rewrite it, `guide` compares the dashboard's guide with your installed Companion plugins, and `guide refresh` drafts edits. |
 | `/bc-dashboard banner` | | Brings the banner back after **Hide**. |
 
@@ -495,7 +515,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to 
 | `logo` | `true` | The mark in the pane and the banner. In the Exosphere themes it's the Boomi logo, drawn as a picture in terminals that can (kitty, Ghostty). In the Whimsical themes it's the 8-bit flamingo, standing on one leg in a thin line of seafoam water. Every 15 seconds or so it glances back over its shoulder or blinks. Now and then it switches legs or turns around, and once in a while a neighbour pops in to say hello. Turning this off hides the mark in either theme. It replaces `flamingo`, `bandIcon` and the banner's diamond. |
 | `bandAnimation` | `true` | The banner's flamingo turns into a sparkle for one second in every five. Whimsical themes only. |
 | `recentHours` | `24` | How far back earlier sessions' steps and Companion's activity log count. |
-| `envCheck` | `off` | The production check. `off` reads nothing. `check` reads the environment Companion's `.env` points at, by name and classification, at the start of each session, and shows it. `enforce` also refuses Companion deploys, undeploys and test runs to that environment unless it is classified TEST or DEV, so production stays read-only for Companion. Pushes are not refused. Either level also reads the roles linked to the `.env`'s login from Boomi, and the pane says whether it holds only the Companion roles (an account admin role is critical). The token is never shown. |
+| `envCheck` | `off` | The production check. `off` reads nothing. `check` reads the environment Companion's `.env` points at, by name and classification, at the start of each session, and shows it. `enforce` also refuses Companion's changes to that environment unless it is classified TEST or DEV, so production stays read-only for Companion. Pushes are not refused. Either level also reads the roles linked to the `.env`'s login from Boomi, and the pane says whether it holds only the Companion roles (an account admin role is critical). The token is never shown. |
 | `personalLogin` | empty | Your own Boomi login, if you have one. The pane flags Companion when its `.env` signs in with it, and when the `.env` login otherwise looks like a person's (first.last@domain). The pane and the status line also flag a `.env` login that matches the email of the Claude account you're signed into. That email comes from the engine's session identity where it has one, else from the `emailAddress` in Claude Code's login record (`~/.claude.json`), which you can edit, so it's a claim and not verified. Companion should have a dedicated login. It's a nudge only: nothing is refused for it. |
 | `envFile` | `.env` | Companion's `.env`, relative to the working directory. |
 | `componentsDir` | `active-development` | Where Companion keeps component XML. |
@@ -504,7 +524,9 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to 
 | `activityLogPrompt` | `ask` | Whether to offer, at the start of a session in a Companion folder, to add `BOOMI_COMPANION_LOG_ACTIVITY=1` to its `.env`. `ask` offers until you say yes or never; `never` stops the offer. |
 | `toasts` | `true` | Toasts for failures, finished deploys and tests, and watched changes. |
 | `banner` | `true` | The banner above the prompt, plus a new session's recap and tips. |
-| `handoffNudge` | `true` | The first `/exit`, `/quit` or `/clear` of a session that did work suggests `/handoff` first; typing the command again goes through. |
+| `tokenGuard` | `offer` | `suggest` [warns when the context fills and turns back a large whole-file read once](#token-guard). `offer` does neither, and mentions the guard as a session starts and now and then. `off` stays silent. |
+| `largeReadKb` | `40` | With `tokenGuard` on `suggest`, a file over this size, read whole in one go, is turned back once. `0` never turns a read back. |
+| `contextWarnPercent` | `50` | With `tokenGuard` on `suggest`, how full the context gets before the warning and the `/compact` offer. `0` never warns. |
 | `budgetUsd` | `0` | The session's spend budget, in US dollars. `0` turns it off. |
 | `companionShare` | `0` | Companion's share of your weekly usage limit, as a percent. `0` turns it off. |
 | `companionSharePeriod` | `week` | What the share covers: `day`, `week` or `month`. |
@@ -518,11 +540,12 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to 
 | `reportOpen` | `true` | Open the page from `/bc-dashboard report html` in your browser once it's saved. |
 | `reportStyle` | `exosphere` | How the HTML report looks: `exosphere` (Boomi's design system) or `expressive` (Valence, Miami Deco). `--style` picks one for a single report. |
 | `suggestions` | `true` | Suggest the next step after a turn. |
+| `handoffNudge` | `false` | The first `/exit`, `/quit` or `/clear` of a session where Companion did something suggests `/handoff` instead; typing it again goes through. |
 | `historyDays` | `90` | How far back **Past Companion sessions** looks. |
-| `promptCheck` | `confirm` | [Prompt tips](#prompt-tips). `confirm` holds a flagged prompt until you send it or the upgrade, `suggest` shows tips and sends the prompt anyway, and `off` never checks. A secret in a prompt still gets a question unless this is `off`. |
+| `promptCheck` | `suggest` | [Prompt tips](#prompt-tips). `suggest` shows tips and sends the prompt anyway, `confirm` holds a flagged prompt until you send it or the upgrade, and `off` never checks. A secret in a prompt still gets a question unless this is `off`. |
 | `promptView` | `auto` | When the [Prompt tab](#prompt-tips) opens: `auto` when a prompt gets tips, `manual` only when you ask, `off` never. |
 | `promptSuggested` | `skip` | What to do with a [suggestion](#prompt-tips) from the prompt box that you take with Tab and send unchanged: `skip` leaves it unchecked, and `check` treats it like any other prompt. |
-| `promptRewrite` | `auto` | Whether the model rewrites a prompt with tips on its own in the background (`auto`), or only when you ask (`manual`). |
+| `promptRewrite` | `manual` | Whether the model rewrites a prompt with tips on its own in the background (`auto`), or only when you ask (`manual`). |
 | `promptModel` | `haiku` | The model that rewrites prompts, whether on its own or when you ask. |
 | `promptSkip` | (none) | Prompt checks to leave out, separated by commas. |
 

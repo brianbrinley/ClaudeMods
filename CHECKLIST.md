@@ -448,19 +448,71 @@ When an item passes, tick it here. When every item in a section passes, the sect
 - [ ] **U6. Restore.** Put the original `.env` back, remove any test role from the login in Boomi, and set `envCheck` to `off`.
   **Pass:** the `.env` matches its original contents, the login holds only its original roles, and the next session shows no login warning. **Fail:** anything differs.
 
-## V. Boomi Companion updates (boomi-dashboard 0.64.0)
+## V. Token tips and token guard (boomi-dashboard 0.64.0)
 
-*In a real Claude Code session in a Companion folder, with the Companion plugins installed from the `boomi-companion` marketplace. The check reads each plugin's tags on its GitHub repository, so V2 and V3 need a newer Companion release than the installed one. Until one exists, mark them as waiting rather than failing.*
+- [ ] **V1. The tips show.** Start a new session in a Companion workspace and leave it idle until the banner has turned through its tips (one every 20 seconds).
+  **Pass:** the six tips on `/clear`, `CLAUDE.md`, `/compact`, line ranges, `/context` and the token guard each appear, readable in the banner. **Fail:** one never appears, or is cut off so it can't be understood.
+- [ ] **V2. Out of the box, nothing is stopped.** With `tokenGuard` left alone, start a new session in a Companion workspace, then ask Claude to read all of a text file over 40 KB.
+  **Pass:** a few seconds in, one toast names `/bc-dashboard config tokenGuard suggest`; the file is read first time, with no second toast about the guard. **Fail:** the read is refused, no toast shows at the start, or a second shows straight after the read.
+- [ ] **V3. Not too pushy.** In that session, after 30 minutes, read another large file; after 30 more, read a third; after 30 more, read a fourth.
+  **Pass:** a toast for each of the first two reads, none for the fourth, and each is readable. No warning and no `/compact` offer at any point. **Fail:** more than three toasts about the guard in the session, or two inside 30 minutes.
+- [ ] **V4. Turn it on.** Run `/bc-dashboard config tokenGuard suggest`, start a new session and ask Claude to read all of a text file over 40 KB.
+  **Pass:** a toast says Claude was asked to read part of the file, and Claude searches or reads a range instead. **Fail:** the whole file is read first time, or no toast shows.
+- [ ] **V5. The same read goes through.** Ask Claude to read that whole file anyway.
+  **Pass:** the read goes ahead without a second refusal. **Fail:** it is refused again.
+- [ ] **V6. Small and ranged reads are left alone.** Ask Claude to read a small file, then lines 1 to 20 of a large one in a new session.
+  **Pass:** both go ahead with no toast. **Fail:** either is refused.
+- [ ] **V7. The context warning.** Set `contextWarnPercent` just above the session's current CONTEXT figure, then work until it passes.
+  **Pass:** one toast, the pane's CONTEXT gauge says `◐ /compact or /clear soon`, and the prompt box offers `/compact`. **Fail:** any of those is missing, or the toast repeats every turn.
+- [ ] **V8. Tab takes the offer.** Press Tab on the `/compact` offer and send it.
+  **Pass:** the session compacts, keeping the goal, and the gauge's warning goes away. **Fail:** the text goes to Claude as a prompt, or the warning stays.
+- [ ] **V9. `claude-local`.** Run V7 in `claude-local` with `contextWarnPercent` at 50, and note the CONTEXT figure when it compacts on its own.
+  **Pass:** the warning comes before the compaction. **Fail:** the session compacts with no warning first.
+- [ ] **V10. Off stays silent.** Set `tokenGuard` to `off`, start a new session and repeat V2.
+  **Pass:** the file is read whole, with no toast about the guard. **Fail:** a toast shows, or the read is refused.
+- [ ] **V11. The menu in smaller steps.** Run `/bc-dashboard config`, pick **Budget**, then **Tokens**, keep each answer, then back out to the first menu and pick **Done**.
+  **Pass:** three areas, then three sections each, three questions in Tokens, and each way back lands on the menu above. **Fail:** more than five questions in a row, or a way back lands somewhere else.
+- [ ] **V12. Straight to a section.** Run `/bc-dashboard config tokens`, then `/bc-dashboard config budget`.
+  **Pass:** the first opens the Tokens questions, the second the Budget sections with **Done** as the way out. **Fail:** either starts somewhere else.
 
-- [ ] **V1. Up to date.** Run `/bc-dashboard upgrade companion --check`.
+## W. Safer gates and fewer interruptions (boomi-dashboard 0.65.0)
+
+Use a test `.env` pointed at a TEST environment, and a second folder whose `.env` points at PROD, with `envCheck` on `enforce`. Nothing here should change production: the point is that it's refused.
+
+- [ ] **W1. Other plugins' changes.** Ask Claude to run `boomi-extensions.sh set` or a Data Hub deploy with the `.env` on PROD.
+  **Pass:** refused before it runs, naming the environment. **Fail:** it runs.
+- [ ] **W2. Another folder's `.env`.** From the TEST folder, ask Claude to run `cd <prod folder> && bash <scripts>/boomi-deploy.sh <file>`.
+  **Pass:** refused, naming the production environment. **Fail:** it runs, or the refusal names the test one.
+- [ ] **W3. A `cd` in an earlier command.** Ask Claude to `cd <prod folder>` as one command, then deploy as the next.
+  **Pass:** note which `.env` the check read, and whether it's refused. README lists this as not seen, so a refusal means the README can be corrected. **Fail:** nothing to fail; record the result.
+- [ ] **W4. A wrapper.** Ask Claude to run `time ./deploy-all.sh` with any script of that name.
+  **Pass:** refused as a script the check can't see into. **Fail:** it runs.
+- [ ] **W5. Real role shape.** With `envCheck` on `check` and a login holding an account admin role, start a session.
+  **Pass:** the pane shows it as critical, naming the role. **Fail:** anything else: Boomi's privileges come back in a shape the check doesn't read.
+- [ ] **W6. Tips, not holds.** Start a session with the defaults and type "deploy it".
+  **Pass:** Claude gets the prompt, the tips show, and no Haiku call appears. **Fail:** it's held, or a rewrite starts by itself.
+- [ ] **W7. The way out.** With the defaults, do some Companion work and type `/clear`.
+  **Pass:** it clears the first time. **Fail:** a `/handoff` suggestion appears.
+- [ ] **W8. A secret after `>`.** Type `> deploy it, password=abc12345`.
+  **Pass:** the secret question appears, and the prompt sent has no `>`. **Fail:** it's sent with no question.
+- [ ] **W9. Quiet.** Run `/bc-dashboard config quiet`, start a new session and do some Companion work, then run `/bc-dashboard config quiet off`.
+  **Pass:** no toasts or offers, then the settings are back. **Fail:** something still pops up, other than a secret question.
+- [ ] **W10. First look.** In a new folder with no earlier sessions, open the pane.
+  **Pass:** it says `Nothing to report yet`. **Fail:** it says `All clear`.
+
+## X. Boomi Companion updates (boomi-dashboard 0.66.0)
+
+*In a real Claude Code session in a Companion folder, with the Companion plugins installed from the `boomi-companion` marketplace. The check reads each plugin's tags on its GitHub repository, so X2 and X3 need a newer Companion release than the installed one. Until one exists, mark them as waiting rather than failing.*
+
+- [ ] **X1. Up to date.** Run `/bc-dashboard upgrade companion --check`.
   **Pass:** the output says the Companion plugins are up to date and names each one. **Fail:** it says something is behind when the tags say it isn't, or shows an error for a plugin that is reachable.
-- [ ] **V2. A newer version is toasted once.** When a newer Companion tag exists, start a new session (after the daily check is due, or with `updateCheckHours` set to 0 then back to 24).
+- [ ] **X2. A newer version is toasted once.** When a newer Companion tag exists, start a new session (after the daily check is due, or with `updateCheckHours` set to 0 then back to 24).
   **Pass:** one toast names the plugin and the new version, and says to run `/bc-dashboard upgrade companion`; a later session toasts nothing for the same version. **Fail:** no toast, or a toast on every session.
-- [ ] **V3. Declining changes nothing.** Run `/bc-dashboard upgrade companion`, then pick **Cancel**.
+- [ ] **X3. Declining changes nothing.** Run `/bc-dashboard upgrade companion`, then pick **Cancel**.
   **Pass:** the output says "Not updated", and `claude plugin list` shows the installed version unchanged. **Fail:** the version changes.
-- [ ] **V4. Accepting installs and asks for a restart.** Run `/bc-dashboard upgrade companion` and pick **Update**.
+- [ ] **X4. Accepting installs and asks for a restart.** Run `/bc-dashboard upgrade companion` and pick **Update**.
   **Pass:** the output says the plugin is installed over its old version and to restart Claude Code; after the restart, `claude plugin list` shows the new version. **Fail:** the version doesn't change, or no restart note appears.
-- [ ] **V5. A changed install command is not accepted for you.** If Claude Code asks to confirm a marketplace-declared install command during the update, the dashboard's run must not accept it.
+- [ ] **X5. A changed install command is not accepted for you.** If Claude Code asks to confirm a marketplace-declared install command during the update, the dashboard's run must not accept it.
   **Pass:** the output shows Claude Code's refusal as "wasn't updated", with the reason, and the installed version is unchanged. **Fail:** the update goes through without the confirmation being shown to you.
-- [ ] **V6. Offline.** Turn off the network and run `/bc-dashboard upgrade companion --check`.
+- [ ] **X6. Offline.** Turn off the network and run `/bc-dashboard upgrade companion --check`.
   **Pass:** the output says it couldn't read the version of each plugin, and nothing else changes. **Fail:** the session hangs or shows a false "up to date".

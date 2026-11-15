@@ -3,7 +3,8 @@
 // functions: nothing here touches the engine.
 
 import { scriptRuns } from './activity'
-import { platformWrites, wrapperScripts } from './budget-gate'
+import type { ScriptRun } from './activity'
+import { isAccountWide, platformWrites, runChange, wrapperRuns } from './budget-gate'
 
 /** What the production check does: off reads nothing, check reports, enforce also refuses. */
 export type EnvCheck = 'off' | 'check' | 'enforce'
@@ -11,7 +12,7 @@ export type EnvCheck = 'off' | 'check' | 'enforce'
 /** The environment the .env points at, as Boomi lists it. */
 export type Environment = { id: string; name: string; classification?: string }
 
-/** Companion steps that change the environment in .env: a deploy, an undeploy, a test run. */
+/** How the steps people know best read in a refusal. Every other change is worded by the budget gate's list. */
 const CHANGES_ENVIRONMENT: Record<string, string> = {
   deploy: 'deploy',
   undeploy: 'undeploy',
@@ -35,32 +36,24 @@ export const environmentsFrom = (rows: readonly Record<string, unknown>[]): Envi
 export const environmentNamed = (list: readonly Environment[], id: string | undefined): Environment | undefined =>
   id ? list.find(env => env.id === id) : undefined
 
-/** The scripts a command runs that aren't Companion's own, each with the folder it runs from (the last `cd` before it). */
-export const wrapperRuns = (command: string): { path: string; dir: string }[] => {
-  const out: { path: string; dir: string }[] = []
-  let dir = ''
-  for (const segment of command.split(/&&|\|\||[;|&\n]/).map(s => s.trim())) {
-    const cd = /^(?:cd|pushd)\s+("[^"]*"|'[^']*'|\S+)$/.exec(segment)
-    if (cd) {
-      const target = cd[1]!.replace(/^["']|["']$/g, '')
-      dir = target.startsWith('/') || !dir ? target : `${dir}/${target}`
-      continue
-    }
-    for (const path of wrapperScripts(segment)) out.push({ path, dir })
-  }
-  return out
-}
+export { wrapperRuns }
 
-/** The steps a shell command would take in the .env's environment, in words: deploy, undeploy, run a test. Empty when it takes none. */
+/** The steps of a command that reach the .env's environment: all Companion's changes but creates and saves, and those to the account's components. */
+const environmentRuns = (command: string): ScriptRun[] =>
+  scriptRuns(command).filter(run => run.kind !== 'create' && run.kind !== 'push' && !isAccountWide(run.script, run.verb) && runChange(run) !== undefined)
+
+/** The steps a shell command would take in the .env's environment, in words. Empty when it takes none. */
 export const environmentChanges = (command: string): string[] =>
-  scriptRuns(command)
-    .filter(run => run.kind in CHANGES_ENVIRONMENT)
-    .map(run => CHANGES_ENVIRONMENT[run.kind]!)
+  environmentRuns(command).map(run => CHANGES_ENVIRONMENT[run.kind] ?? runChange(run)!)
+
+/** The folders those steps run from, each once; empty text for where the command starts. Companion reads the .env in the folder it runs from, so that's the environment they change. */
+export const changeFolders = (command: string): string[] => [...new Set(environmentRuns(command).map(run => run.dir ?? ''))]
 
 /**
- * Every change a command would make in the .env's environment: Companion
- * deploys, undeploys and test runs, and any Platform API write made with
- * curl or a similar tool, since its target is unknown.
+ * Every change a command would make in the .env's environment: Companion's
+ * deploys, undeploys, test runs and other steps that reach it, and any
+ * Platform API write made with curl or a similar tool, since its target is
+ * unknown.
  */
 export const environmentChangesIn = (command: string): string[] => [...environmentChanges(command), ...platformWrites(command)]
 

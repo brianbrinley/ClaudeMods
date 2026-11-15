@@ -31,7 +31,10 @@ export const tagVersions = (output: string): string[] =>
 export const latestTag = (versions: readonly string[]): string | undefined =>
   versions.reduce<string | undefined>((best, v) => (best === undefined || compareVersions(v, best) > 0 ? v : best), undefined)
 
-/** The GitHub repository a Companion plugin is published from, from the marketplace's catalog (marketplace.json). */
+/** A GitHub repository over https, as the catalog may name it: owner/name, with or without .git. Anything else (a leading dash, file:, ssh:, another host) is refused. */
+const GITHUB_HTTPS = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\.git)?$/
+
+/** The GitHub repository a Companion plugin is published from, from the marketplace's catalog (marketplace.json). Only https GitHub URLs count: the catalog is read from disk and never trusted with another scheme or host. */
 export const repoUrl = (catalog: string | undefined, name: string): string | undefined => {
   const plugins = asObject(parse(catalog))?.plugins
   if (!Array.isArray(plugins)) return undefined
@@ -39,8 +42,8 @@ export const repoUrl = (catalog: string | undefined, name: string): string | und
     const entry = asObject(item)
     const source = asObject(entry?.source)
     if (entry?.name !== name || !source) continue
-    if (typeof source.url === 'string') return source.url
-    if (typeof source.repo === 'string') return `https://github.com/${source.repo}.git`
+    const url = typeof source.url === 'string' ? source.url : typeof source.repo === 'string' ? `https://github.com/${source.repo}.git` : undefined
+    return url && GITHUB_HTTPS.test(url) ? url : undefined
   }
   return undefined
 }

@@ -96,5 +96,5 @@ test("the tips name what's installed and leave out tips for plugins that aren't"
   expect(integration.some(t => t.includes('Data Hub'))).toBe(false)
   for (const tip of datahub.slice(1)) expect(tip.startsWith('Tip: ')).toBe(true)
 
-  expect(welcomeLine(0, undefined, 0, datahub).text).toBe('Companion here: Data Hub 0.2.12')
+  expect(welcomeLine(0, undefined, 0, datahub)?.text).toBe('Companion here: Data Hub 0.2.12')
 })

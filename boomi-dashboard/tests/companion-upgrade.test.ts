@@ -26,6 +26,13 @@ test('a plugin is published from the repository its marketplace entry names', ()
   expect(repoUrl(catalog, 'bc-datahub')).toBe('https://github.com/OfficialBoomi/bc-datahub.git')
   expect(repoUrl(catalog, 'bc-bdi')).toBeUndefined()
   expect(repoUrl(undefined, 'bc-integration')).toBeUndefined()
+  // Only https GitHub URLs: a dash-led or file: value, or another host, is never handed to git.
+  const hostile = (url: string) => JSON.stringify({ plugins: [{ name: 'bc-bdi', source: { source: 'url', url } }] })
+  expect(repoUrl(hostile('--upload-pack=touch /tmp/x'), 'bc-bdi')).toBeUndefined()
+  expect(repoUrl(hostile('file:///etc'), 'bc-bdi')).toBeUndefined()
+  expect(repoUrl(hostile('ext::sh -c evil'), 'bc-bdi')).toBeUndefined()
+  expect(repoUrl(hostile('https://example.com/x.git'), 'bc-bdi')).toBeUndefined()
+  expect(repoUrl(hostile('https://github.com/OfficialBoomi/bc-bdi.git'), 'bc-bdi')).toBe('https://github.com/OfficialBoomi/bc-bdi.git')
   expect(repoUrl('not json', 'bc-integration')).toBeUndefined()
 })
 
