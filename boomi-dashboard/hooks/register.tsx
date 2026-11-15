@@ -140,7 +140,7 @@ import { BOOMI_MARK_PNG, drawsPictures } from './boomi-mark'
 import { PALETTES, THEMES, THEME_NAMES, THEME_LABELS, THEME_OPTIONS, isDarkAppearance, markOf, resolveTheme, themeFromOptions, themeNamed } from './themes'
 import type { DrawnTheme, Family } from './themes'
 import { COMPANION_PLUGINS, hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
-import { COMPANION_MARKETPLACE, asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, MANIFEST_MAX_CHARS, pluginId, repoUrl, withinManifestLimit } from './companion-upgrade'
+import { COMPANION_MARKETPLACE, asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoUrl, utf8Length, withinManifestLimit } from './companion-upgrade'
 import { RESTART, asUpdateSeen, changelogBetween, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
@@ -3185,17 +3185,47 @@ const upgradeCommand = async ($: Engine, target: string): Promise<string> => {
  * (git ls-remote: nothing is cloned or installed). The plugins it couldn't read
  * are listed apart.
  */
-/** The manifest's text from its raw URL: none when the read fails, runs past the deadline, or is too large. */
+/**
+ * The manifest's text from its raw URL, or none when the read fails, runs past
+ * the deadline, or is over the size cap. The body is read as it arrives and
+ * the read stops at the cap; the deadline aborts the request as well.
+ */
 const MANIFEST_TIMEOUT_MS = 30_000
 const readManifest = async ($: Engine, url: string): Promise<string | undefined> => {
-  const deadline = new Promise<undefined>(resolve => $.clock.after(MANIFEST_TIMEOUT_MS, () => resolve(undefined)))
+  // The engine's sandbox may not have these globals; without them the read is simply not aborted, and the cap still applies.
+  const controller = typeof AbortController === 'function' ? new AbortController() : undefined
+  const deadline = new Promise<undefined>(resolve =>
+    $.clock.after(MANIFEST_TIMEOUT_MS, () => {
+      controller?.abort()
+      resolve(undefined)
+    }),
+  )
   const read = (async () => {
-    const res = await $.http.fetch(url, { headers: { Accept: 'application/json' } })
+    const res = await $.http.fetch(url, { headers: { Accept: 'application/json' }, signal: controller?.signal })
     if (!res.ok) return undefined
     const declared = Number(res.headers?.get?.('content-length'))
-    if (Number.isFinite(declared) && declared > MANIFEST_MAX_CHARS) return undefined
-    const text = await res.text()
-    return withinManifestLimit(text) ? text : undefined
+    if (Number.isFinite(declared) && !withinManifestLimit(declared)) return undefined
+    const body = res.body
+    if (!body || typeof body.getReader !== 'function') {
+      const text = await res.text()
+      return withinManifestLimit(utf8Length(text)) ? text : undefined
+    }
+    const reader = body.getReader()
+    if (typeof TextDecoder !== 'function') return undefined
+    const decoder = new TextDecoder()
+    let total = 0
+    let text = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (!withinManifestLimit(total)) {
+        await reader.cancel()
+        return undefined
+      }
+      text += decoder.decode(value, { stream: true })
+    }
+    return text + decoder.decode()
   })().catch(() => undefined)
   return Promise.race([read, deadline])
 }

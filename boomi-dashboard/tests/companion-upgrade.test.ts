@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { MANIFEST_MAX_CHARS, asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoUrl, withinManifestLimit } from '../hooks/companion-upgrade'
+import { MANIFEST_MAX_BYTES, asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoUrl, withinManifestLimit, utf8Length } from '../hooks/companion-upgrade'
 
 const SHA = 'c7240f64daee879ab93a6f989d9ab4d367b87d40'
 
@@ -70,8 +70,15 @@ test('the seen versions read back only the entries that have both fields', () =>
   expect(asCompanionSeen(undefined)).toEqual({})
 })
 
-test('a manifest over the size cap is not read, and one at the cap is', () => {
-  expect(withinManifestLimit('{"version":"1.0.0"}')).toBe(true)
-  expect(withinManifestLimit('x'.repeat(MANIFEST_MAX_CHARS))).toBe(true)
-  expect(withinManifestLimit('x'.repeat(MANIFEST_MAX_CHARS + 1))).toBe(false)
+test('a body over the size cap is not read, and one at the cap is', () => {
+  expect(withinManifestLimit(20)).toBe(true)
+  expect(withinManifestLimit(MANIFEST_MAX_BYTES)).toBe(true)
+  expect(withinManifestLimit(MANIFEST_MAX_BYTES + 1)).toBe(false)
+})
+
+test('the body is counted in UTF-8 bytes', () => {
+  expect(utf8Length('abc')).toBe(3)
+  expect(utf8Length('é')).toBe(2)
+  expect(utf8Length('€')).toBe(3)
+  expect(utf8Length('😀')).toBe(4)
 })
