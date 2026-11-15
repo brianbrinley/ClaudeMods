@@ -2187,21 +2187,20 @@ const configWorld = (on: On, values: Record<string, unknown>, answers: (string |
 test('/bc-dashboard config walks the budget with figures from past sessions, and saves at Done', async ($, on) => {
   // Past sessions cost $3.50 and $1.25: twice the typical one is $2.50, the costliest $3.50.
   const { sets, asked } = configWorld(on, { budgetUsd: 0, companionMonthlyUsd: 0, companionShare: 0 }, [
-    'Budget',
+    'Budgets',
     '$2.50 (twice a typical session)',
     'Keep off',
     '30%',
     'Month',
     'Keep off',
     'Keep warn',
-    'Keep off',
-    'Done',
+    'done',
   ])
   const answer = await $.command.run(dashboard('config'))
-  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget 1/8', 'Budget 2/8', 'Budget 3/8', 'Budget 4/8', 'Budget 5/8', 'Budget 6/8', 'Budget 7/8', 'Settings'])
+  expect(asked.map(q => q.header)).toEqual(['Settings', 'Budget 1/7', 'Budget 2/7', 'Budget 3/7', 'Budget 4/7', 'Budget 5/7', 'Budget 6/7', 'Settings'])
   expect(asked[1]!.options.map(o => o.label)).toEqual(['Keep off', '$2.50 (twice a typical session)', '$3.50 (your costliest session)', 'Back to the menu'])
   expect(asked[1]!.question).toContain('cost $1.25 typically, $3.50 at most')
-  expect(asked[8]!.question).toContain('3 changes so far, saved when you pick Done.')
+  expect(asked[7]!.question).toContain('3 changes so far. Pick a group, or type done to save and finish.')
   expect(sets).toEqual([
     ['boomi-dashboard.budgetUsd', 2.5],
     ['boomi-dashboard.companionShare', 30],
@@ -2217,7 +2216,7 @@ test('/bc-dashboard config skips the share period with no share, goes back to th
   const answer = await $.command.run(dashboard('config budget'))
   expect(asked[0]!.options.map(o => o.label)).toEqual(['Keep $5.00', '$2.50 (twice a typical session)', 'Off', 'Back to the menu'])
   expect(asked[1]!.question).toMatch(/^"lots" didn't work: Session budget takes a number \(0 for off\)\. Session budget:/)
-  expect(asked[2]!.header).toBe('Budget 2/8')
+  expect(asked[2]!.header).toBe('Budget 2/7')
   expect(sets).toEqual([['boomi-dashboard.budgetUsd', 7]])
   expect(answer.text).toBe('Saved to /config:\n  Session budget: $5.00 → $7.00')
 })
@@ -2232,19 +2231,19 @@ test('/bc-dashboard config sets one setting by name, and lists them where it can
   expect((await $.command.run(dashboard('config wibble'))).text).toMatch(/^No setting or group called wibble\./)
   // The dialog dismissed at once, as in a -p run: every setting, and how to change one.
   const listed = (await $.command.run(dashboard('config'))).text
-  expect(listed).toContain('Budget:\n  budgetUsd             off  (default)')
+  expect(listed).toContain('Budgets:\n  budgetUsd             off  (default)')
   expect(listed).toContain('/bc-dashboard config <setting> <value>')
   expect(sets).toHaveLength(1)
 })
 
 test('/bc-dashboard config closed before Done with nothing picked changes nothing', async ($, on) => {
-  const { sets } = configWorld(on, { toasts: true }, ['Pane and banner', 'Keep auto', undefined])
+  const { sets } = configWorld(on, { toasts: true }, ['Look and reports', 'Keep auto', undefined])
   expect((await $.command.run(dashboard('config'))).text).toBe('Nothing changed.')
   expect(sets).toEqual([])
 })
 
 test('/bc-dashboard config keeps what was picked when the menu closes before Done, and the pane takes the colors', async ($, on) => {
-  const { sets } = configWorld(on, { toasts: true }, ['Pane and banner', 'Exosphere-dark', undefined])
+  const { sets } = configWorld(on, { toasts: true }, ['Look and reports', 'Exosphere-dark', undefined])
   const saved = await $.command.run(dashboard('config'))
   expect(sets).toEqual([['boomi-dashboard.paneTheme', 'exosphere-dark']])
   expect(saved.text).toBe('Saved to /config:\n  Theme: auto → exosphere-dark\nThe menu closed before Done; what you picked before it closed is saved.')

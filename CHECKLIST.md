@@ -447,3 +447,20 @@ When an item passes, tick it here. When every item in a section passes, the sect
   *This is the deliberate fail-open case (see the 0.63.0 CHANGELOG entry). Record here whether the warning was seen; it is the place to confirm the pass-through is visible before it is tightened.*
 - [ ] **U6. Restore.** Put the original `.env` back, remove any test role from the login in Boomi, and set `envCheck` to `off`.
   **Pass:** the `.env` matches its original contents, the login holds only its original roles, and the next session shows no login warning. **Fail:** anything differs.
+
+## V. Boomi Companion updates (boomi-dashboard 0.64.0)
+
+*In a real Claude Code session in a Companion folder, with the Companion plugins installed from the `boomi-companion` marketplace. The check reads each plugin's tags on its GitHub repository, so V2 and V3 need a newer Companion release than the installed one. Until one exists, mark them as waiting rather than failing.*
+
+- [ ] **V1. Up to date.** Run `/bc-dashboard upgrade companion --check`.
+  **Pass:** the output says the Companion plugins are up to date and names each one. **Fail:** it says something is behind when the tags say it isn't, or shows an error for a plugin that is reachable.
+- [ ] **V2. A newer version is toasted once.** When a newer Companion tag exists, start a new session (after the daily check is due, or with `updateCheckHours` set to 0 then back to 24).
+  **Pass:** one toast names the plugin and the new version, and says to run `/bc-dashboard upgrade companion`; a later session toasts nothing for the same version. **Fail:** no toast, or a toast on every session.
+- [ ] **V3. Declining changes nothing.** Run `/bc-dashboard upgrade companion`, then pick **Cancel**.
+  **Pass:** the output says "Not updated", and `claude plugin list` shows the installed version unchanged. **Fail:** the version changes.
+- [ ] **V4. Accepting installs and asks for a restart.** Run `/bc-dashboard upgrade companion` and pick **Update**.
+  **Pass:** the output says the plugin is installed over its old version and to restart Claude Code; after the restart, `claude plugin list` shows the new version. **Fail:** the version doesn't change, or no restart note appears.
+- [ ] **V5. A changed install command is not accepted for you.** If Claude Code asks to confirm a marketplace-declared install command during the update, the dashboard's run must not accept it.
+  **Pass:** the output shows Claude Code's refusal as "wasn't updated", with the reason, and the installed version is unchanged. **Fail:** the update goes through without the confirmation being shown to you.
+- [ ] **V6. Offline.** Turn off the network and run `/bc-dashboard upgrade companion --check`.
+  **Pass:** the output says it couldn't read the version of each plugin, and nothing else changes. **Fail:** the session hangs or shows a false "up to date".

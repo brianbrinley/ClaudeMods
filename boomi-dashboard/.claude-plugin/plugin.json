@@ -1,6 +1,6 @@
 {
   "name": "boomi-dashboard",
-  "version": "0.63.0",
+  "version": "0.64.0",
   "description": "Boomi Companion at a glance while you build, across all its plugins: what Claude did, what needs attention, watched components and the session's cost",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -209,7 +209,7 @@
     "updateCheck": {
       "type": "boolean",
       "title": "Check for updates",
-      "description": "Once per interval, at the start of a session, fetch the dashboard's GitHub checkout and say when a newer version is there (run /bc-dashboard upgrade to install it). It never installs, and says nothing when offline",
+      "description": "Once per interval, at the start of a session, fetch the dashboard's GitHub checkout and say when a newer dashboard or a newer Boomi Companion plugin is there (run /bc-dashboard upgrade, or /bc-dashboard upgrade companion, to install it). It never installs, and says nothing when offline",
       "default": true
     },
     "updateCheckHours": {

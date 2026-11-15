@@ -15,7 +15,7 @@ const MANIFEST_KEYS = ['activityLog', 'activityLogPrompt', 'bandAnimation', 'ban
 test('every userConfig field is in one group, and every group fits the menu', () => {
   const keys = GROUPS.flatMap(g => g.fields.map(f => f.key))
   expect([...keys].sort()).toEqual(MANIFEST_KEYS)
-  expect(GROUPS.length).toBeLessThanOrEqual(3)
+  expect(GROUPS.length).toBeLessThanOrEqual(4)
   for (const g of GROUPS) expect(g.header.length).toBeLessThanOrEqual(8)
 })
 
@@ -64,18 +64,19 @@ test('the monthly amount offers figures from the last 30 days', () => {
 })
 
 test('toggles, choices and paths', () => {
-  const pane = groupNamed('pane')!
-  expect(questionFor(field('toasts'), true, { sessions: 0 }, { index: 1, of: 7, group: pane }).options).toEqual(['Keep on', 'Turn off', BACK])
-  const theme = questionFor(field('paneTheme'), 'whimsical-dark', { sessions: 0 }, { index: 1, of: 7, group: pane })
+  const pane = groupNamed('look')!
+  const prompts = groupNamed('prompts')!
+  expect(questionFor(field('toasts'), true, { sessions: 0 }, { index: 9, of: 11, group: prompts }).options).toEqual(['Keep on', 'Turn off', BACK])
+  const theme = questionFor(field('paneTheme'), 'whimsical-dark', { sessions: 0 }, { index: 1, of: 9, group: pane })
   expect(theme.options).toEqual(['Keep whimsical-dark', 'Auto', 'Exosphere-light', BACK])
   expect(theme.answer('Auto')).toEqual({ kind: 'set', value: 'auto' })
   expect(theme.answer('whimsical-light')).toEqual({ kind: 'set', value: 'whimsical-light' })
-  const logo = questionFor(field('logo'), true, { sessions: 0 }, { index: 7, of: 7, group: pane })
+  const logo = questionFor(field('logo'), true, { sessions: 0 }, { index: 4, of: 9, group: pane })
   expect(logo.options).toEqual(['Keep on', 'Turn off', BACK])
   expect(logo.answer('Turn off')).toEqual({ kind: 'set', value: false })
-  const animation = questionFor(field('bandAnimation'), true, { sessions: 0 }, { index: 7, of: 7, group: pane })
+  const animation = questionFor(field('bandAnimation'), true, { sessions: 0 }, { index: 5, of: 9, group: pane })
   expect(animation.question).toContain('A change takes effect in your next session.')
-  const env = questionFor(field('envFile'), `config/${ENV}`, { sessions: 0 }, { index: 8, of: 9, group: groupNamed('data')! })
+  const env = questionFor(field('envFile'), `config/${ENV}`, { sessions: 0 }, { index: 3, of: 9, group: groupNamed('companion')! })
   expect(env.options).toEqual([`Keep config/${ENV}`, `Back to ${ENV}`, BACK])
   expect(env.answer(`other/${ENV}`)).toEqual({ kind: 'set', value: `other/${ENV}` })
 })
@@ -95,8 +96,8 @@ test('typed values are read, or refused with the reason', () => {
 
 test('the menu and the listing', () => {
   const values = Object.fromEntries(GROUPS.flatMap(g => g.fields.map(f => [f.key, f.default])))
-  expect(menuQuestion(values, 0)).toEqual({ question: 'Which dashboard settings do you want to go through? No budget is set.', options: ['Budget', 'Pane and banner', 'Data and reports', 'Done'] })
-  expect(menuQuestion({ ...values, budgetUsd: 5 }, 2).question).toContain('Budgets now: session budget $5.00. 2 changes so far, saved when you pick Done.')
+  expect(menuQuestion(values, 0)).toEqual({ question: 'Which dashboard settings do you want to go through? No budget is set. Pick a group, or type done to save and finish.', options: ['Budgets', 'Companion and Boomi', 'Look and reports', 'Prompts and behavior'] })
+  expect(menuQuestion({ ...values, budgetUsd: 5 }, 2).question).toContain('Budgets now: session budget $5.00. 2 changes so far. Pick a group, or type done to save and finish.')
   const list = listing({ ...values, budgetUsd: 5 })
   expect(list).toContain('  budgetUsd             $5.00\n')
   expect(list).toContain('  toasts                on  (default)')
@@ -106,16 +107,16 @@ test('the menu and the listing', () => {
   expect(valueOf(field('paneTheme'), 'exosphere-dark')).toBe('exosphere-dark')
   expect(valueOf(field('logo'), 'nope')).toBe(true)
   expect(fieldNamed('BUDGETUSD')?.key).toBe('budgetUsd')
-  expect(groupNamed('data')?.name).toBe('Data and reports')
-  expect(groupNamed('Done')).toBeUndefined()
+  expect(groupNamed('companion')?.name).toBe('Companion and Boomi')
+  expect(groupNamed('done')).toBeUndefined()
 })
 
 test('a group named with a value saves nothing and says which setting the value fits', () => {
   const budget = groupNamed('budget')!
   expect(groupWithValue(budget, 'warn')).toBe(
-    'Budget is a group of settings, so "warn" wasn\'t saved. Did you mean /bc-dashboard config budgetEnforce warn? Run /bc-dashboard config budget on its own to go through the group a question at a time.',
+    'Budget is a group of settings, so "warn" wasn\'t saved. Did you mean /bc-dashboard config budgetEnforce warn? Run /bc-dashboard config budgets on its own to go through the group a question at a time.',
   )
   expect(groupWithValue(budget, 'lots')).toBe(
-    'Budget is a group of settings, so "lots" wasn\'t saved. Run /bc-dashboard config budget on its own to go through the group a question at a time.',
+    'Budget is a group of settings, so "lots" wasn\'t saved. Run /bc-dashboard config budgets on its own to go through the group a question at a time.',
   )
 })

@@ -2,6 +2,12 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.64.0
+
+- **`/bc-dashboard config` is regrouped into four groups.** Budgets (the spend limits, `budgetEnforce` and `budgetGrace`), Companion and Boomi (`envCheck`, `personalLogin`, `envFile`, the components folder, polling, the activity log, usage, `recentHours`), Look and reports (theme, pane size, logo, banner, report settings, `historyDays`), and Prompts and behavior (prompt tips, plus toasts, suggestions, `handoffNudge` and update checks). `envCheck` moves out of Budgets to sit with the rest of what Companion may touch. The menu no longer has a Done option: pick a group, or type `done` under Other to save and finish. A typed word that isn't a group or `done` asks again.
+- **`handoffNudge` is in the settings table in the README.**
+- **Boomi Companion updates work like the dashboard's.** At most once every `updateCheckHours`, the dashboard reads the newest version of each installed Companion plugin from its repository's tags, and toasts a newer one once. It never installs. `/bc-dashboard upgrade companion` shows what is behind, asks, then runs Claude Code's own `claude plugin update` for each. Claude Code's confirmation for a changed install command is not accepted on your behalf. `--check` only reads. The `updateCheck` setting covers both.
+
 ## 0.63.0
 
 - **Enforce also refuses a Companion change from a login that isn't dedicated to Companion.** With `envCheck` on `enforce`, a deploy, undeploy, test run or raw Platform API write is refused when the `.env` login holds an account-admin role, or roles beyond the two Companion roles (`CR-Boomi-Companion-Non-Prod-FullAccess`, `CR-Boomi-Companion-Prod-ReadOnly`). The refusal says which role is the problem and tells Claude to stop. The login's roles are read again for each such command, since the `.env` can change during a session. Pushes are not refused, matching the production gate.

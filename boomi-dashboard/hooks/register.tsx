@@ -137,6 +137,7 @@ import { BOOMI_MARK_PNG, drawsPictures } from './boomi-mark'
 import { PALETTES, THEMES, THEME_NAMES, THEME_LABELS, THEME_OPTIONS, isDarkAppearance, markOf, resolveTheme, themeFromOptions, themeNamed } from './themes'
 import type { DrawnTheme, Family } from './themes'
 import { COMPANION_PLUGINS, hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
+import { COMPANION_MARKETPLACE, asCompanionSeen, companionCheckText, companionUpdates, latestTag, pluginId, repoUrl, tagVersions } from './companion-upgrade'
 import { RESTART, asUpdateSeen, changelogBetween, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
@@ -460,6 +461,9 @@ const UPGRADE_KEY = 'upgradeCheckedAt'
 const REPORT_SCAN_KEY = 'reportScan'
 /** The newest version an update check found, and the newest already toasted (UpdateSeen). */
 const UPDATE_SEEN_KEY = 'updateSeen'
+/** When Boomi Companion's plugins were last checked, and the newest version toasted for each (CompanionSeen). */
+const COMPANION_CHECKED_KEY = 'companionCheckedAt'
+const COMPANION_SEEN_KEY = 'companionSeen'
 
 /** How often the flamingo's frame moves on while Claude works. */
 /** The rewrite's spinner turns this often, and only while a rewrite runs. */
@@ -2983,8 +2987,12 @@ const configCommand = async ($: Engine, settings: Settings, target: string): Pro
         const menu = menuQuestion(Object.fromEntries(FIELDS.map(f => [f.key, current(f.key)])), changes.size)
         const picked = await $.ui.ask(menu.question, { header: 'Settings', options: menu.options })
         asked++
-        const group = picked === DONE ? undefined : groupNamed(picked)
-        if (!group) break
+        if (picked === undefined || picked.trim().toLowerCase() === DONE) break
+        const group = groupNamed(picked)
+        if (!group) {
+          notes.push(`"${picked}" isn't a group. Pick one, or type ${DONE} to save and finish.`)
+          continue
+        }
         await walk(group)
       }
   } catch {
@@ -3022,6 +3030,7 @@ const runUpgrade = async ($: Engine, args: string[], timeoutMs: number): Promise
  * move anything of the person's and tests the new code before it goes live.
  */
 const upgradeCommand = async ($: Engine, target: string): Promise<string> => {
+  if (/^companion(\s|$)/.test(target.trim())) return companionUpgradeCommand($, target.trim().slice('companion'.length))
   const flags = target.split(/\s+/).filter(Boolean)
   const unknown = flags.filter(f => !['--check', '--yes', '--rollback'].includes(f))
   if (unknown.length > 0) return `Unknown option ${unknown.join(' ')}. Usage: /bc-dashboard upgrade [--check] [--yes], or /bc-dashboard upgrade --rollback`
@@ -3058,6 +3067,85 @@ const upgradeCommand = async ($: Engine, target: string): Promise<string> => {
     `/bc-dashboard upgrade --rollback goes back to ${check.installed}.`,
     RESTART,
   ].join('\n')
+}
+
+/**
+ * Each plugin's newest version on its repository, read from the tags there
+ * (git ls-remote: nothing is cloned or installed). The plugins it couldn't read
+ * are listed apart.
+ */
+const latestCompanion = async ($: Engine, plugins: readonly CompanionPlugin[]): Promise<{ latest: Record<string, string | undefined>; unreachable: string[] }> => {
+  const home = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)) || `${(await $.env.get('HOME').catch(() => undefined)) ?? ''}/.claude`
+  const catalog = await $.fs.read(`${home}/plugins/marketplaces/${COMPANION_MARKETPLACE}/.claude-plugin/marketplace.json`).then(String).catch(() => undefined)
+  const latest: Record<string, string | undefined> = {}
+  const unreachable: string[] = []
+  for (const p of plugins) {
+    const url = repoUrl(catalog, p.name)
+    const ran = url ? await $.process.run(['git', 'ls-remote', '--tags', '--refs', url], { timeoutMs: 30_000, env: { GIT_TERMINAL_PROMPT: '0' } }).catch(() => undefined) : undefined
+    latest[p.name] = ran?.exitCode === 0 ? latestTag(tagVersions(ran.stdout)) : undefined
+    if (!latest[p.name]) unreachable.push(p.name)
+  }
+  return { latest, unreachable }
+}
+
+/**
+ * /bc-dashboard upgrade companion [--check] [--yes]: the check, then after a
+ * yes, Claude Code's own `claude plugin update` for each plugin behind. Claude
+ * Code's confirmation for a changed install command is never accepted here.
+ */
+const companionUpgradeCommand = async ($: Engine, target: string): Promise<string> => {
+  const flags = target.split(/\s+/).filter(Boolean)
+  const unknown = flags.filter(f => !['--check', '--yes'].includes(f))
+  if (unknown.length > 0) return `Unknown option ${unknown.join(' ')}. Usage: /bc-dashboard upgrade companion [--check] [--yes]`
+  const all = (await findPlugins($).catch(() => null)) ?? []
+  if (all.length === 0) return 'No Boomi Companion plugins are on in this session.'
+  const { latest, unreachable } = await latestCompanion($, all)
+  const updates = companionUpdates(all, latest)
+  const checked = all.filter(p => latest[p.name] && !updates.some(u => u.name === p.name)).map(p => p.name)
+  const text = companionCheckText(updates, unreachable, checked)
+  if (updates.length === 0 || flags.includes('--check')) return text
+  if (!flags.includes('--yes')) {
+    const answer = await $.ui
+      .ask(`Update ${updates.map(u => `${u.name} ${u.installed} to ${u.latest}`).join(', ')}? Claude Code installs each one. Companion's own tests don't run here, and the new version loads after a restart.`, {
+        header: 'Companion',
+        options: ['Update', 'Cancel'],
+      })
+      .catch(() => undefined)
+    if (answer !== 'Update') return `${text}\n\nNot updated. Run /bc-dashboard upgrade companion again to update, or with --yes to skip the question.`
+  }
+  const lines = [text, '']
+  for (const u of updates) {
+    const ran = await $.process.run(['claude', 'plugin', 'update', pluginId(u.name)], { timeoutMs: 300_000, env: { GIT_TERMINAL_PROMPT: '0' } }).catch(() => undefined)
+    const said = `${ran?.stdout ?? ''}\n${ran?.stderr ?? ''}`.split('\n').filter(l => l.trim()).slice(-3).join('\n')
+    lines.push(ran?.exitCode === 0 ? `✓ ${u.name} ${u.latest} is installed (was ${u.installed}).` : `✗ ${u.name} wasn't updated: ${said || 'Claude Code gave no reason'}`)
+  }
+  if (lines.some(l => l.startsWith('✓'))) lines.push('Restart Claude Code for the new Companion version to load.')
+  return lines.join('\n')
+}
+
+/**
+ * The once-a-day Companion check: read each installed plugin's newest version,
+ * and toast a newer one once. Never installs; says nothing when it can't tell.
+ */
+const nudgeCompanion = async ($: Engine, settings: Settings) => {
+  if (!settings.isCheckingUpdates) return
+  const now = await $.clock.now()
+  const last = await $.store.get(COMPANION_CHECKED_KEY).catch(() => undefined)
+  if (!isCheckDue(typeof last === 'number' ? last : undefined, now, settings.updateCheckHours)) return
+  const all = ((await findPlugins($).catch(() => null)) ?? []).filter(p => p.version)
+  if (all.length === 0) return
+  const { latest } = await latestCompanion($, all)
+  await $.store.set(COMPANION_CHECKED_KEY, now).catch(() => undefined)
+  const seen = asCompanionSeen(await $.store.get(COMPANION_SEEN_KEY).catch(() => undefined))
+  for (const p of all) {
+    const newest = latest[p.name]
+    if (!newest) continue
+    const notice = updateNotice(seen[p.name], p.version!, newest)
+    if (notice.seen) seen[p.name] = notice.seen
+    else delete seen[p.name]
+    if (notice.isToasting) $.ui.toast(`${p.name} ${newest} is available (you have ${p.version}): run /bc-dashboard upgrade companion`)
+  }
+  await $.store.set(COMPANION_SEEN_KEY, seen).catch(() => undefined)
 }
 
 /** The once-a-day nudge: fetch and compare, never install, and say nothing when it can't tell. */
@@ -3391,6 +3479,7 @@ export const register: Register = (on, options) => {
     // Whether a newer dashboard is on GitHub, at most once a day; it never installs.
     if (settings.isCheckingUpdates) await restoreUpdate($).catch(() => undefined)
     $.clock.after(15_000, () => nudgeUpgrade($, settings).catch(() => undefined))
+    $.clock.after(20_000, () => nudgeCompanion($, settings).catch(() => undefined))
     // A monthly Companion amount counts earlier sessions' costs: read them once, soon after the start.
     if (settings.companionMonthlyUsd > 0) {
       $.clock.after(5_000, async () => {

@@ -60,11 +60,12 @@ There's no marketplace involved and nothing gets copied. Claude Code loads the m
 | `/bc-dashboard upgrade --check` | A dry run. It checks and changes nothing |
 | `/bc-dashboard upgrade` | Check, ask, test, install |
 | `/bc-dashboard upgrade --yes` | The same, without asking. The safety steps still run |
+| `/bc-dashboard upgrade companion [--check] [--yes]` | Boomi Companion plugins: reads each one's newest version on its repository, then asks before Claude Code updates the ones behind. `--check` only reads. Restart Claude Code after an update. There's no rollback command here: the previous version stays in Claude Code's plugin cache |
 | `/bc-dashboard upgrade --rollback` | Goes back to the commit it noted before the last upgrade, as a detached checkout. `main` keeps the newer commits, and the next upgrade returns to it |
 
 Everything it prints has tokens and keys masked (`glc_`, `sk-`, `eyJ`, `Bearer …`, `Basic …`), and it never reads `.env`.
 
-**Update reminders.** When a session starts, the dashboard fetches its checkout to see if you're behind, at most once every `updateCheckHours` (24). The first time it sees a new version, you get one toast: `bc-dashboard X.Y.Z is available`. After that, the pane's footer says `↑ bc-dashboard X.Y.Z is available: /bc-dashboard upgrade` until you install it, and you only get another toast for an even newer release. It never installs anything on its own, and it stays quiet when you're offline. You can turn it off with `updateCheck` under `/config`.
+**Update reminders.** When a session starts, the dashboard fetches its checkout to see if you're behind, and reads the newest version of each Boomi Companion plugin on its repository, at most once every `updateCheckHours` (24). The first time it sees a new version, you get one toast: `bc-dashboard X.Y.Z is available`. After that, the pane's footer says `↑ bc-dashboard X.Y.Z is available: /bc-dashboard upgrade` until you install it, and you only get another toast for an even newer release. It never installs anything on its own, and it stays quiet when you're offline. You can turn it off with `updateCheck` under `/config`.
 
 To do it all by hand: `git -C ~/ClaudeMods pull --ff-only`, then `claude plugin validate` and `claude plugin test` on the mod, then restart.
 
@@ -72,7 +73,7 @@ To do it all by hand: `git -C ~/ClaudeMods pull --ff-only`, then `claude plugin 
 
 `/bc-dashboard` opens the pane, and Esc closes it. Where a pane can't be shown, including Claude Code on the web, you get the same thing as text.
 
-**Resizing it:** drag the pane's edge, and Claude Code remembers the size. To set a size up front, use `/bc-dashboard size <rows> [columns]`, or `size` on its own to go back to the default. That saves the `paneRows` and `paneColumns` settings, which you'll also find in `/config` and `/bc-dashboard config pane`. Rows set its height above the prompt. Columns set its width when it's docked beside a fullscreen transcript.
+**Resizing it:** drag the pane's edge, and Claude Code remembers the size. To set a size up front, use `/bc-dashboard size <rows> [columns]`, or `size` on its own to go back to the default. That saves the `paneRows` and `paneColumns` settings, which you'll also find in `/config` and `/bc-dashboard config look`. Rows set its height above the prompt. Columns set its width when it's docked beside a fullscreen transcript.
 
 <img alt="The dashboard pane in the Exosphere light theme: a navy title band, gauges for tokens, spend and context, then Needs attention with a failed test and its Why? and Run again buttons, Components this session, Claude's latest steps and Past Companion sessions" src="assets/pane-exosphere-light.png" width="420"> <img alt="The same pane in the Exosphere dark theme" src="assets/pane-exosphere-dark.png" width="420">
 
@@ -426,7 +427,7 @@ Boomi Companion sessions on this machine, last 90 days:
 
 The page follows Boomi's [Exosphere](https://exosphere.boomi.com/) design system. It uses Exosphere's Exo III color tokens in light and dark (switch with the moon or sun button at the top, or let it follow your system), Poppins headings, Noto Sans text, and Exosphere's cards, badges and alerts. Every status shows its icon and its label, never color alone.
 
-**Another style:** set `reportStyle` to `expressive` (in `/config` or `/bc-dashboard config data`), or add `--style expressive` for a single report. That report uses this repository's own Valence theme, Miami Deco: Sand by day and Midnight Navy by night, Poiret One for the title, Josefin Sans headings, Deco Gold rules, and Flamingo marking the sessions. Status keeps Valence's fixed colors, with its icon and label. Stick with `exosphere`, the default, for anything Boomi people will read.
+**Another style:** set `reportStyle` to `expressive` (in `/config` or `/bc-dashboard config look`), or add `--style expressive` for a single report. That report uses this repository's own Valence theme, Miami Deco: Sand by day and Midnight Navy by night, Poiret One for the title, Josefin Sans headings, Deco Gold rules, and Flamingo marking the sessions. Status keeps Valence's fixed colors, with its icon and label. Stick with `exosphere`, the default, for anything Boomi people will read.
 
 - **Charts** only appear when they add something: outcomes and spend by product when the work spans two or more products, cost over the session in a one-session report, and, in an all-sessions report with at least two sessions, each session's cost and how its steps went (click a session to open its steps). Each chart has hover details and a **Show the data** table, and each product keeps the same color in every chart.
 - **Tables** of custom connectors and Agentstudio agents can be sorted by clicking a column.
@@ -472,7 +473,7 @@ When you're online, the page loads its fonts from Google Fonts. Offline, it fall
 | `/bc-dashboard review [n]` | | What drove a past session's cost, and what to change next time. Without a number, it asks which of the most expensive ones. |
 | `/bc-dashboard theme [name]` | | Picks the pane's theme, or lists them. |
 | `/bc-dashboard components [csv] [save]` | | Copies every component with its IDs, tab-separated for a spreadsheet (`csv` copies it as CSV, and `save` also writes a `.csv` file). |
-| `/bc-dashboard config [budget\|pane\|data]` | | Goes through the dashboard's settings one question at a time, or just one group of them. `config <setting> <value>` sets one, such as `config budgetUsd 5`, and `config list` shows them all. |
+| `/bc-dashboard config [budget\|companion\|look\|prompts]` | | Goes through the dashboard's settings one question at a time, or just one group of them (type `done` under Other to save and finish). `config <setting> <value>` sets one, such as `config budgetUsd 5`, and `config list` shows them all. |
 | `/bc-dashboard prompt [use\|upgrade\|guide [refresh]]` | | Your last Boomi prompt's [tips](#prompt-tips) and an upgraded version. `use` puts it in the prompt box, `upgrade` has a model rewrite it, `guide` compares the dashboard's guide with your installed Companion plugins, and `guide refresh` drafts edits. |
 | `/bc-dashboard banner` | | Brings the banner back after **Hide**. |
 
@@ -503,6 +504,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to 
 | `activityLogPrompt` | `ask` | Whether to offer, at the start of a session in a Companion folder, to add `BOOMI_COMPANION_LOG_ACTIVITY=1` to its `.env`. `ask` offers until you say yes or never; `never` stops the offer. |
 | `toasts` | `true` | Toasts for failures, finished deploys and tests, and watched changes. |
 | `banner` | `true` | The banner above the prompt, plus a new session's recap and tips. |
+| `handoffNudge` | `true` | The first `/exit`, `/quit` or `/clear` of a session that did work suggests `/handoff` first; typing the command again goes through. |
 | `budgetUsd` | `0` | The session's spend budget, in US dollars. `0` turns it off. |
 | `companionShare` | `0` | Companion's share of your weekly usage limit, as a percent. `0` turns it off. |
 | `companionSharePeriod` | `week` | What the share covers: `day`, `week` or `month`. |
@@ -511,7 +513,7 @@ Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to 
 | `usageBreakdown` | `true` | Read Claude Code's `/usage` breakdown every 15 minutes to work out Companion's share of all your usage. |
 | `budgetEnforce` | `warn` | What happens when a budget is spent: `warn` only warns, `confirm` asks before each Companion change, and `block` refuses them. `confirm` and `block` really do stop changes. See [Budget enforcement](#budget-enforcement). |
 | `budgetGrace` | `0` | How far past a budget, as a percent, before `confirm` or `block` kicks in. |
-| `updateCheck` | `true` | When a session starts, tell you if a newer dashboard is on GitHub (it never installs it). |
+| `updateCheck` | `true` | When a session starts, tell you if a newer dashboard or Boomi Companion plugin is out (it never installs either). |
 | `updateCheckHours` | `24` | Hours between update checks. `0` turns them off. |
 | `reportOpen` | `true` | Open the page from `/bc-dashboard report html` in your browser once it's saved. |
 | `reportStyle` | `exosphere` | How the HTML report looks: `exosphere` (Boomi's design system) or `expressive` (Valence, Miami Deco). `--style` picks one for a single report. |
