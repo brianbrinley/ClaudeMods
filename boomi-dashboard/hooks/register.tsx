@@ -3192,7 +3192,16 @@ const latestCompanion = async ($: Engine, plugins: readonly CompanionPlugin[]): 
   const unreachable: string[] = []
   for (const p of plugins) {
     const url = repoUrl(catalog, p.name)
-    const ran = url ? await $.process.run(['git', 'ls-remote', '--tags', '--refs', '--', url], { timeoutMs: 30_000, env: { GIT_TERMINAL_PROMPT: '0' } }).catch(() => undefined) : undefined
+    // Run from / with no global or system git config, and only https allowed: a repository config in the session's folder can't rewrite the URL.
+    const ran = url
+      ? await $.process
+          .run(['git', '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always', 'ls-remote', '--tags', '--refs', '--', url], {
+            cwd: '/',
+            timeoutMs: 30_000,
+            env: { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
+          })
+          .catch(() => undefined)
+      : undefined
     latest[p.name] = ran?.exitCode === 0 ? latestTag(tagVersions(ran.stdout)) : undefined
     if (!latest[p.name]) unreachable.push(p.name)
   }
