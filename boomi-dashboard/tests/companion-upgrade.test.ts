@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoUrl } from '../hooks/companion-upgrade'
+import { MANIFEST_MAX_CHARS, asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoUrl, withinManifestLimit } from '../hooks/companion-upgrade'
 
 const SHA = 'c7240f64daee879ab93a6f989d9ab4d367b87d40'
 
@@ -68,4 +68,10 @@ test('the seen versions read back only the entries that have both fields', () =>
     'bc-integration': { latest: '1.0.104', announced: '1.0.104' },
   })
   expect(asCompanionSeen(undefined)).toEqual({})
+})
+
+test('a manifest over the size cap is not read, and one at the cap is', () => {
+  expect(withinManifestLimit('{"version":"1.0.0"}')).toBe(true)
+  expect(withinManifestLimit('x'.repeat(MANIFEST_MAX_CHARS))).toBe(true)
+  expect(withinManifestLimit('x'.repeat(MANIFEST_MAX_CHARS + 1))).toBe(false)
 })

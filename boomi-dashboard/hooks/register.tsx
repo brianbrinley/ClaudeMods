@@ -140,7 +140,7 @@ import { BOOMI_MARK_PNG, drawsPictures } from './boomi-mark'
 import { PALETTES, THEMES, THEME_NAMES, THEME_LABELS, THEME_OPTIONS, isDarkAppearance, markOf, resolveTheme, themeFromOptions, themeNamed } from './themes'
 import type { DrawnTheme, Family } from './themes'
 import { COMPANION_PLUGINS, hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
-import { COMPANION_MARKETPLACE, asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoUrl } from './companion-upgrade'
+import { COMPANION_MARKETPLACE, asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, MANIFEST_MAX_CHARS, pluginId, repoUrl, withinManifestLimit } from './companion-upgrade'
 import { RESTART, asUpdateSeen, changelogBetween, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
@@ -3185,6 +3185,21 @@ const upgradeCommand = async ($: Engine, target: string): Promise<string> => {
  * (git ls-remote: nothing is cloned or installed). The plugins it couldn't read
  * are listed apart.
  */
+/** The manifest's text from its raw URL: none when the read fails, runs past the deadline, or is too large. */
+const MANIFEST_TIMEOUT_MS = 30_000
+const readManifest = async ($: Engine, url: string): Promise<string | undefined> => {
+  const deadline = new Promise<undefined>(resolve => $.clock.after(MANIFEST_TIMEOUT_MS, () => resolve(undefined)))
+  const read = (async () => {
+    const res = await $.http.fetch(url, { headers: { Accept: 'application/json' } })
+    if (!res.ok) return undefined
+    const declared = Number(res.headers?.get?.('content-length'))
+    if (Number.isFinite(declared) && declared > MANIFEST_MAX_CHARS) return undefined
+    const text = await res.text()
+    return withinManifestLimit(text) ? text : undefined
+  })().catch(() => undefined)
+  return Promise.race([read, deadline])
+}
+
 const latestCompanion = async ($: Engine, plugins: readonly CompanionPlugin[]): Promise<{ latest: Record<string, string | undefined>; unreachable: string[] }> => {
   const home = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)) || `${(await $.env.get('HOME').catch(() => undefined)) ?? ''}/.claude`
   const catalog = await $.fs.read(`${home}/plugins/marketplaces/${COMPANION_MARKETPLACE}/.claude-plugin/marketplace.json`).then(String).catch(() => undefined)
@@ -3193,8 +3208,7 @@ const latestCompanion = async ($: Engine, plugins: readonly CompanionPlugin[]): 
   for (const p of plugins) {
     const url = repoUrl(catalog, p.name)
     const manifest = url ? manifestUrl(url) : undefined
-    const res = manifest ? await $.http.fetch(manifest, { headers: { Accept: 'application/json' } }).catch(() => undefined) : undefined
-    const text = res?.ok ? await res.text().catch(() => undefined) : undefined
+    const text = manifest ? await readManifest($, manifest) : undefined
     latest[p.name] = manifestVersion(text)
     if (!latest[p.name]) unreachable.push(p.name)
   }

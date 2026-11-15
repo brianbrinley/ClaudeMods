@@ -26,6 +26,12 @@ export const manifestUrl = (repo: string): string | undefined => {
   return m ? `https://raw.githubusercontent.com/${m[1]}/${m[2]}/HEAD/.claude-plugin/plugin.json` : undefined
 }
 
+/** A plugin.json is a few kilobytes; anything larger than this is not read. */
+export const MANIFEST_MAX_CHARS = 64 * 1024
+
+/** Whether a manifest's text is small enough to read. */
+export const withinManifestLimit = (text: string): boolean => text.length <= MANIFEST_MAX_CHARS
+
 /** The version in a plugin manifest's text, or undefined when there isn't a plausible one. */
 export const manifestVersion = (text: string | undefined): string | undefined => {
   const version = asObject(parse(text))?.version
