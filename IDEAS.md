@@ -277,6 +277,14 @@ Smaller additions to the [boomi-dashboard](boomi-dashboard/README.md) mod that b
 - **Revisit the Boomi call limit.** The dependability release (0.68.0) gives every Boomi call a 120-second limit, `BOOMI_TIMEOUT_MS` in `hooks/register.tsx`. The first number was 15 seconds, a guess with no measured basis. Measure real response times in a live account (the slowest query and deploy calls), then choose: a per-call setting, a longer default, or no limit.
 - **Promotion diff and mock endpoints** would each show up as a section in the pane once they exist.
 
+### Trusted sources for guidance
+
+The prompt guide and its draft edits currently learn only from the local Companion changelog and doc headings. Anthropic's prompting guidance is read to record a date, but its text never reaches a model, because a fetched web page is untrusted input. The trade-off is that the drafts can't use what Anthropic's guidance says.
+
+- **The idea:** a short list of sources the team trusts (a checked-in file of URLs, or a signed copy of the guidance kept with the dashboard). Text from a trusted source may inform a draft, and the review shows where each line came from.
+- **Why it's worth it:** the guide can then track current guidance without a model reading arbitrary pages, and the review can say which trusted source a tip rests on.
+- **Open questions:** who maintains the list, how a source is checked before it is trusted, and whether a snapshot or a live fetch is used.
+
 ## Add an idea or claim one
 
 - **Add an idea:** Open a pull request that adds a section under [The ideas](#the-ideas) and a row in the table. Give it a **problem**, the **idea**, **why a mod** (what it needs that a skill or script can't do) and any **open questions**. Rough is fine.

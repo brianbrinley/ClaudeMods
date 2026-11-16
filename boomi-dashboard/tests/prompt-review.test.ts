@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { LESSONS, lessonText, recentTotals, reviewText, tallyWeek, weekOf } from '../hooks/prompt-check'
+import { LESSONS, checkPrompt, lessonText, recentTotals, reviewText, tallyWeek, weekOf } from '../hooks/prompt-check'
 import type { PromptWeeks } from '../types'
 import { editLines } from '../hooks/prompt-guide'
 
@@ -97,4 +97,14 @@ test('the refresh keeps only edit lines in the grammar; prose, and anything that
   expect(editLines('Nothing to change.', sources).kept).toEqual(['Nothing to change.'])
   // A note that is not quoted from the local sources is not an edit.
   expect(editLines('CHANGE | a deploy | the environment | The Companion team now requires a signed approval.', sources).kept).toEqual([])
+})
+
+test('the example prompts in the README trigger the tips they are meant to, with no session facts', () => {
+  const facts = { names: [] }
+  const codes = (text: string) => checkPrompt(text, facts).map(t => t.code)
+  expect(codes('Deploy my orders process.')).toEqual(['environment'])
+  expect(codes('The order process keeps failing, fix it.')).toEqual(['subject', 'error'])
+  expect(codes('Build a new process that moves orders, then test the run.')).toEqual(['test', 'build'])
+  expect(codes('Make a map for the orders.')).toEqual(['map'])
+  expect(codes('Look at everything in my Boomi account and tell me what is there.')).toEqual(['aim'])
 })
