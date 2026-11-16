@@ -4,6 +4,7 @@
 // Code's own `claude plugin update`, run only after a yes. Plain functions:
 // nothing here touches the engine.
 
+import type { CompanionPlugin } from '../types'
 import { compareVersions, type UpdateSeen } from './upgrade'
 
 /** The marketplace the Companion plugins come from, as Claude Code names it. */
@@ -97,4 +98,22 @@ export const companionCheckText = (updates: readonly CompanionUpdate[], unreacha
   if (updates.length === 0 && checked.length > 0) lines.push(`✓ Companion plugins are up to date: ${checked.join(', ')}.`)
   if (unreachable.length > 0) lines.push(`✗ Couldn't read the version of ${unreachable.join(', ')} (offline, or not in the marketplace's catalog).`)
   return lines.join('\n') || 'No Boomi Companion plugins are on in this session.'
+}
+
+/** The repository's page on GitHub for a clone URL: the link the footer opens, without the .git. */
+export const repoPage = (url: string | undefined): string | undefined => url?.replace(/\.git$/, '')
+
+/** The footer's line for Companion plugins with a newer version; undefined when there are none. */
+export const companionNewerText = (updates: readonly { name: string; latest: string }[]): string | undefined =>
+  updates.length === 0
+    ? undefined
+    : `↑ Companion ${updates.map(u => `${u.name} ${u.latest}`).join(', ')} ${updates.length === 1 ? 'is' : 'are'} out: /bc-dashboard upgrade companion`
+
+/** The versions for the pane's footer: the dashboard's, then each Companion plugin's installed one. Undefined when there is nothing to show. */
+export const versionsText = (dashboard: string | undefined, plugins: readonly CompanionPlugin[] | null | undefined): string | undefined => {
+  const parts: string[] = []
+  if (dashboard) parts.push(`dashboard ${dashboard}`)
+  const companion = (plugins ?? []).map(p => (p.version ? `${p.name} ${p.version}` : p.name))
+  if (companion.length > 0) parts.push(`Companion ${companion.join(', ')}`)
+  return parts.length > 0 ? parts.join(' · ') : undefined
 }

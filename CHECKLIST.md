@@ -516,3 +516,6 @@ Use a test `.env` pointed at a TEST environment, and a second folder whose `.env
   **Pass:** the output shows Claude Code's refusal as "wasn't updated", with the reason, and the installed version is unchanged. **Fail:** the update goes through without the confirmation being shown to you.
 - [ ] **X6. Offline.** Turn off the network and run `/bc-dashboard upgrade companion --check`.
   **Pass:** the output says it couldn't read the version of each plugin, and nothing else changes. **Fail:** the session hangs or shows a false "up to date".
+- [ ] **X7. Footer versions.** Open the dashboard pane in a Companion folder.
+  **Pass:** a line under the session line reads `dashboard <version>` matching `.claude-plugin/plugin.json`, followed by `Companion` and each on plugin with its installed version (as `claude plugin list` shows). **Fail:** the line is missing, or a version differs from what is installed.
+  **Nudge:** when a newer Companion plugin has been seen, a line above the session line reads `↑ Companion <name> <version> is out: /bc-dashboard upgrade companion` with a `↗` that opens the plugin's repository. **Pass:** the link opens the GitHub page, and the line goes away after the upgrade. **Fail:** no link, or the line stays after upgrading.

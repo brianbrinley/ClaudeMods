@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { MANIFEST_MAX_BYTES, asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoUrl, withinManifestLimit, utf8Length } from '../hooks/companion-upgrade'
+import { MANIFEST_MAX_BYTES, asCompanionSeen, companionCheckText, companionNewerText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoPage, repoUrl, versionsText, withinManifestLimit, utf8Length } from '../hooks/companion-upgrade'
 
 const SHA = 'c7240f64daee879ab93a6f989d9ab4d367b87d40'
 
@@ -74,6 +74,27 @@ test('a body over the size cap is not read, and one at the cap is', () => {
   expect(withinManifestLimit(20)).toBe(true)
   expect(withinManifestLimit(MANIFEST_MAX_BYTES)).toBe(true)
   expect(withinManifestLimit(MANIFEST_MAX_BYTES + 1)).toBe(false)
+})
+
+test('the footer nudges toward a newer Companion plugin, and links its repository without the .git', () => {
+  expect(companionNewerText([{ name: 'bc-integration', latest: '1.0.104' }])).toBe(
+    '↑ Companion bc-integration 1.0.104 is out: /bc-dashboard upgrade companion',
+  )
+  expect(companionNewerText([{ name: 'bc-integration', latest: '1.0.104' }, { name: 'bc-bdi', latest: '0.2.0' }])).toBe(
+    '↑ Companion bc-integration 1.0.104, bc-bdi 0.2.0 are out: /bc-dashboard upgrade companion',
+  )
+  expect(companionNewerText([])).toBeUndefined()
+  expect(repoPage('https://github.com/OfficialBoomi/bc-integration.git')).toBe('https://github.com/OfficialBoomi/bc-integration')
+  expect(repoPage(undefined)).toBeUndefined()
+})
+
+test('the footer names the dashboard and each Companion plugin on, with the versions it knows', () => {
+  expect(versionsText('0.67.0', [{ name: 'bc-integration', version: '1.0.103' }, { name: 'bc-bdi' }])).toBe(
+    'dashboard 0.67.0 · Companion bc-integration 1.0.103, bc-bdi',
+  )
+  expect(versionsText('0.67.0', null)).toBe('dashboard 0.67.0')
+  expect(versionsText(undefined, [{ name: 'bc-datahub', version: '0.3.0' }])).toBe('Companion bc-datahub 0.3.0')
+  expect(versionsText(undefined, undefined)).toBeUndefined()
 })
 
 test('the body is counted in UTF-8 bytes', () => {

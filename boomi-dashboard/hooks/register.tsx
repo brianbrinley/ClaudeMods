@@ -140,7 +140,7 @@ import { BOOMI_MARK_PNG, drawsPictures } from './boomi-mark'
 import { PALETTES, THEMES, THEME_NAMES, THEME_LABELS, THEME_OPTIONS, isDarkAppearance, markOf, resolveTheme, themeFromOptions, themeNamed } from './themes'
 import type { DrawnTheme, Family } from './themes'
 import { COMPANION_PLUGINS, hasComponents, isInstalled, pluginsFromFiles, pluginsFromList } from './plugins'
-import { COMPANION_MARKETPLACE, asCompanionSeen, companionCheckText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoUrl, utf8Length, withinManifestLimit } from './companion-upgrade'
+import { COMPANION_MARKETPLACE, asCompanionSeen, companionCheckText, companionNewerText, companionUpdates, manifestUrl, manifestVersion, pluginId, repoPage, repoUrl, utf8Length, versionsText, withinManifestLimit } from './companion-upgrade'
 import { RESTART, asUpdateSeen, changelogBetween, checkText, isCheckDue, parseUpgrade, pendingUpdate, planText, updateNotice } from './upgrade'
 import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
@@ -188,6 +188,9 @@ const companionPlugins = atom({ plugin: 'boomi-dashboard', key: 'companionPlugin
 
 /** A newer dashboard version on GitHub, for the pane's footer: toasted once, then mentioned quietly until installed. */
 const updateAvailable = atom({ plugin: 'boomi-dashboard', key: 'updateAvailable' } as const, null as string | null)
+
+/** Boomi Companion plugins with a newer version on their repositories, for the pane's footer: the installed and newest versions, and the repository's GitHub page. */
+const companionNewer = atom({ plugin: 'boomi-dashboard', key: 'companionNewer' } as const, null as { name: string; installed: string; latest: string; repo?: string }[] | null)
 
 /** What each failed execution's log says, by execution ID, once someone asks Why?. */
 const diagnoses = atom({ plugin: 'boomi-dashboard', key: 'diagnoses' } as const, {} as Record<string, DiagnosisState>)
@@ -3230,9 +3233,27 @@ const readManifest = async ($: Engine, url: string): Promise<string | undefined>
   return Promise.race([read, deadline])
 }
 
-const latestCompanion = async ($: Engine, plugins: readonly CompanionPlugin[]): Promise<{ latest: Record<string, string | undefined>; unreachable: string[] }> => {
+/** The Companion marketplace's catalog as Claude Code wrote it to disk; undefined when it can't be read. */
+const companionCatalog = async ($: Engine): Promise<string | undefined> => {
   const home = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)) || `${(await $.env.get('HOME').catch(() => undefined)) ?? ''}/.claude`
-  const catalog = await $.fs.read(`${home}/plugins/marketplaces/${COMPANION_MARKETPLACE}/.claude-plugin/marketplace.json`).then(String).catch(() => undefined)
+  return $.fs.read(`${home}/plugins/marketplaces/${COMPANION_MARKETPLACE}/.claude-plugin/marketplace.json`).then(String).catch(() => undefined)
+}
+
+/**
+ * The footer's Companion notice from the store: the plugins whose newer version
+ * an earlier check saw and that aren't installed yet. No fetch, so it's safe at start.
+ */
+const refreshCompanionNotice = async ($: Engine) => {
+  const seen = asCompanionSeen(await $.store.get(COMPANION_SEEN_KEY).catch(() => undefined))
+  const plugins = ((await findPlugins($).catch(() => null)) ?? []).filter(p => p.version)
+  const latest = Object.fromEntries(Object.entries(seen).map(([name, s]) => [name, s.latest]))
+  const catalog = await companionCatalog($)
+  const updates = companionUpdates(plugins, latest).map(u => ({ ...u, repo: repoPage(repoUrl(catalog, u.name)) }))
+  await update($, companionNewer, () => (updates.length > 0 ? updates : null))
+}
+
+const latestCompanion = async ($: Engine, plugins: readonly CompanionPlugin[]): Promise<{ latest: Record<string, string | undefined>; unreachable: string[] }> => {
+  const catalog = await companionCatalog($)
   const latest: Record<string, string | undefined> = {}
   const unreachable: string[] = []
   for (const p of plugins) {
@@ -3303,6 +3324,7 @@ const nudgeCompanion = async ($: Engine, settings: Settings) => {
     if (notice.isToasting) $.ui.toast(`${p.name} ${newest} is available (you have ${p.version}): run /bc-dashboard upgrade companion`)
   }
   await $.store.set(COMPANION_SEEN_KEY, seen).catch(() => undefined)
+  await refreshCompanionNotice($).catch(() => undefined)
 }
 
 /** The once-a-day nudge: fetch and compare, never install, and say nothing when it can't tell. */
@@ -3329,20 +3351,20 @@ const restoreUpdate = async ($: Engine) => {
 
 // --- Drawing -------------------------------------------------------------------
 
-// The footer's facts, read once per load: the session's id and the repository's GitHub page.
-let footerCache: { session: string; repo?: string } | undefined
+// The footer's facts, read once per load: the session's id, the repository's GitHub page and the dashboard's version.
+let footerCache: { session: string; repo?: string; dashboard?: string } | undefined
 
 /**
  * The footer: the session's whole ID (the mod API gives a plugin the
- * session's ID, not its name; claude --resume takes it) and the GitHub page of the working copy's
- * origin remote, read at run time. No link when origin isn't on GitHub.
+ * session's ID, not its name; claude --resume takes it), the GitHub page of the working copy's
+ * origin remote, read at run time (no link when origin isn't on GitHub), and the dashboard's version.
  */
-const footerOf = async ($: Engine): Promise<{ session: string; repo?: string }> => {
+const footerOf = async ($: Engine): Promise<{ session: string; repo?: string; dashboard?: string }> => {
   if (footerCache) return footerCache
   const id = await $.session.id().catch(() => '')
   const repo = await $.session.repo().catch(() => null)
   // The whole ID: it's what claude --resume takes.
-  footerCache = { session: id || 'unknown', repo: githubUrl(repo?.remote) }
+  footerCache = { session: id || 'unknown', repo: githubUrl(repo?.remote), dashboard: await ownVersion($) }
   return footerCache
 }
 
@@ -3642,7 +3664,10 @@ export const register: Register = (on, options) => {
     await readActivityLog($, settings)
     $.clock.every(LOG_CHECK_MS, () => readActivityLog($, settings))
     // Whether a newer dashboard is on GitHub, at most once a day; it never installs.
-    if (settings.isCheckingUpdates) await restoreUpdate($).catch(() => undefined)
+    if (settings.isCheckingUpdates) {
+      await restoreUpdate($).catch(() => undefined)
+      await refreshCompanionNotice($).catch(() => undefined)
+    }
     $.clock.after(15_000, () => nudgeUpgrade($, settings).catch(() => undefined))
     $.clock.after(20_000, () => nudgeCompanion($, settings).catch(() => undefined))
     // A monthly Companion amount counts earlier sessions' costs: read them once, soon after the start.
@@ -4128,7 +4153,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button: PlainButton, Text } = $.ui.resolve(e)
+    const { Box, Button: PlainButton, Link, Text } = $.ui.resolve(e)
     const logoPicture = ((await drawsPicturesHere($)) ? ($.ui.resolve(e) as { Image?: typeof Text }).Image : undefined) as ((props: { source: { png: string }; columns: number; rows: number; alt: string }) => unknown) | undefined
     const themeNow = await themeOf($, settings)
     const drawnNow = await drawnThemeOf($, settings)
@@ -4158,6 +4183,8 @@ export const register: Register = (on, options) => {
     const connectorRows = connectors(current.activity)
     const plugins = await read($, companionPlugins)
     const newer = await read($, updateAvailable)
+    const newerCompanion = await read($, companionNewer)
+    const companionNudge = companionNewerText(newerCompanion ?? [])
     const stepsLimit = await read($, stepsShown)
     const lastTips = settings.promptCheck === 'off' ? null : await read($, promptTips)
     // Companion's activity log is off in its env file: said until it is on, or the offer is stopped.
@@ -4565,12 +4592,24 @@ export const register: Register = (on, options) => {
             {t(`↑ bc-dashboard ${newer} is available: /bc-dashboard upgrade`, { color: p.muted })}
           </Box>
         )}
-        <Box marginTop={newer ? 0 : 1} justifyContent="space-between">
+        {companionNudge && (
+          <Text color={p.muted} backgroundColor={p.bg} dimColor>
+            {companionNudge}
+            {Link && newerCompanion?.[0]?.repo ? ' ' : ''}
+            {Link && newerCompanion?.[0]?.repo ? <Link href={newerCompanion[0].repo} label="↗" /> : null}
+          </Text>
+        )}
+        <Box marginTop={newer || companionNudge ? 0 : 1} justifyContent="space-between">
           <Text color={p.muted} backgroundColor={p.bg} dimColor>
             {`session ${footer.session}`}
           </Text>
           <Button key="report-html" label="Report ↗" onPress={() => void reportFromPane($, settings)} />
         </Box>
+        {versionsText(footer.dashboard, plugins) && (
+          <Text color={p.muted} backgroundColor={p.bg} dimColor>
+            {versionsText(footer.dashboard, plugins)}
+          </Text>
+        )}
         <Box>
           {t('🎨 Theme  ', { color: p.muted })}
           <Button key="theme" label={`${THEME_LABELS[themeNow]} ${themeListOpen ? '▴' : '▾'}`} onPress={() => update($, isThemeListOpen, open => !open)} />

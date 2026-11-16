@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.67.0
+
+- **The pane's footer shows the versions.** Under the session line, the pane now names the dashboard's version and each Boomi Companion plugin's installed version, for example `dashboard 0.67.0 · Companion bc-integration 1.0.103`. It's read from the plugin files, so it shows what is installed, not what is newest. When a daily check has seen a newer Companion plugin, the footer also says so, with a `↗` link to that plugin's GitHub repository, until it is installed.
+
 ## 0.66.0
 
 - **Boomi Companion updates work like the dashboard's.** At most once every `updateCheckHours`, the dashboard reads the newest version of each installed Companion plugin from the `plugin.json` on its repository's default branch, and toasts a newer one once. It never installs. `/bc-dashboard upgrade companion` shows what is behind, asks, then runs Claude Code's own `claude plugin update` for each. Claude Code's confirmation for a changed install command is not accepted on your behalf. `--check` only reads. The `updateCheck` setting covers both.
