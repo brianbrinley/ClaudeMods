@@ -12,7 +12,8 @@ TITLE = "How the dashboard stays aware of Companion"
 DESC = (
     "Data flow for the dashboard's awareness of Boomi Companion: installed plugin versions decide whether the index of pointers "
     "to Companion's docs is rebuilt, only for what changed; a prompt's words pick a few sections to read for the model; "
-    "and the dashboard's own guide, stamped with a version, is compared with what is installed so a person reviews any drift."
+    "and the dashboard's own guide, stamped with a version, is compared with what is installed so a person reviews any drift. "
+    "Anthropic's prompting guidance is read live when the guide is refreshed, and its date is recorded."
 )
 VIEWBOX = (0, 64, 1280, 652)
 

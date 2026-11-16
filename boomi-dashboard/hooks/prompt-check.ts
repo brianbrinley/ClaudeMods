@@ -2,7 +2,7 @@
 // work, and a better prompt built from what the session already knows. Plain
 // functions, with no model call: the tests call them directly.
 
-import type { PromptCheckCode, PromptCounts, PromptTip, PromptTips } from '../types'
+import type { PromptCheckCode, PromptCounts, PromptTip, PromptTips, PromptWeeks, WeekCount, WeekTally } from '../types'
 import { STATUS } from './activity'
 import { mask } from './upgrade'
 import { guideFor, guideLine } from './prompt-guide'
@@ -440,4 +440,183 @@ export const reportLines = (counts: PromptCounts | undefined): string[] => {
   if (!counts || counts.checked === 0) return []
   const top = mostOften(counts)
   return ['', '## Prompt tips', '', `- ${countsLine(counts)}`, ...(top ? [`- Most often: ${top}`] : [])]
+}
+
+// --- Lessons and the weekly review -------------------------------------------------
+//
+// What the prompt review and the lessons say is built from category counts only:
+// no prompt text is kept. Each week's tally says how often a category was shown,
+// how often the next prompt had fixed it, and how often the upgrade was used.
+
+const WEEKS_KEPT = 8
+
+/** The Monday of the week a time falls in, UTC. */
+export const weekOf = (ms: number): string => {
+  const d = new Date(ms)
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7))
+  return d.toISOString().slice(0, 10)
+}
+
+/** This week's tally after a checked prompt: tips shown, tips the prompt had fixed, and tips whose upgrade was used. */
+export const tallyWeek = (
+  weeks: PromptWeeks,
+  now: number,
+  event: { shown: readonly PromptCheckCode[]; followed: readonly PromptCheckCode[]; used: readonly PromptCheckCode[] },
+): PromptWeeks => {
+  const key = weekOf(now)
+  const week: WeekTally = { ...(weeks[key] ?? {}) }
+  const bump = (codes: readonly PromptCheckCode[], field: 'seen' | 'followed' | 'used') => {
+    for (const code of codes) {
+      const was = week[code] ?? { seen: 0, followed: 0, used: 0 }
+      week[code] = { ...was, [field]: was[field] + 1 }
+    }
+  }
+  bump(event.shown, 'seen')
+  bump(event.followed, 'followed')
+  bump(event.used, 'used')
+  const all: PromptWeeks = { ...weeks, [key]: week }
+  const kept = Object.keys(all).sort().slice(-WEEKS_KEPT)
+  return Object.fromEntries(kept.map(k => [k, all[k]!]))
+}
+
+/** The last `count` weeks' tallies added up by category, most seen first. */
+export const recentTotals = (weeks: PromptWeeks, now: number, count = 4): (WeekCount & { code: PromptCheckCode })[] => {
+  const since = weekOf(now - (count - 1) * 7 * 86_400_000)
+  const totals: Partial<Record<PromptCheckCode, WeekCount>> = {}
+  for (const [key, week] of Object.entries(weeks)) {
+    if (key < since) continue
+    for (const code of Object.keys(week) as PromptCheckCode[]) {
+      const t = week[code]!
+      const was = totals[code] ?? { seen: 0, followed: 0, used: 0 }
+      totals[code] = { seen: was.seen + t.seen, followed: was.followed + t.followed, used: was.used + t.used }
+    }
+  }
+  return (Object.keys(totals) as PromptCheckCode[])
+    .map(code => ({ code, ...totals[code]! }))
+    .filter(t => t.seen > 0)
+    .sort((a, b) => b.seen - a.seen)
+}
+
+/** A lesson: what a kind of prompt leaves out, why it matters, and a before and after with made-up names. */
+export type Lesson = { title: string; gap: string; why: string; before: string; after: string }
+
+export const LESSONS: Record<PromptCheckCode, Lesson> = {
+  subject: {
+    title: 'Name the component',
+    gap: 'no component named',
+    why: 'Without a name or ID, Claude has to guess which process, map or connection you mean.',
+    before: 'Fix the map so the amount is right.',
+    after: 'Fix the "Orders to Invoices" map so the Amount field copies from the order total.',
+  },
+  environment: {
+    title: 'Name the environment',
+    gap: 'no environment named',
+    why: 'A deploy goes to one specific place. Without the environment, Claude can only guess, and a wrong guess can reach production.',
+    before: 'Deploy the order sync.',
+    after: 'Deploy the order sync to the Test environment, then run it once.',
+  },
+  test: {
+    title: 'Say what a test uses and what passing means',
+    gap: 'no test data or pass check named',
+    why: 'A test with no data proves little. Naming the data and the expected result makes the check meaningful.',
+    before: 'Test it.',
+    after: 'Run the order sync with the three sample orders in the test folder; each should create one invoice.',
+  },
+  production: {
+    title: 'Say whether Claude may change production',
+    gap: 'production not addressed',
+    why: 'Production changes can affect live customers. A clear yes or no keeps Claude from guessing.',
+    before: 'Update the sync in production.',
+    after: 'Only read the production sync and tell me its last run. Do not change it.',
+  },
+  steps: {
+    title: 'Take big changes one step at a time',
+    gap: 'several big steps in one prompt',
+    why: 'Several large changes in one request are hard to check and easy to leave half done.',
+    before: 'Build the new process, add error handling, deploy it and test it.',
+    after: 'First build the new process and stop there. I will ask for error handling next.',
+  },
+  error: {
+    title: 'Give the error or the execution ID',
+    gap: 'no error or execution ID given',
+    why: 'The actual error text usually helps Claude find the cause sooner than a description of it does.',
+    before: 'The sync keeps failing, fix it.',
+    after: 'The sync fails with "401 Unauthorized" on execution 1234. Find the cause and tell me before changing anything.',
+  },
+  build: {
+    title: 'Give the source, the target and what happens to a failed record',
+    gap: 'no source, target or failure path given',
+    why: 'A new process needs its ends and its failure path decided, or it gets built on guesses.',
+    before: 'Build a process that moves orders.',
+    after: 'Build a process that reads orders from the sales API and writes them to the ERP. A failed record goes to an error folder.',
+  },
+  map: {
+    title: 'Name the profiles a map connects',
+    gap: 'no profiles named',
+    why: 'A map is only as good as the two profiles it links. Naming them lets Claude check each field.',
+    before: 'Make a map for the orders.',
+    after: 'Make a map from the sales order profile to the ERP invoice profile. Copy the total, not the tax.',
+  },
+  secret: {
+    title: 'Never put a password or token in a prompt',
+    gap: 'a secret in the prompt',
+    why: 'A prompt is saved in the transcript. Point to where a secret is kept instead of pasting it.',
+    before: 'Use the key abc123 to log in.',
+    after: 'Use the API key from my settings file to log in.',
+  },
+  aim: {
+    title: 'Say what you are looking for',
+    gap: 'no question for a look around',
+    why: 'A look around with no question can wander. A specific question tends to get a more focused answer.',
+    before: 'Look at the sync.',
+    after: 'Look at the sync and tell me whether it retries failed records.',
+  },
+}
+
+const pct = (part: number, whole: number) => Math.min(100, whole === 0 ? 0 : Math.round((part / whole) * 100))
+
+/** Percentages need a few tips behind them; below this, the counts are said plainly instead. */
+const MIN_SHOWN = 5
+
+/** The review: two plain sentences by default, then the guidance's date; `deep` adds each category's numbers and code. */
+export const reviewText = (weeks: PromptWeeks, now: number, guideChecked: string | null, deep = false): string => {
+  const totals = recentTotals(weeks, now)
+  if (totals.length === 0) return 'No Boomi prompt tips in the last four weeks, so there is nothing to review yet.'
+  const [first, second] = totals
+  const seen = totals.reduce((n, t) => n + t.seen, 0)
+  const fixed = totals.reduce((n, t) => n + t.followed, 0)
+  const used = totals.reduce((n, t) => n + t.used, 0)
+  const gapLine = `The most common gap: ${LESSONS[first!.code].gap}${second ? `, then ${LESSONS[second.code].gap}` : ''}.`
+  const rateLine =
+    seen >= MIN_SHOWN
+      ? `Your next Boomi prompt no longer had the gap ${pct(fixed, seen)}% of the time, and you used the upgrade for ${pct(used, seen)}% of the tips.`
+      : `Only ${seen} tip${seen === 1 ? '' : 's'} counted so far, too few for a percentage.`
+  const lines = [gapLine, rateLine]
+  if (deep) {
+    lines.push('', 'By category:')
+    for (const t of totals) {
+      const rates = t.seen >= MIN_SHOWN
+        ? `no longer flagged in your next Boomi prompt ${pct(t.followed, t.seen)}%, upgrade used ${pct(t.used, t.seen)}%`
+        : `too few to give rates (${t.seen} shown)`
+      lines.push(`  ${LESSONS[t.code].title} [${t.code}]: shown ${t.seen}, ${rates}`)
+    }
+  }
+  lines.push(guideChecked ? `Anthropic's guidance was last read on ${guideChecked}.` : "Anthropic's guidance hasn't been read yet: run /bc-dashboard prompt guide refresh.")
+  return lines.join('\n')
+}
+
+/** One lesson as text: the gap, why it matters, a before and after, the source, and how to say whether it helped. */
+export const lessonText = (code: PromptCheckCode, source: string): string => {
+  const l = LESSONS[code]
+  return [
+    `Lesson: ${l.title}`,
+    '',
+    l.why,
+    '',
+    `Before: ${l.before}`,
+    `After:  ${l.after}`,
+    '',
+    `Reference: ${source}. The lesson text is written by hand from it; read the page for its current wording.`,
+    `Was this useful? /bc-dashboard prompt lesson good ${code}  or  /bc-dashboard prompt lesson bad ${code}`,
+  ].join('\n')
 }

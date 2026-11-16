@@ -2,6 +2,13 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.69.0
+
+- **Prompt review and lessons.** Each week the dashboard counts, per kind of gap in a prompt, how often it was shown, how often the next Boomi prompt no longer had the gap, and how often the upgrade was used. Only the counts are kept, never the prompt text. `/bc-dashboard prompt review` says what came up most in two plain sentences; `--deep` adds the numbers, and `--ai` has a model write three tips from the counts alone. The report has a Prompt review section with the same two sentences.
+- **Lessons you can ask for.** `/bc-dashboard prompt lesson [category]` teaches one kind of gap with a why, a before and after, and its source. `lesson good` or `lesson bad` says whether it helped, and the dashboard keeps the count.
+- **Anthropic's guidance behind the tips.** `/bc-dashboard prompt guide refresh` now reads Anthropic's prompt engineering overview live, and records the date it was read. Until a refresh has run, the review says the guidance is not yet checked.
+  The page is only trusted when it is a real page of the guidance (it must name prompt engineering, and be long enough), its text is labelled untrusted before the model reads it, and a refresh only ever shows its draft. The engine's fetch cannot be cancelled and always reads the whole page, so the 30-second wait and the size limit only stop the dashboard waiting or accepting it; they do not stop the download itself.
+
 ## 0.68.0
 
 - **The budget gate fails closed.** When the spend can't be read, a wrapper script that holds a Companion change is refused as well, and a session with no dollar cost reported counts as unreadable, not as $0.

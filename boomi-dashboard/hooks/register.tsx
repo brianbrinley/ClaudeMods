@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, PromptSubmitInput, Register } from 'claude-code'
 
-import type { Activity, CompanionPlugin, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, PromptCounts, PromptTips, PromptTry, UsageBreakdownSeen, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
+import type { Activity, CompanionPlugin, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, PromptCheckCode, PromptCounts, PromptWeeks, PromptTips, PromptTry, UsageBreakdownSeen, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -150,11 +150,11 @@ import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import { EMPTY_INDEX, contextLines, docName, folderComponentOf, indexFile, isCurrent, relevantComponents, relevantPlaces, relevantSections, sectionsOf } from './retrieve'
 import type { DocIndex, FolderComponent, Section } from './retrieve'
-import { GUIDE, GUIDE_STAMP, REFRESH_SYSTEM, driftNote, guideFor, guideStatus, guideText, refreshRequest, refreshText } from './prompt-guide'
+import { GUIDANCE_SOURCES, GUIDE, GUIDE_STAMP, REFRESH_SYSTEM, driftNote, guideFor, guideStatus, guideText, refreshRequest, refreshText } from './prompt-guide'
 import { companionUseLine, isFresh, parseUsage, topHabit, usageArgv } from './usage-breakdown'
 import { paceOf, recordDay } from './spend-history'
 import type { SpendDays } from './spend-history'
-import { NO_COUNTS, NUDGE_ONLY, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, isClosingOut, isSuggestionTaken, maskPrompt, reportLines, rewriteParts, rewriteRequest, rewriteSystem, statusPart, tipsText, upgradePrompt } from './prompt-check'
+import { NO_COUNTS, NUDGE_ONLY, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, isClosingOut, isSuggestionTaken, maskPrompt, reportLines, rewriteParts, rewriteRequest, rewriteSystem, statusPart, tipsText, upgradePrompt, lessonText, recentTotals, reviewText as promptReviewText, tallyWeek, LESSONS } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import { ACTIVITY_LOG_LINE, activityLogSetting, turnOffActivityLog, turnOnActivityLog } from './activity-env'
 import type { Credentials } from './platform'
@@ -275,6 +275,14 @@ const promptTips = atom({ plugin: 'boomi-dashboard', key: 'promptTips' } as cons
 
 /** How many prompts were checked, had tips, and followed the tips before them, this session. */
 const promptCounts = atom({ plugin: 'boomi-dashboard', key: 'promptCounts' } as const, NO_COUNTS as PromptCounts)
+/** The week-by-week prompt tallies the review reads: category counts only, never prompt text. */
+const promptWeeks = atom({ plugin: 'boomi-dashboard', key: 'promptWeeks' } as const, {} as PromptWeeks)
+/** The check the upgrade was last counted as used for, so one upgrade counts once however many ways it's taken. */
+const usedFor = atom({ plugin: 'boomi-dashboard', key: 'promptUsedFor' } as const, null as number | null)
+/** How often each lesson was marked helpful or not, from /bc-dashboard prompt lesson good|bad. */
+const tipFeedback = atom({ plugin: 'boomi-dashboard', key: 'tipFeedback' } as const, {} as Partial<Record<PromptCheckCode, { helpful: number; unhelpful: number }>>)
+/** The date Anthropic's prompting guidance was last read by the guide refresh; null until it has been. */
+const guidanceChecked = atom({ plugin: 'boomi-dashboard', key: 'guidanceChecked' } as const, null as string | null)
 
 /** True while a model rewrites the upgrade from the Prompt tab. */
 const promptBusy = atom({ plugin: 'boomi-dashboard', key: 'promptBusy' } as const, false)
@@ -1993,7 +2001,7 @@ const reportNow = async ($: Engine, settings: Settings) => {
   const state = await read($, dashboard)
   return report(
     state,
-    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await withBudget($, settings), changes: changeLines(state.activity), promptLines: reportLines(await read($, promptCounts)) },
+    { session: footer.session, date: new Date(now).toISOString().slice(0, 10), repo: footer.repo, usage: await withBudget($, settings), changes: changeLines(state.activity), promptLines: [...reportLines(await read($, promptCounts)), ...(await reviewLinesFor($, now))] },
     now,
     settings.windowMs,
   )
@@ -2275,7 +2283,7 @@ const USAGE = [
   '/bc-dashboard history         past Companion sessions on this machine and what each cost',
   '/bc-dashboard resume [n]      copy the command that reopens a past session in a new terminal',
   '/bc-dashboard review [n]      what made a past session cost what it did, and what to change next time',
-  '/bc-dashboard prompt [use|upgrade|guide] your last Boomi prompt\'s tips and an upgraded prompt; use puts it in the prompt box, upgrade has a model rewrite it',
+  '/bc-dashboard prompt [use|upgrade|guide|review|lesson] your last Boomi prompt\'s tips and an upgraded prompt; use puts it in the prompt box, upgrade has a model rewrite it',
   '/bc-dashboard activity-log [on|off|status|never] turn Companion\'s activity log on or off in its env file (one line, asked first), or stop the offer',
   '/bc-dashboard seen            mark watched changes as seen (expected)',
   '/bc-dashboard banner          show the banner above the prompt again',
@@ -2503,6 +2511,9 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   const tips = checkPrompt(typed, facts, settings.promptSkip)
   const before = await read($, promptTips)
   await update($, promptCounts, c => countsAfter(c, before?.tips, tips))
+  const gone = (before?.tips ?? []).map(t => t.code).filter(code => code !== 'secret' && !tips.some(t => t.code === code))
+  const nowMs = await $.clock.now()
+  await update($, promptWeeks, w => tallyWeek(w, nowMs, { shown: tips.map(t => t.code).filter(code => code !== 'secret'), followed: gone, used: [] }))
   const upgrade = tips.length > 0 ? upgradePrompt(typed, facts, tips) : ''
   const at = await $.clock.now()
   await update($, promptTips, (): PromptTips | null =>
@@ -2574,11 +2585,22 @@ const closePromptTab = async ($: Engine, settings: Settings) => {
 }
 
 /** Sends a held prompt (or its upgrade) as the person's own words; the dashboard never checks its own sends. */
+/** The upgrade was taken (put in the box, edited or sent): its categories count as used this week. */
+const noteUsed = async ($: Engine) => {
+  const tips = await read($, promptTips)
+  if (!tips || tips.tips.length === 0) return
+  if ((await read($, usedFor)) === tips.at) return
+  await update($, usedFor, () => tips.at)
+  const nowMs = await $.clock.now()
+  await update($, promptWeeks, w => tallyWeek(w, nowMs, { shown: [], followed: [], used: tips.tips.map(t => t.code).filter(code => code !== 'secret') }))
+}
+
 const sendHeld = async ($: Engine, settings: Settings, which: 'upgrade' | 'typed') => {
   const held = await read($, promptHeld)
   const tips = await read($, promptTips)
   if (held === null || !tips) return
   const text = which === 'upgrade' ? tips.upgrade : held
+  if (which === 'upgrade') await noteUsed($)
   await update($, promptHeld, () => null)
   await update($, promptNote, () => (which === 'upgrade' ? 'Sent the upgrade to Claude.' : 'Sent your prompt to Claude as typed.'))
   await refreshStatus($, settings).catch(() => undefined)
@@ -2598,6 +2620,7 @@ const editHeld = async ($: Engine, settings: Settings) => {
     await update($, promptNote, () => "The prompt box couldn't take it here: send it from here instead.")
     return
   }
+  await noteUsed($)
   await update($, promptHeld, () => null)
   await update($, promptNote, () => 'The upgrade is in the prompt box to edit. Nothing was sent.')
   await refreshStatus($, settings).catch(() => undefined)
@@ -2818,7 +2841,14 @@ const guideCommand = async ($: Engine, settings: Settings, rest: string): Promis
   const changelogs: Record<string, string[]> = {}
   for (const s of stale) changelogs[s.plugin] = await notesOf(s.plugin)
   if (rest.split(/\s+/)[0] !== 'refresh') return guideText(status, changelogs)
-  if (stale.length === 0) return 'The dashboard\'s guide is up to date with every Companion plugin on in this session. Nothing to refresh.'
+  // Anthropic's prompting guidance, read now, so the lines and the lessons follow what Anthropic says today.
+  const guidance = await guidanceExcerpts($)
+  if (guidance.length > 0) {
+    const day = new Date(await $.clock.now()).toISOString().slice(0, 10)
+    await update($, guidanceChecked, () => day)
+  }
+  const guideNote = guidance.length > 0 ? '' : "Couldn't read Anthropic's guidance just now, so the date is unchanged.\n\n"
+  if (stale.length === 0) return `${guideNote}The dashboard's guide is up to date with every Companion plugin on in this session. Nothing to refresh.`
   const drafts: string[] = []
   for (const s of stale) {
     const all = changelogs[s.plugin] ?? []
@@ -2827,14 +2857,108 @@ const guideCommand = async ($: Engine, settings: Settings, rest: string): Promis
     const reply = await $.model.complete({
       model: settings.promptModel,
       system: REFRESH_SYSTEM,
-      prompt: refreshRequest(s.plugin, s.stamped, s.installed, GUIDE.filter(e => e.plugin === s.plugin), notes, headings),
+      prompt: refreshRequest(s.plugin, s.stamped, s.installed, GUIDE.filter(e => e.plugin === s.plugin), notes, headings, guidance),
       maxTokens: 1500,
       effort: 'low',
       timeoutMs: MODEL_TIMEOUT_MS,
     })
     drafts.push(reply.isAnswered ? refreshText(s.plugin, s.installed, reply.text, settings.promptModel) : `${s.plugin}: ${settings.promptModel} couldn't draft it (${reply.reason}). Nothing was changed.`)
   }
-  return drafts.join('\n\n')
+  return guideNote + drafts.join('\n\n')
+}
+
+/** The text of each guidance page, tags stripped and cut short, for the refresh to read. Empty when none could be read. */
+const guidanceExcerpts = async ($: Engine): Promise<string[]> => {
+  const out: string[] = []
+  for (const src of GUIDANCE_SOURCES) {
+    // The engine's fetch has no abort, so the wait is capped: a stalled page is given up on, not waited for.
+    const deadline = new Promise<undefined>(resolve => $.clock.after(GUIDANCE_TIMEOUT_MS, () => resolve(undefined)))
+    const res = await Promise.race([$.http.fetch(src.url, { headers: { Accept: 'text/html' } }).catch(() => undefined), deadline])
+    const declared = Number(res?.headers?.['content-length'])
+    if (!res?.ok || !res.text || res.text.length > GUIDANCE_MAX_CHARS || (Number.isFinite(declared) && declared > GUIDANCE_MAX_CHARS)) continue
+    const text = res.text
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    // A page too short to be the guidance (an error or a sign-in page) is not stamped as read.
+    // The page must be the guidance itself (its title names prompt engineering), not a sign-in or an error page.
+    if (text.length < GUIDANCE_MIN_CHARS || !/prompt engineering/i.test(text)) continue
+    out.push(`${src.title} (${src.url}): ${text.slice(0, 6000)}`)
+  }
+  return out
+}
+const GUIDANCE_TIMEOUT_MS = 30_000
+const GUIDANCE_MIN_CHARS = 500
+const GUIDANCE_MAX_CHARS = 512 * 1024
+
+/** The guidance's date as the review and the lessons say it. */
+const guidanceDate = (checked: string | null) => checked ?? 'not yet (run /bc-dashboard prompt guide refresh)'
+
+const isCode = (c: string): c is PromptCheckCode => Object.prototype.hasOwnProperty.call(LESSONS, c)
+
+/** The review lines for the report's section; none before any tips were counted in the last four weeks. */
+const reviewLinesFor = async ($: Engine, now: number): Promise<string[]> => {
+  const weeks = await read($, promptWeeks)
+  if (recentTotals(weeks, now).length === 0) return []
+  return ['', '## Prompt review', '', promptReviewText(weeks, now, await read($, guidanceChecked)), '', 'More detail: /bc-dashboard prompt review --deep']
+}
+
+const REVIEW_SYSTEM = [
+  'You are a prompt engineer coaching a Boomi integration developer. Write exactly three tips, numbered 1, 2 and 3.',
+  'Each tip: a plain-language headline, one sentence on why it helps, and one before and after example with made-up names.',
+  'Use only the categories and numbers you are given. Do not invent statistics. Friendly and direct; explain any term you use. Under 200 words in all.',
+].join('\n')
+
+/** `/bc-dashboard prompt review [--deep] [--ai]`: the review in two sentences; --deep adds the numbers; --ai has a model write three tips from the counts. */
+const promptReviewCommand = async ($: Engine, settings: Settings, rest: string): Promise<string> => {
+  const flags = rest.split(/\s+/).filter(Boolean)
+  const weeks = await read($, promptWeeks)
+  const nowMs = await $.clock.now()
+  const checked = guidanceDate(await read($, guidanceChecked))
+  if (!flags.includes('--ai')) {
+    const plain = promptReviewText(weeks, nowMs, await read($, guidanceChecked), flags.includes('--deep'))
+    if (!flags.includes('--deep')) return plain
+    const feedback = await read($, tipFeedback)
+    const marks = (Object.keys(feedback) as PromptCheckCode[]).map(c => `${c}: ${feedback[c]!.helpful} helpful, ${feedback[c]!.unhelpful} not`)
+    return marks.length > 0 ? `${plain}\n\nLessons marked: ${marks.join(' · ')}` : plain
+  }
+  const totals = recentTotals(weeks, nowMs)
+  if (totals.length === 0) return promptReviewText(weeks, nowMs, await read($, guidanceChecked))
+  const rows = totals.map(t => `- ${LESSONS[t.code].title} [${t.code}]: shown ${t.seen}, ${t.seen >= 5 ? `no longer flagged in your next Boomi prompt ${Math.min(100, Math.round((t.followed / t.seen) * 100))}%, upgrade used ${Math.min(100, Math.round((t.used / t.seen) * 100))}%` : 'too few to give rates'}`)
+  const reply = await $.model.complete({
+    model: settings.promptModel,
+    system: REVIEW_SYSTEM,
+    prompt: ['Gaps in the last four weeks of prompts (shown = tips the dashboard showed; fixed = the next prompt no longer had the gap; upgrade = the rewritten prompt was used):', ...rows, '', `Anthropic's guidance was last checked: ${checked}.`].join('\n'),
+    maxTokens: 900,
+    effort: 'low',
+    timeoutMs: MODEL_TIMEOUT_MS,
+  })
+  return reply.isAnswered
+    ? `Tips from ${settings.promptModel}, written from the counts only (no prompt text was sent):\n\n${reply.text}`
+    : `${settings.promptModel} couldn't write the tips (${reply.reason}). The plain review:\n\n${promptReviewText(weeks, nowMs, await read($, guidanceChecked))}`
+}
+
+/** `/bc-dashboard prompt lesson [category]`, or `good|bad <category>` to say whether a lesson helped. */
+const lessonCommand = async ($: Engine, rest: string): Promise<string> => {
+  const [verb = '', code = ''] = rest.split(/\s+/)
+  const categories = Object.keys(LESSONS).join(' | ')
+  if (verb === 'good' || verb === 'bad') {
+    if (!isCode(code)) return `Usage: /bc-dashboard prompt lesson ${verb} <${categories}>`
+    await update($, tipFeedback, f => {
+      const was = f[code] ?? { helpful: 0, unhelpful: 0 }
+      return { ...f, [code]: verb === 'good' ? { ...was, helpful: was.helpful + 1 } : { ...was, unhelpful: was.unhelpful + 1 } }
+    })
+    return `Thanks, noted: that lesson ${verb === 'good' ? 'helped' : 'did not help'}. The count is kept and shows in /bc-dashboard prompt review --deep; it does not change the lesson yet.`
+  }
+  if (verb !== '' && !isCode(verb)) return `No lesson called ${verb.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').slice(0, 40)}. Pick one of: ${categories}`
+  const chosen: PromptCheckCode | undefined = isCode(verb) ? verb : recentTotals(await read($, promptWeeks), await $.clock.now())[0]?.code
+  if (!chosen) return `No gaps counted in the last four weeks yet. Pick a category to learn about: /bc-dashboard prompt lesson <${categories}>`
+  const source = `${GUIDANCE_SOURCES[0]!.title}, ${GUIDANCE_SOURCES[0]!.url}`
+  return lessonText(chosen, source)
 }
 
 /** /bc-dashboard prompt: the last prompt's tips; `use` puts the upgrade in the prompt box; `upgrade` has a model rewrite it. */
@@ -2851,13 +2975,17 @@ const promptCommand = async ($: Engine, settings: Settings, target: string): Pro
     if (verb === 'use') {
       const tips = await read($, promptTips)
       if (!tips) return 'No upgraded prompt yet: no Boomi prompt this session has had tips.'
-      return (await refill($, tips.upgrade))
+      const filled = await refill($, tips.upgrade)
+      if (filled) await noteUsed($)
+      return filled
         ? 'The upgraded prompt is in the prompt box: fill in any [placeholder], then press Enter.'
         : `The prompt box couldn't take it here. The upgraded prompt:\n\n${tips.upgrade}`
     }
     if (verb === 'guide') return await guideCommand($, settings, target.trim().slice('guide'.length).trim())
+    if (verb === 'review') return await promptReviewCommand($, settings, target.trim().slice('review'.length).trim())
+    if (verb === 'lesson') return await lessonCommand($, target.trim().slice('lesson'.length).trim())
     if (verb === 'upgrade') return await rewritePrompt($, settings, target.trim().slice('upgrade'.length).trim() || undefined)
-    return 'Usage: /bc-dashboard prompt shows your last Boomi prompt\'s tips; prompt use puts the upgrade in the prompt box; prompt upgrade [a note] has a model rewrite it, following the note; prompt guide [refresh] compares the dashboard\'s guide with the Companion plugins installed and, with refresh, has a model draft edits.'
+    return 'Usage: /bc-dashboard prompt review [--deep|--ai] | prompt lesson [category] | prompt shows your last Boomi prompt\'s tips; prompt use puts the upgrade in the prompt box; prompt upgrade [a note] has a model rewrite it, following the note; prompt guide [refresh] compares the dashboard\'s guide with the Companion plugins installed and, with refresh, has a model draft edits.'
   } catch (error) {
     return `The dashboard couldn't do that: ${messageOf(error)}. Your prompt is safe.`
   }
@@ -4025,7 +4153,7 @@ export const register: Register = (on, options) => {
           {held !== null ? <Button key="nudge-send-typed" label="Send as typed" onPress={() => sendHeld($, settings, 'typed')} /> : undefined}
           {held === null ? (
             <Button key="nudge-use" label="Use it" onPress={async () => {
-              await refill($, nudge.upgrade)
+              if (await refill($, nudge.upgrade)) await noteUsed($)
               await update($, promptNudgeHidden, () => nudge.at)
             }} />
           ) : undefined}

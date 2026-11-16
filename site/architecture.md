@@ -42,7 +42,7 @@ The exception is a spent budget. If Claude tries to change something in Boomi af
 
 ## What happens to a prompt you type
 
-If you take a suggestion with Tab, it goes straight to Claude. Anything else that looks like Boomi work gets checked first. By default the dashboard holds the prompt and shows you tips and a rough upgrade in the Prompt tab. Meanwhile it asks a model for a better rewrite, which replaces the rough one when it's ready.
+If you take a suggestion with Tab, it goes straight to Claude. Anything else that looks like Boomi work gets checked first. By default the prompt goes through as you typed it. When Boomi work could be clearer, the dashboard shows tips and a quick upgrade in the Prompt tab, and a model writes a better upgrade in the background. Set `confirm` and it holds the prompt in the Prompt tab until you choose: send it as typed, send the upgrade, or edit it.
 
 Whatever you send from the Prompt tab goes through unchecked, so it can't get stuck in a loop.
 
@@ -51,6 +51,10 @@ Whatever you send from the Prompt tab goes through unchecked, so it can't get st
 </figure>
 
 [Prompt tips](../boomi-dashboard/README.md#prompt-tips) explains the settings.
+
+The dashboard also learns which gaps keep coming back. Each week it counts how often each kind of gap was shown, how often the next Boomi prompt no longer had the gap, and how often the upgrade was used. It keeps those counts only, never the prompt text. `/bc-dashboard prompt review` says what came up most, in two plain sentences; `--deep` adds the numbers, and `--ai` has a model write three tips from the counts alone. `/bc-dashboard prompt lesson` teaches one gap with a before and after, then asks whether it helped.
+
+The lesson text is written by hand as a reference to Anthropic's prompt engineering guidance. The guide refresh reads that guidance live and records the date it was read.
 
 ## How the dashboard keeps up with Companion
 

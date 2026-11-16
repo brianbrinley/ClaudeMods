@@ -24,8 +24,13 @@ NOTES = [
     ),
     (
         "Held, not blocked",
-        "In <code>confirm</code> mode (the default) the prompt waits in the Prompt tab: send it as typed, send the upgrade, or edit it. "
+        "By default (<code>suggest</code>) the prompt goes through with its tips. In <code>confirm</code> mode it waits in the Prompt tab: send it as typed, send the upgrade, or edit it. "
         "Claude sees nothing until you choose. A suggestion taken with Tab skips all of this.",
+    ),
+    (
+        "What it learns, without the text",
+        "Each week the dashboard counts how often each kind of gap was shown, no longer flagged in the next Boomi prompt, and taken up in the upgrade. "
+        "Only the counts are kept. <code>prompt review</code> summarises them, and <code>prompt lesson</code> teaches one gap at a time.",
     ),
     (
         "Never checked twice",

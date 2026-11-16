@@ -3984,6 +3984,48 @@ test('block: a session whose cost in dollars is not reported is not treated as $
   await $.command.run(dashboard('text'))
 })
 
+test('prompt lesson records good or bad for a category, refuses an unknown one, and review --deep shows the marks', async ($, on) => {
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  expect((await $.command.run(dashboard('prompt lesson good environment'))).text).toContain('Thanks, noted: that lesson helped.')
+  expect((await $.command.run(dashboard('prompt lesson bad environment'))).text).toContain('did not help')
+  expect((await $.command.run(dashboard('prompt lesson good nonsense'))).text).toContain('Usage: /bc-dashboard prompt lesson good')
+  expect((await $.command.run(dashboard('prompt lesson another\u0007thing'))).text).toContain('No lesson called anotherthing.')
+  expect((await $.command.run(dashboard('prompt review --deep'))).text).toContain('Lessons marked: environment: 1 helpful, 1 not')
+})
+
+test('prompt review --ai sends only category counts to the model, never the prompt', async ($, on) => {
+  const asks: string[] = []
+  on('model.complete', async (_$, e) => {
+    asks.push(String(e.prompt))
+    return { value: { isAnswered: true, text: '1. Name the environment.', usage: { input_tokens: 90, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } as never
+  })
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  const out = (await $.command.run(dashboard('prompt review --ai'))).text
+  expect(out).toContain('no prompt text was sent')
+  expect(out).toContain('1. Name the environment.')
+  expect(asks.some(p => p.includes('shown'))).toBe(true)
+  expect(asks.every(p => !p.includes(VAGUE))).toBe(true)
+})
+
+test('prompt guide refresh records the day Anthropic’s guidance was read; a sign-in page does not count', async ($, on) => {
+  let body = `<html><body><h1>Prompt engineering overview</h1><p>${'Be clear and direct about the task and its context. '.repeat(20)}</p></body></html>`
+  on('http.fetch', async () => ({ value: { status: 200, ok: true, headers: {}, text: body } }))
+  on('model.complete', async () => ({ value: { isAnswered: true, text: 'Nothing to change.', usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }) as never)
+  companionInstalled(on)
+  const { typed } = await promptWorld($, on, () => undefined, { 'active-development': '', [DOC]: DOC_TEXT, [`${COMPANION}/CHANGELOG.md`]: CHANGES })
+  await clock.advance(1_000)
+  await typed(VAGUE)
+  expect((await $.command.run(dashboard('prompt review'))).text).toContain("hasn't been read yet")
+  body = '<html><body>Sign in to continue</body></html>'
+  await $.command.run(dashboard('prompt guide refresh'))
+  expect((await $.command.run(dashboard('prompt review'))).text).toContain("hasn't been read yet")
+  body = `<html><body><h1>Prompt engineering overview</h1><p>${'Be clear and direct about the task and its context. '.repeat(20)}</p></body></html>`
+  await $.command.run(dashboard('prompt guide refresh'))
+  expect((await $.command.run(dashboard('prompt review'))).text).toMatch(/last read on \d{4}-\d{2}-\d{2}\./)
+})
+
 test('the store is tidied: the old docs index goes, and so do the steps of folders long unused', async ($, on) => {
   world(on, { [FILE]: ORDERS })
   const store: Record<string, unknown> = {

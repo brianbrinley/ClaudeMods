@@ -377,7 +377,7 @@ The dashboard pane shows `◐ 4 prompt tips for your last prompt` with a **Promp
 
 **Privacy:** your prompt is masked before it's kept, it's only kept in this session's state, and it's never logged or saved across sessions. A held prompt is kept as typed, in this session only, until you send or discard it. The model rewrite reads the masked prompt, the session's facts, matching component names and Companion's docs. It never reads Companion's `.env` or its token. The dashboard only reads `BOOMI_ENVIRONMENT_ID` from it, for the tips.
 
-**What gets counted:** `/bc-dashboard prompt` and the session report tell you how many prompts were checked and had tips, how many tips your next prompt followed, and which tip came up most.
+**What gets counted:** `/bc-dashboard prompt` and the session report tell you how many prompts were checked and had tips, how many tips your next prompt followed, and which tip came up most. Each week the dashboard also keeps, per kind of gap, how often it was shown, no longer flagged in the next Boomi prompt, and taken up in the upgrade. Only these counts are kept, never the prompt text, and `/bc-dashboard prompt review` reads them in plain words. Weeks run Monday to Sunday in UTC, and the review covers the last four weeks. Percentages wait for at least five tips counted in all, and the detail gives each category's rates only from five tips in that category.
 
 **To skip a check,** list it in `promptSkip`, for example `promptSkip test,steps`.
 
@@ -495,7 +495,7 @@ When you're online, the page loads its fonts from Google Fonts. Offline, it fall
 | `/bc-dashboard theme [name]` | | Picks the pane's theme, or lists them. |
 | `/bc-dashboard components [csv] [save]` | | Copies every component with its IDs, tab-separated for a spreadsheet (`csv` copies it as CSV, and `save` also writes a `.csv` file). |
 | `/bc-dashboard config [area\|section]` | | Goes through the dashboard's settings a few questions at a time: pick an area (`budget`, `pane`, `data`), then a section of at most five questions, or name a section to go straight there (`budgets`, `limits`, `tokens`, `look`, `nudges`, `prompts`, `history`, `checks`, `files`). `config <setting> <value>` sets one, such as `config budgetUsd 5`, and `config list` shows them all. |
-| `/bc-dashboard prompt [use\|upgrade\|guide [refresh]]` | | Your last Boomi prompt's [tips](#prompt-tips) and an upgraded version. `use` puts it in the prompt box, `upgrade` has a model rewrite it, `guide` compares the dashboard's guide with your installed Companion plugins, and `guide refresh` drafts edits. |
+| `/bc-dashboard prompt [use\|upgrade\|guide [refresh]\|review [--deep\|--ai]\|lesson [category]]` | | Your last Boomi prompt's [tips](#prompt-tips) and an upgraded version. `use` puts it in the prompt box, `upgrade` has a model rewrite it, `guide` compares the dashboard's guide with your installed Companion plugins, and `guide refresh` drafts edits, reading Anthropic's prompting guidance live. `review` says which gaps came up most in two sentences (`--deep` adds the numbers, `--ai` has a model write three tips from the counts only). `lesson` teaches one gap with a before and after, then `lesson good\|bad <category>` says whether it helped. |
 | `/bc-dashboard banner` | | Brings the banner back after **Hide**. |
 
 Claude sees the tools as `mcp__boomi-dashboard__<tool>`. Ask it "what's left to fix?" and it'll answer from the summary.

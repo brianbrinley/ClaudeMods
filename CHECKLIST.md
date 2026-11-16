@@ -538,3 +538,22 @@ Use a test `.env` pointed at a TEST environment, and a second folder whose `.env
   **Pass:** no `claude-haiku` 404s and no `/usage` child runs from this session. **Fail:** either shows up.
 - [ ] **X8. Subagents.** Ask Claude to run a subagent while Companion work has left a next step to offer.
   **Pass:** the offer appears when the main turn ends, not when the subagent does. **Fail:** it appears mid-turn.
+
+## Z. Prompt review and lessons (boomi-dashboard 0.69.0)
+
+*In a real Claude Code session with Companion, `promptCheck` on `suggest`. Send a few vague Boomi prompts (for example, a deploy with no environment) and use the upgrade on some of them before you run these.*
+
+- [ ] **Z1. The review in two sentences.** Run `/bc-dashboard prompt review`.
+  **Pass:** two plain sentences name the most common gap and how often it was no longer flagged, then a line with the guidance date. **Fail:** jargon, codes only, or a count with no words.
+- [ ] **Z2. The numbers on request.** Run `/bc-dashboard prompt review --deep`.
+  **Pass:** each category shows how many times it was shown, its no-longer-flagged and upgrade-used rates (or "too few to give rates" under five), with its code. **Fail:** missing categories you know you triggered.
+- [ ] **Z3. A lesson.** Run `/bc-dashboard prompt lesson`, then `/bc-dashboard prompt lesson environment`.
+  **Pass:** a why, a before and after, a line saying what it is based on, and the good/bad line. **Fail:** a missing part, or an error.
+- [ ] **Z4. A lesson marked not useful.** Run `/bc-dashboard prompt lesson bad environment`.
+  **Pass:** the reply thanks you and says the count is kept. **Fail:** an error, or nothing saved.
+- [ ] **Z5. Guidance read live.** Run `/bc-dashboard prompt guide refresh` with network on.
+  **Pass:** the review then says "Anthropic's guidance was last read on" with today's date. **Fail:** it still says the guidance hasn't been read after a successful refresh, or the refresh fails with the network on.
+- [ ] **Z6. No prompt text stored.** Look in the dashboard's store file after a session: the weekly counts are numbers keyed by category and week.
+  **Pass:** no prompt words appear in the store. **Fail:** any prompt text is stored.
+- [ ] **Z7. The AI review.** Run `/bc-dashboard prompt review --ai`.
+  **Pass:** three numbered tips, friendly, using only the categories shown. **Fail:** invented statistics, or prompt text quoted back.
