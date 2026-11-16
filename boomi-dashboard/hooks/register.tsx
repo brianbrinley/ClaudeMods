@@ -4605,7 +4605,7 @@ export const register: Register = (on, options) => {
           </Text>
           <Button key="report-html" label="Report ↗" onPress={() => void reportFromPane($, settings)} />
         </Box>
-        {versionsText(footer.dashboard, plugins) && (
+        {(newer || companionNudge) && versionsText(footer.dashboard, plugins) && (
           <Text color={p.muted} backgroundColor={p.bg} dimColor>
             {versionsText(footer.dashboard, plugins)}
           </Text>

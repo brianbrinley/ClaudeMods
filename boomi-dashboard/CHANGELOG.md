@@ -4,7 +4,7 @@
 
 ## 0.67.0
 
-- **The pane's footer shows the versions.** Under the session line, the pane now names the dashboard's version and each Boomi Companion plugin's installed version, for example `dashboard 0.67.0 · Companion bc-integration 1.0.103`. It's read from the plugin files, so it shows what is installed, not what is newest. When a daily check has seen a newer Companion plugin, the footer also says so, with a `↗` link to that plugin's GitHub repository, until it is installed.
+- **The pane's footer shows the versions when one is behind.** Under the session line, the pane names the dashboard's version and each Boomi Companion plugin's installed version, for example `dashboard 0.67.0 · Companion bc-integration 1.0.103`, but only while a newer dashboard or Companion plugin is out, so a current install adds no line. It's read from the plugin files, so it shows what is installed, not what is newest. When a daily check has seen a newer Companion plugin, the footer also says so, with a `↗` link to that plugin's GitHub repository, until it is installed.
 
 ## 0.66.0
 
