@@ -112,11 +112,29 @@ export const refreshRequest = (
   ].join('\n')
 
 /** The draft as a person reads it: the model's edit lines, and how to apply them. Nothing is written anywhere. */
-export const refreshText = (plugin: string, installed: string | undefined, reply: string, by: string): string =>
-  [
+/** The model's reply, kept only where it is an edit line in the grammar the refresh asks for; anything else is counted and dropped, never shown as an edit. */
+export const editLines = (reply: string): { kept: string[]; dropped: number } => {
+  const kept: string[] = []
+  let dropped = 0
+  for (const raw of reply.split('\n')) {
+    const line = raw.trim()
+    if (line === '') continue
+    if (line === 'Nothing to change.') { kept.push(line); continue }
+    const m = line.match(/^(ADD|CHANGE|REMOVE) \| ([^|]{1,80}) \|([^|]{0,300})\|([^|]{1,300})$/)
+    if (m && /^[\x20-\x7E]+$/.test(line)) kept.push(line)
+    else dropped++
+  }
+  return { kept, dropped }
+}
+
+export const refreshText = (plugin: string, installed: string | undefined, reply: string, by: string): string => {
+  const { kept, dropped } = editLines(reply)
+  return [
     `Draft edits to the guide for ${plugin}${installed ? ` ${installed}` : ''}, by ${by}. Read each against the note it names before using it:`,
     '',
-    reply.trim(),
+    kept.length > 0 ? kept.join('\n') : 'No edit lines in the reply.',
+    ...(dropped > 0 ? [`(${dropped} line${dropped === 1 ? '' : 's'} in the reply did not match the edit format and were left out.)`] : []),
     '',
     `To use them: edit GUIDE in hooks/prompt-guide.ts and set GUIDE_STAMP['${plugin}'] to '${installed ?? '<version>'}'. Nothing was changed.`,
   ].join('\n')
+}

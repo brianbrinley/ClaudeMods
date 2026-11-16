@@ -2887,7 +2887,9 @@ const guidanceExcerpts = async ($: Engine): Promise<string[]> => {
     // A page too short to be the guidance (an error or a sign-in page) is not stamped as read.
     // The page must be the guidance itself (its title names prompt engineering), not a sign-in or an error page.
     if (text.length < GUIDANCE_MIN_CHARS || !/prompt engineering/i.test(text)) continue
-    out.push(`${src.title} (${src.url}): ${text.slice(0, 6000)}`)
+    // Phrases that read as instructions to a model are cut out of the excerpt: a filter, not a guarantee; the person reviews every draft line.
+    const cleaned = text.replace(/ignore (all |any |the )?(previous|prior|above) (instructions|prompts?)|system prompt|you are now|<\|[^|]*\|>|\[\/?INST\]/gi, '[removed]')
+    out.push(`${src.title} (${src.url}): ${cleaned.slice(0, 4000)}`)
   }
   return out
 }
