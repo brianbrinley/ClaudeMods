@@ -26,6 +26,8 @@ let clock: MockClock
 /** What the surface does with a pane, and the session's id and origin remote. */
 type WorldOptions = {
   isPlaced?: boolean
+  /** The session's usage without a cost in dollars, as when Claude Code reports none. */
+  noCost?: boolean
   /** The session's ID, or a function for one that changes (a /clear). */
   sessionId?: string | (() => string)
   remote?: string | null
@@ -71,7 +73,7 @@ const world = (on: On, files: Record<string, string> = {}, options: WorldOptions
     return { value: undefined }
   })
   on('session.usage', async () => options.isUsageUnreadable ? ({ deny: 'unavailable' } as never) : ({
-    value: { startedAt: options.startedAt ?? 0, context: { window: 200_000, percent: options.contextPercent?.() ?? 12 }, rateLimits: options.limits?.() ?? [], cost: { usd: 1.25 } },
+    value: { startedAt: options.startedAt ?? 0, context: { window: 200_000, percent: options.contextPercent?.() ?? 12 }, rateLimits: options.limits?.() ?? [], ...(options.noCost ? {} : { cost: { usd: 1.25 } }) },
   }))
   return toasts
 }
@@ -3952,6 +3954,31 @@ test('block: when what is spent can’t be read, a change is refused and a read 
   expect(ran).toEqual([])
   expect((await $.tool.call({ tool: 'Bash', command: 'bash scripts/boomi-component-pull.sh --component-id x' })).deny).toBeUndefined()
   // The status line and the save carry on in the background: let them finish first.
+  await $.command.run(dashboard('text'))
+  await clock.advance(5_000)
+  await $.command.run(dashboard('text'))
+})
+
+test('block: a wrapper script that holds a change is refused when what is spent can’t be read', { options: { budgetUsd: 1, budgetEnforce: 'block' } }, async ($, on) => {
+  world(on, { [FILE]: ORDERS }, { isUsageUnreadable: true })
+  mock.store(on)
+  const ran = shell(on, 'ok')
+  const refused = await $.tool.call({ tool: 'Bash', command: 'bash run-all.sh' })
+  expect(refused.deny).toContain("couldn't read what's been spent")
+  expect(refused.deny).toContain('run-all.sh')
+  expect(ran).toEqual([])
+  await $.command.run(dashboard('text'))
+  await clock.advance(5_000)
+  await $.command.run(dashboard('text'))
+})
+
+test('block: a session whose cost in dollars is not reported is not treated as $0', { options: { budgetUsd: 1, budgetEnforce: 'block', noCost: true } }, async ($, on) => {
+  world(on, { [FILE]: ORDERS })
+  mock.store(on)
+  const ran = shell(on, 'ok')
+  // Refused, not waved through as $0: the reason may come from another reading of the spend.
+  expect((await $.tool.call({ tool: 'Bash', command: DEPLOY })).deny).toBeDefined()
+  expect(ran).toEqual([])
   await $.command.run(dashboard('text'))
   await clock.advance(5_000)
   await $.command.run(dashboard('text'))

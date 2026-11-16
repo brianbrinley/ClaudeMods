@@ -2942,9 +2942,8 @@ const wrapperTexts = async ($: Engine, command: string): Promise<{ path: string;
 }
 
 /** The answer when the spend can't be read: with enforcement on, a change is refused, since nothing shows the budget has room. */
-const budgetUnreadable = (settings: Settings, command: string): { deny: string; short: string } | undefined => {
+const budgetUnreadable = (settings: Settings, changes: readonly string[]): { deny: string; short: string } | undefined => {
   if (settings.budgetEnforce === 'warn') return undefined
-  const changes = [...companionChanges(command), ...platformWrites(command)]
   return changes.length > 0 ? refusal("the dashboard couldn't read what's been spent, so it can't tell whether the budget has room", changes.join('; ')) : undefined
 }
 
@@ -2957,8 +2956,10 @@ const budgetGate = async ($: Engine, settings: Settings, command: string): Promi
     else changes.push(...[...companionChanges(text), ...platformWrites(text)].map(c => `${c}, inside ${path}`))
   }
   if (changes.length === 0) return undefined
-  // A session budget needs the session's spend: without a reading, that isn't $0.
-  if (settings.budgetUsd > 0 && !(await read($, budgetAllowed)) && (await usageOf($)).now === undefined) return budgetUnreadable(settings, command)
+  // A budget needs the session's spend in dollars (and the month's, when one is set): a reading without them is not $0.
+  const usage = await usageOf($)
+  const needsSpend = settings.budgetUsd > 0 || settings.companionMonthlyUsd > 0
+  if (needsSpend && !(await read($, budgetAllowed)) && (usage.now === undefined || usage.usd === undefined)) return budgetUnreadable(settings, changes)
   const { spent, isAllowed } = await enforcementNow($, settings)
   if (spent.length === 0 || isAllowed) return undefined
   const refuse = (isChosen = false) => ({ deny: denyMessage(spent, changes, settings.budgetEnforce, isChosen), short: blockedDetail(spent) })
@@ -3787,7 +3788,7 @@ export const register: Register = (on, options) => {
     // A spent budget, with budgetEnforce confirm or block, stops Companion changes before they run.
     // Production read-only (envCheck enforce) comes first: a refused change never reaches the budget question.
     const envRefusal = await environmentRefusal($, settings, command).catch(() => environmentGate(command, settings.envCheck, undefined, 'the environment check failed', settings.envFile))
-    const gate = envRefusal ?? (await budgetGate($, settings, command).catch(() => budgetUnreadable(settings, command)))
+    const gate = envRefusal ?? (await budgetGate($, settings, command).catch(() => budgetUnreadable(settings, [...companionChanges(command), ...platformWrites(command), ...wrapperRuns(command).map(({ path }) => `run ${path}, which the dashboard couldn't read`)])))
     const runs = scriptRuns(command)
     const checks = bdiStatusChecks(command)
     const deploys = datahubStatusChecks(command)

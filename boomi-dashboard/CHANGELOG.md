@@ -4,6 +4,7 @@
 
 ## 0.68.0
 
+- **The budget gate fails closed.** When the spend can't be read, a wrapper script that holds a Companion change is refused as well, and a session with no dollar cost reported counts as unreadable, not as $0.
 - **Boomi can't hang the session.** Every Boomi call now has a 120-second limit, and the production and login checks at the start of a session run in the background, so a slow or dead network doesn't hold up the start or the first prompt after `/clear`. The production check still reads them for itself before a change.
 - **Polling tells the truth.** The pane said `Connected.` even when every watched component failed. Now it names the failure and waits longer between tries, up to half an hour. A hung call can no longer stop polling for good. `/bc-dashboard poll` always checks now.
 - **A budget check that can't tell doesn't let changes through.** With `budgetEnforce` on `confirm` or `block`, a change is refused if the check fails, or if `budgetUsd` is set and the session's spend can't be read. Reads still run.
