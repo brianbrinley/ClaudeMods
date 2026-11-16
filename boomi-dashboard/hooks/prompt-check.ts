@@ -605,6 +605,64 @@ export const reviewText = (weeks: PromptWeeks, now: number, guideChecked: string
   return lines.join('\n')
 }
 
+/** One tip in the report: what it is, why it matters, an example, and what happened, in everyday words. */
+export type PromptReportCard = { title: string; why: string; instead: string; tryThis: string; shown: string; fixed: string; upgraded: string }
+
+/** The prompt section of the HTML report: written to the person who reads it. */
+export type PromptReport = { intro: string; summary: string[]; cards: PromptReportCard[]; marks?: string; next: string[] }
+
+const inTen = (p: number) => `about ${Math.round(p / 10)} in 10`
+const times = (n: number) => (n === 1 ? '1 time' : `${n} times`)
+
+/**
+ * The report's prompt section. Plain words, no codes: a summary, a card for each of the three tips that came up most,
+ * the lesson marks if any, and what to do next. Undefined before any tip was counted.
+ */
+export const reportPromptReview = (weeks: PromptWeeks, now: number, feedback: Partial<Record<PromptCheckCode, { helpful: number; unhelpful: number }>>): PromptReport | undefined => {
+  const totals = recentTotals(weeks, now)
+  if (totals.length === 0) return undefined
+  const top = totals.slice(0, 3)
+  const seen = totals.reduce((n, t) => n + t.seen, 0)
+  const fixed = totals.reduce((n, t) => n + t.followed, 0)
+  const summary = [`The tip that came up most was “${LESSONS[top[0]!.code].title}”, shown ${times(top[0]!.seen)} in the last four weeks.`]
+  if (seen >= MIN_SHOWN) {
+    const rate = pct(fixed, seen)
+    summary.push(
+      rate >= 50
+        ? `Good news: when a tip came up, your next Boomi prompt had already fixed it ${inTen(rate)} times.`
+        : `When a tip came up, your next Boomi prompt had fixed it ${inTen(rate)} times, so the examples below are worth a look.`,
+    )
+  } else {
+    summary.push(`Only ${seen} tip${seen === 1 ? '' : 's'} counted so far, so there is not much of a pattern yet.`)
+  }
+  const cards = top.map(t => {
+    const lesson = LESSONS[t.code]
+    const enough = t.seen >= MIN_SHOWN
+    return {
+      title: lesson.title,
+      why: lesson.why,
+      instead: lesson.before,
+      tryThis: lesson.after,
+      shown: `It came up ${times(t.seen)}.`,
+      fixed: enough ? `Your next prompt no longer had it ${inTen(pct(t.followed, t.seen))} times.` : 'Too few times to say more yet.',
+      upgraded: enough ? `You used the upgrade ${inTen(pct(t.used, t.seen))} times.` : '',
+    }
+  })
+  const helpful = Object.values(feedback).reduce((n, f) => n + (f?.helpful ?? 0), 0)
+  const unhelpful = Object.values(feedback).reduce((n, f) => n + (f?.unhelpful ?? 0), 0)
+  const marks = helpful + unhelpful > 0 ? `You marked ${helpful} lesson${helpful === 1 ? '' : 's'} as helpful and ${unhelpful} as not useful.` : undefined
+  return {
+    intro: 'Before Claude does Boomi work, the dashboard looks at your prompt for a few things that often go missing. This is what it noticed over the last four weeks, and how your next prompts went. It never shows what you typed.',
+    summary,
+    cards,
+    marks,
+    next: [
+      'Try the upgrade next time: /bc-dashboard prompt use puts the clearer version in your prompt box.',
+      'Curious about one of these? /bc-dashboard prompt lesson walks through it, and telling it helpful or not helps the dashboard learn.',
+    ],
+  }
+}
+
 /** One lesson as text: the gap, why it matters, a before and after, the source, and how to say whether it helped. */
 export const lessonText = (code: PromptCheckCode, source: string): string => {
   const l = LESSONS[code]

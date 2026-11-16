@@ -5,6 +5,7 @@
 // tables and a filterable list of steps. Plain functions: nothing here touches
 // the engine.
 
+import type { PromptReport } from './prompt-check'
 import type { Activity, Dashboard, PastSession, Product } from '../types'
 import type { ComponentDetails } from './platform'
 import {
@@ -628,11 +629,28 @@ export type HtmlFacts = ReportFacts & {
   /** Exosphere (the default, for Boomi people) or expressive: the repository's own Valence theme. */
   style?: ReportStyle
   /** The prompt review: the two sentences, the numbers and the lesson marks, and lessons for the top gaps. Absent before any tip was counted. */
-  promptReview?: { summary: string[]; details: string[]; lessons: string[] }
+  promptReview?: PromptReport
 }
 
 /** How the report looks: Boomi's Exosphere, or Valence (Miami Deco), the repository's own theme. */
 export type ReportStyle = 'exosphere' | 'expressive'
+
+/** The Prompts section: plain words for the person who reads it. A summary, a card per tip with its example, and what to do next. */
+const promptSection = (r: PromptReport): string => {
+  const cards = r.cards
+    .map(
+      c => `<article class="prompt-card"><h3>${esc(c.title)}</h3><p>${esc(c.why)}</p>` +
+        `<dl><dt>Instead of</dt><dd><code>${esc(c.instead)}</code></dd><dt>Try</dt><dd><code>${esc(c.tryThis)}</code></dd></dl>` +
+        `<p class="muted">${esc([c.shown, c.fixed, c.upgraded].filter(Boolean).join(' '))}</p></article>`,
+    )
+    .join('')
+  return `<section id="prompts"><h2>Your prompts</h2><p class="muted">${esc(r.intro)}</p>` +
+    r.summary.map(l => `<p>${esc(l)}</p>`).join('') +
+    `<details><summary>Show each tip with an example</summary>${cards}</details>` +
+    (r.marks ? `<p class="muted">${esc(r.marks)}</p>` : '') +
+    r.next.map(l => `<p class="muted">${esc(l)}</p>`).join('') +
+    `</section>`
+}
 
 /** The session report as one HTML page, styles and scripts inside it. */
 export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, windowMs: number): string => {
@@ -938,7 +956,7 @@ ${table('connectors', 'Custom connectors', ['Connector', 'Group', 'Where it stan
 ${table('agents', 'Agentstudio agents', ['Agent', 'Where it stands', 'Tokens', 'Cost'], agentRows)}
 ${quarantine.length === 0 ? '' : `<section id="quarantine"><h2>Data Hub quarantine</h2><ul class="plain">${quarantine.map(q => `<li>${status(q.level, q.text)}</li>`).join('')}</ul></section>`}
 ${charts.length > 0 ? `<section id="charts"><h2>Charts</h2><div class="charts">${charts.join('\n')}</div></section>` : ''}
-${facts.promptReview ? `<section id="prompts"><h2>Prompts</h2>${facts.promptReview.summary.map(l => `<p>${esc(l)}</p>`).join('')}<details><summary>Dive deeper</summary>${facts.promptReview.details.map(l => `<p class="muted">${esc(l)}</p>`).join('')}${facts.promptReview.lessons.map(l => `<p class="muted">${esc(l)}</p>`).join('')}</details></section>` : ''}
+${facts.promptReview ? promptSection(facts.promptReview) : ''}
 <section id="steps"><h2>Claude's steps <span class="count">${steps.length}</span></h2>
 ${
   steps.length === 0
@@ -1134,6 +1152,11 @@ table.lanes td.lane{min-width:11rem}table.lanes tbody th{min-width:16rem}table.l
 .overrides li{padding:.35rem 0;border-bottom:1px solid var(--exo-color-border-secondary)}.overrides time{color:var(--exo-color-font-secondary);margin-right:.5rem;font-variant-numeric:tabular-nums}
 code.copy{cursor:copy}td a,th a,.sub a{white-space:nowrap}code.copy.copied{outline:1px solid var(--exo-color-background-success-strong);outline-offset:1px;border-radius:2px}
 .why{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.15rem 0 0 1.4rem}
+.prompt-card{border:1px solid var(--exo-color-border-secondary);border-radius:var(--exo-radius-standard,6px);padding:.875rem 1rem;margin:.75rem 0}
+.prompt-card h3{font-size:1rem;margin:0 0 .35rem}
+.prompt-card dl{display:grid;grid-template-columns:max-content 1fr;gap:.25rem .75rem;margin:.6rem 0}
+.prompt-card dt{color:var(--exo-color-font-secondary)}
+.prompt-card dd{margin:0}
 svg.maker{display:inline-block}
 .wordmark{display:inline-flex;align-items:center;gap:.5rem;flex:none}
 .wordmark .logo{width:1.5rem;height:1.5rem;flex:none;display:block}

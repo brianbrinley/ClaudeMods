@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { LESSONS, checkPrompt, lessonText, recentTotals, reviewText, tallyWeek, weekOf } from '../hooks/prompt-check'
+import { LESSONS, checkPrompt, lessonText, recentTotals, reportPromptReview, reviewText, tallyWeek, weekOf } from '../hooks/prompt-check'
 import type { PromptWeeks } from '../types'
 import { editLines } from '../hooks/prompt-guide'
 import { reportHtml } from '../hooks/report-html'
@@ -111,14 +111,29 @@ test('the example prompts in the README trigger the tips they are meant to, with
   expect(codes('Look at everything in my Boomi account and tell me what is there.')).toEqual(['aim'])
 })
 
-test('the HTML report has a Prompts section with the two sentences, and the details folded under Dive deeper', () => {
+test('the HTML report has a plain Your prompts section with a card per tip, and none when nothing was counted', () => {
   const empty: Dashboard = { activity: [], platform: { phase: 'off', message: '', runs: [] }, watched: [], earlier: [] } as unknown as Dashboard
-  const review = { summary: ['The most common gap: no environment named.', 'Your next Boomi prompt no longer had the gap 60% of the time.'], details: ['  No environment named [environment]: shown 5'], lessons: ['Lesson: Name the environment'] }
-  const page = reportHtml(empty, { session: 's-1', sessionId: 's-1', date: '2026-11-16', usage: { startedAt: 0, usd: 0, tokens: 0 }, scope: 'session', promptReview: review }, Date.UTC(2026, 10, 16), 24 * 3_600_000)
-  expect(page).toContain('<section id="prompts"><h2>Prompts</h2>')
-  expect(page).toContain('The most common gap: no environment named.')
-  expect(page).toContain('<details><summary>Dive deeper</summary>')
+  const weeks = tallyWeek({}, WED, { shown: ['environment'], followed: [], used: [] })
+  const review = reportPromptReview(weeks, WED, { environment: { helpful: 1, unhelpful: 0 } })!
+  const page = reportHtml(empty, { session: 's-1', sessionId: 's-1', date: '2026-11-16', usage: { startedAt: 0, usd: 0, tokens: 0 }, scope: 'session', promptReview: review }, WED, 24 * 3_600_000)
+  expect(page).toContain('<section id="prompts"><h2>Your prompts</h2>')
+  expect(page).toContain('It never shows what you typed.')
+  expect(page).toContain('<article class="prompt-card"><h3>Name the environment</h3>')
+  expect(page).toContain('It came up 1 time.')
+  expect(page).toContain('You marked 1 lesson as helpful and 0 as not useful.')
   expect(page).toContain('href="#prompts"')
-  const without = reportHtml(empty, { session: 's-1', sessionId: 's-1', date: '2026-11-16', usage: { startedAt: 0, usd: 0, tokens: 0 }, scope: 'session' }, Date.UTC(2026, 10, 16), 24 * 3_600_000)
+  const without = reportHtml(empty, { session: 's-1', sessionId: 's-1', date: '2026-11-16', usage: { startedAt: 0, usd: 0, tokens: 0 }, scope: 'session' }, WED, 24 * 3_600_000)
   expect(without).not.toContain('id="prompts"')
+})
+
+test('the report prompt section says what came up in plain words, with the numbers in everyday terms', () => {
+  let weeks: PromptWeeks = {}
+  for (let i = 0; i < 6; i++) weeks = tallyWeek(weeks, WED, { shown: ['environment'], followed: i < 4 ? ['environment'] : [], used: i < 2 ? ['environment'] : [] })
+  const r = reportPromptReview(weeks, WED, {})!
+  expect(r.summary[0]).toBe('The tip that came up most was “Name the environment”, shown 6 times in the last four weeks.')
+  expect(r.summary[1]).toContain('about 7 in 10 times')
+  expect(r.cards[0]!.fixed).toBe('Your next prompt no longer had it about 7 in 10 times.')
+  expect(r.cards[0]!.upgraded).toBe('You used the upgrade about 3 in 10 times.')
+  expect(r.summary.join(' ')).not.toMatch(/\[|gap|tally|category/i)
+  expect(reportPromptReview({}, WED, {})).toBeUndefined()
 })

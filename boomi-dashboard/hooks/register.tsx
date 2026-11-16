@@ -154,7 +154,8 @@ import { GUIDANCE_SOURCES, GUIDE, GUIDE_STAMP, REFRESH_SYSTEM, driftNote, guideF
 import { companionUseLine, isFresh, parseUsage, topHabit, usageArgv } from './usage-breakdown'
 import { paceOf, recordDay } from './spend-history'
 import type { SpendDays } from './spend-history'
-import { NO_COUNTS, NUDGE_ONLY, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, isClosingOut, isSuggestionTaken, maskPrompt, reportLines, rewriteParts, rewriteRequest, rewriteSystem, statusPart, tipsText, upgradePrompt, lessonText, recentTotals, reviewText as promptReviewText, tallyWeek, LESSONS } from './prompt-check'
+import { NO_COUNTS, NUDGE_ONLY, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, isClosingOut, isSuggestionTaken, maskPrompt, reportLines, rewriteParts, rewriteRequest, rewriteSystem, statusPart, tipsText, upgradePrompt, lessonText, recentTotals, reportPromptReview, reviewText as promptReviewText, tallyWeek, LESSONS } from './prompt-check'
+import type { PromptReport } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import { ACTIVITY_LOG_LINE, activityLogSetting, turnOffActivityLog, turnOnActivityLog } from './activity-env'
 import type { Credentials } from './platform'
@@ -2946,23 +2947,8 @@ const promptReviewCommand = async ($: Engine, settings: Settings, rest: string):
 
 /** `/bc-dashboard prompt lesson [category]`, or `good|bad <category>` to say whether a lesson helped. */
 /** The prompt review for the HTML report: the two sentences, the category numbers and lesson marks, and the top gaps' lessons. Undefined before any tip was counted. */
-const promptReviewForReport = async ($: Engine, now: number): Promise<{ summary: string[]; details: string[]; lessons: string[] } | undefined> => {
-  const weeks = await read($, promptWeeks)
-  const totals = recentTotals(weeks, now)
-  if (totals.length === 0) return undefined
-  const checked = await read($, guidanceChecked)
-  const summaryLines = promptReviewText(weeks, now, checked).split('\n')
-  const deepLines = promptReviewText(weeks, now, checked, true).split('\n')
-  const feedback = await read($, tipFeedback)
-  const marks = (Object.keys(feedback) as PromptCheckCode[]).map(c => `${c}: ${feedback[c]!.helpful} helpful, ${feedback[c]!.unhelpful} not`)
-  const source = `${GUIDANCE_SOURCES[0]!.title}, ${GUIDANCE_SOURCES[0]!.url}`
-  const lessons = totals.slice(0, 3).flatMap(t => ['', ...lessonText(t.code, source).split('\n').filter(l => !l.startsWith('Was this useful?'))])
-  return {
-    summary: summaryLines.slice(0, 2),
-    details: [...deepLines.filter(l => l.startsWith('  ')), ...(marks.length > 0 ? [`Lessons marked: ${marks.join(' · ')}`] : [])],
-    lessons,
-  }
-}
+const promptReviewForReport = async ($: Engine, now: number): Promise<PromptReport | undefined> =>
+  reportPromptReview(await read($, promptWeeks), now, await read($, tipFeedback))
 
 const lessonCommand = async ($: Engine, rest: string): Promise<string> => {
   const [verb = '', code = ''] = rest.split(/\s+/)
