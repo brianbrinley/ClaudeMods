@@ -640,7 +640,7 @@ const promptSection = (r: PromptReport): string => {
   const cards = r.cards
     .map(
       c => `<article class="prompt-card"><h3>${esc(c.title)}</h3><p>${esc(c.why)}</p>` +
-        `<dl><dt>Instead of</dt><dd><code>${esc(c.instead)}</code></dd><dt>Try</dt><dd><code>${esc(c.tryThis)}</code></dd></dl>` +
+        `<dl><dt>Example</dt><dd><code>${esc(c.instead)}</code></dd><dt>Clearer version</dt><dd><code>${esc(c.tryThis)}</code></dd></dl>` +
         `<p class="muted">${esc([c.shown, c.fixed, c.upgraded].filter(Boolean).join(' '))}</p></article>`,
     )
     .join('')
@@ -648,7 +648,7 @@ const promptSection = (r: PromptReport): string => {
     r.summary.map(l => `<p>${esc(l)}</p>`).join('') +
     `<details><summary>Show each tip with an example</summary>${cards}</details>` +
     (r.marks ? `<p class="muted">${esc(r.marks)}</p>` : '') +
-    r.next.map(l => `<p class="muted">${esc(l)}</p>`).join('') +
+    r.next.map(n => `<p class="muted">${esc(n.text)} <code>${esc(n.command)}</code> <button type="button" class="copy-icon" data-copy="${esc(n.command)}" aria-label="Copy ${esc(n.command)}" title="Copy"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11"/></svg></button></p>`).join('') +
     `</section>`
 }
 
@@ -1157,6 +1157,8 @@ code.copy{cursor:copy}td a,th a,.sub a{white-space:nowrap}code.copy.copied{outli
 .prompt-card dl{display:grid;grid-template-columns:max-content 1fr;gap:.25rem .75rem;margin:.6rem 0}
 .prompt-card dt{color:var(--exo-color-font-secondary)}
 .prompt-card dd{margin:0}
+.copy-icon{background:none;border:0;padding:0 .25rem;cursor:copy;color:var(--exo-color-font-secondary);vertical-align:middle}
+.copy-icon.copied{color:var(--exo-color-background-success-strong)}
 svg.maker{display:inline-block}
 .wordmark{display:inline-flex;align-items:center;gap:.5rem;flex:none}
 .wordmark .logo{width:1.5rem;height:1.5rem;flex:none;display:block}

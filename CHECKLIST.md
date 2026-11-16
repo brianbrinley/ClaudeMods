@@ -558,4 +558,4 @@ Use a test `.env` pointed at a TEST environment, and a second folder whose `.env
 - [ ] **Z7. The AI review.** Run `/bc-dashboard prompt review --ai`.
   **Pass:** three numbered tips, friendly, using only the categories shown. **Fail:** invented statistics, or prompt text quoted back.
 - [ ] **Z8. The report's Prompts section.** After a few tips are counted, run `/bc-dashboard report html`, then open the page.
-  **Pass:** a Your prompts section sits above Steps, in plain words, with a card per tip (why, instead of, try, and the numbers) under "Show each tip with an example"; the top bar shows the logo beside "Boomi Companion" on one line. **Fail:** the section is missing before any tips are counted, shows prompt text or codes, or the logo overflows the bar.
+  **Pass:** a Your prompts section sits above Steps, in plain words, with a card per tip (why, an example, a clearer version, and the numbers) under "Show each tip with an example"; the top bar shows the logo beside "Boomi Companion" on one line. **Fail:** the section is missing before any tips are counted, shows prompt text or codes, or the logo overflows the bar.

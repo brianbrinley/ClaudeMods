@@ -609,7 +609,7 @@ export const reviewText = (weeks: PromptWeeks, now: number, guideChecked: string
 export type PromptReportCard = { title: string; why: string; instead: string; tryThis: string; shown: string; fixed: string; upgraded: string }
 
 /** The prompt section of the HTML report: written to the person who reads it. */
-export type PromptReport = { intro: string; summary: string[]; cards: PromptReportCard[]; marks?: string; next: string[] }
+export type PromptReport = { intro: string; summary: string[]; cards: PromptReportCard[]; marks?: string; next: { text: string; command: string }[] }
 
 const inTen = (p: number) => `about ${Math.round(p / 10)} in 10`
 const times = (n: number) => (n === 1 ? '1 time' : `${n} times`)
@@ -622,18 +622,18 @@ export const reportPromptReview = (weeks: PromptWeeks, now: number, feedback: Pa
   const totals = recentTotals(weeks, now)
   if (totals.length === 0) return undefined
   const top = totals.slice(0, 3)
-  const seen = totals.reduce((n, t) => n + t.seen, 0)
-  const fixed = totals.reduce((n, t) => n + t.followed, 0)
-  const summary = [`The tip that came up most was “${LESSONS[top[0]!.code].title}”, shown ${times(top[0]!.seen)} in the last four weeks.`]
-  if (seen >= MIN_SHOWN) {
-    const rate = pct(fixed, seen)
+  const lead = top[0]!
+  const summary = [`The tip that came up most was “${LESSONS[lead.code].title}”, shown ${times(lead.seen)} in the last four weeks.`]
+  // A rate is only given for one kind of tip that came up enough times on its own; counts spread across kinds are not a pattern.
+  if (lead.seen >= MIN_SHOWN) {
+    const rate = pct(lead.followed, lead.seen)
     summary.push(
       rate >= 50
-        ? `Good news: when a tip came up, your next Boomi prompt had already fixed it ${inTen(rate)} times.`
-        : `When a tip came up, your next Boomi prompt had fixed it ${inTen(rate)} times, so the examples below are worth a look.`,
+        ? `Good news: when “${LESSONS[lead.code].title}” came up, your next Boomi prompt had already fixed it ${inTen(rate)} times.`
+        : `When “${LESSONS[lead.code].title}” came up, your next Boomi prompt had fixed it ${inTen(rate)} times, so the examples below are worth a look.`,
     )
   } else {
-    summary.push(`Only ${seen} tip${seen === 1 ? '' : 's'} counted so far, so there is not much of a pattern yet.`)
+    summary.push('No single tip has come up five times yet, so there is no pattern to report.')
   }
   const cards = top.map(t => {
     const lesson = LESSONS[t.code]
@@ -657,8 +657,8 @@ export const reportPromptReview = (weeks: PromptWeeks, now: number, feedback: Pa
     cards,
     marks,
     next: [
-      'Try the upgrade next time: /bc-dashboard prompt use puts the clearer version in your prompt box.',
-      'Curious about one of these? /bc-dashboard prompt lesson walks through it, and telling it helpful or not helps the dashboard learn.',
+      { text: 'Try the upgrade next time. This puts the clearer version in your prompt box:', command: '/bc-dashboard prompt use' },
+      { text: 'Curious about one of these? This walks through it, and telling it helpful or not helps the dashboard learn:', command: '/bc-dashboard prompt lesson' },
     ],
   }
 }
