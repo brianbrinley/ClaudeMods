@@ -627,6 +627,8 @@ export type HtmlFacts = ReportFacts & {
   sessionBudgetUsd?: number
   /** Exosphere (the default, for Boomi people) or expressive: the repository's own Valence theme. */
   style?: ReportStyle
+  /** The prompt review: the two sentences, the numbers and the lesson marks, and lessons for the top gaps. Absent before any tip was counted. */
+  promptReview?: { summary: string[]; details: string[]; lessons: string[] }
 }
 
 /** How the report looks: Boomi's Exosphere, or Valence (Miami Deco), the repository's own theme. */
@@ -880,6 +882,7 @@ export const reportHtml = (dashboard: Dashboard, facts: HtmlFacts, now: number, 
     ...(changeRows.length > 0 ? ([['changes', 'Changes']] as [string, string][]) : []),
     ['components', 'Components'],
     ...(charts.length > 0 ? ([['charts', 'Charts']] as [string, string][]) : []),
+    ...(facts.promptReview ? ([['prompts', 'Prompts']] as [string, string][]) : []),
     ['steps', 'Steps'],
   ]
   const nav = sectionsShown.map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join('')
@@ -935,6 +938,7 @@ ${table('connectors', 'Custom connectors', ['Connector', 'Group', 'Where it stan
 ${table('agents', 'Agentstudio agents', ['Agent', 'Where it stands', 'Tokens', 'Cost'], agentRows)}
 ${quarantine.length === 0 ? '' : `<section id="quarantine"><h2>Data Hub quarantine</h2><ul class="plain">${quarantine.map(q => `<li>${status(q.level, q.text)}</li>`).join('')}</ul></section>`}
 ${charts.length > 0 ? `<section id="charts"><h2>Charts</h2><div class="charts">${charts.join('\n')}</div></section>` : ''}
+${facts.promptReview ? `<section id="prompts"><h2>Prompts</h2>${facts.promptReview.summary.map(l => `<p>${esc(l)}</p>`).join('')}<details><summary>Dive deeper</summary>${facts.promptReview.details.map(l => `<p class="muted">${esc(l)}</p>`).join('')}${facts.promptReview.lessons.map(l => `<p class="muted">${esc(l)}</p>`).join('')}</details></section>` : ''}
 <section id="steps"><h2>Claude's steps <span class="count">${steps.length}</span></h2>
 ${
   steps.length === 0
@@ -1131,7 +1135,8 @@ table.lanes td.lane{min-width:11rem}table.lanes tbody th{min-width:16rem}table.l
 code.copy{cursor:copy}td a,th a,.sub a{white-space:nowrap}code.copy.copied{outline:1px solid var(--exo-color-background-success-strong);outline-offset:1px;border-radius:2px}
 .why{font-size:.813rem;color:var(--exo-color-font-secondary);margin:.15rem 0 0 1.4rem}
 svg.maker{display:inline-block}
-.wordmark .logo{width:1.5rem;height:1.5rem;vertical-align:-.4rem;margin-right:.5rem}
+.wordmark{display:inline-flex;align-items:center;gap:.5rem;flex:none}
+.wordmark .logo{width:1.5rem;height:1.5rem;flex:none;display:block}
 footer .maker-logo{width:1rem;height:1rem;vertical-align:-.2rem;margin-right:.5rem}
 @media (max-width:900px){.budgets{padding-left:0;border-left:0;padding-top:1rem;border-top:1px solid var(--exo-color-border-secondary)}}
 @media print{.band{background:none;color:inherit}}

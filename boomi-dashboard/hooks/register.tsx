@@ -2048,6 +2048,7 @@ const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly 
   }
   const view = scoped(current, scope)
   const usage = await withBudget($, settings)
+  const promptReview = await promptReviewForReport($, now)
   const sessionId = await $.session.id().catch(() => undefined)
   const cwd = await $.session.cwd()
   const page = reportHtml(
@@ -2062,6 +2063,7 @@ const reportHtmlCommand = async ($: Engine, settings: Settings, words: readonly 
       folder: cwd.split('/').filter(Boolean).pop(),
       boomi: await boomiFacts($, settings, view),
       cwd,
+      ...(promptReview ? { promptReview } : {}),
       budgets: budgetLines(usage, settings),
       ...(settings.budgetUsd > 0 ? { sessionBudgetUsd: settings.budgetUsd } : {}),
       ...(scope === 'all' ? { pastSessions: await pastForReport($, view, cwd) } : {}),
@@ -2943,6 +2945,25 @@ const promptReviewCommand = async ($: Engine, settings: Settings, rest: string):
 }
 
 /** `/bc-dashboard prompt lesson [category]`, or `good|bad <category>` to say whether a lesson helped. */
+/** The prompt review for the HTML report: the two sentences, the category numbers and lesson marks, and the top gaps' lessons. Undefined before any tip was counted. */
+const promptReviewForReport = async ($: Engine, now: number): Promise<{ summary: string[]; details: string[]; lessons: string[] } | undefined> => {
+  const weeks = await read($, promptWeeks)
+  const totals = recentTotals(weeks, now)
+  if (totals.length === 0) return undefined
+  const checked = await read($, guidanceChecked)
+  const summaryLines = promptReviewText(weeks, now, checked).split('\n')
+  const deepLines = promptReviewText(weeks, now, checked, true).split('\n')
+  const feedback = await read($, tipFeedback)
+  const marks = (Object.keys(feedback) as PromptCheckCode[]).map(c => `${c}: ${feedback[c]!.helpful} helpful, ${feedback[c]!.unhelpful} not`)
+  const source = `${GUIDANCE_SOURCES[0]!.title}, ${GUIDANCE_SOURCES[0]!.url}`
+  const lessons = totals.slice(0, 3).flatMap(t => ['', ...lessonText(t.code, source).split('\n').filter(l => !l.startsWith('Was this useful?'))])
+  return {
+    summary: summaryLines.slice(0, 2),
+    details: [...deepLines.filter(l => l.startsWith('  ')), ...(marks.length > 0 ? [`Lessons marked: ${marks.join(' · ')}`] : [])],
+    lessons,
+  }
+}
+
 const lessonCommand = async ($: Engine, rest: string): Promise<string> => {
   const [verb = '', code = ''] = rest.split(/\s+/)
   const categories = Object.keys(LESSONS).join(' | ')

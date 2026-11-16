@@ -557,3 +557,5 @@ Use a test `.env` pointed at a TEST environment, and a second folder whose `.env
   **Pass:** no prompt words appear in the store. **Fail:** any prompt text is stored.
 - [ ] **Z7. The AI review.** Run `/bc-dashboard prompt review --ai`.
   **Pass:** three numbered tips, friendly, using only the categories shown. **Fail:** invented statistics, or prompt text quoted back.
+- [ ] **Z8. The report's Prompts section.** After a few tips are counted, run `/bc-dashboard report html`, then open the page.
+  **Pass:** a Prompts section sits above Steps with two plain sentences; Dive deeper opens the numbers, lesson marks and lessons; the top bar shows the logo beside "Boomi Companion" on one line. **Fail:** the section is missing before any tips are counted, shows prompt text, or the logo overflows the bar.

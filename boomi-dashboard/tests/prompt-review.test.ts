@@ -2,6 +2,8 @@ import { expect, test } from 'claude-code/testing'
 import { LESSONS, checkPrompt, lessonText, recentTotals, reviewText, tallyWeek, weekOf } from '../hooks/prompt-check'
 import type { PromptWeeks } from '../types'
 import { editLines } from '../hooks/prompt-guide'
+import { reportHtml } from '../hooks/report-html'
+import type { Dashboard } from '../types'
 
 const DAY = 86_400_000
 const WED = Date.UTC(2026, 10, 18)
@@ -107,4 +109,16 @@ test('the example prompts in the README trigger the tips they are meant to, with
   expect(codes('Build a new process that moves orders, then test the run.')).toEqual(['test', 'build'])
   expect(codes('Make a map for the orders.')).toEqual(['map'])
   expect(codes('Look at everything in my Boomi account and tell me what is there.')).toEqual(['aim'])
+})
+
+test('the HTML report has a Prompts section with the two sentences, and the details folded under Dive deeper', () => {
+  const empty: Dashboard = { activity: [], platform: { phase: 'off', message: '', runs: [] }, watched: [], earlier: [] } as unknown as Dashboard
+  const review = { summary: ['The most common gap: no environment named.', 'Your next Boomi prompt no longer had the gap 60% of the time.'], details: ['  No environment named [environment]: shown 5'], lessons: ['Lesson: Name the environment'] }
+  const page = reportHtml(empty, { session: 's-1', sessionId: 's-1', date: '2026-11-16', usage: { startedAt: 0, usd: 0, tokens: 0 }, scope: 'session', promptReview: review }, Date.UTC(2026, 10, 16), 24 * 3_600_000)
+  expect(page).toContain('<section id="prompts"><h2>Prompts</h2>')
+  expect(page).toContain('The most common gap: no environment named.')
+  expect(page).toContain('<details><summary>Dive deeper</summary>')
+  expect(page).toContain('href="#prompts"')
+  const without = reportHtml(empty, { session: 's-1', sessionId: 's-1', date: '2026-11-16', usage: { startedAt: 0, usd: 0, tokens: 0 }, scope: 'session' }, Date.UTC(2026, 10, 16), 24 * 3_600_000)
+  expect(without).not.toContain('id="prompts"')
 })
