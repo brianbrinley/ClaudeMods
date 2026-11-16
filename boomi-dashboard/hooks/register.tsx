@@ -2841,13 +2841,13 @@ const guideCommand = async ($: Engine, settings: Settings, rest: string): Promis
   const changelogs: Record<string, string[]> = {}
   for (const s of stale) changelogs[s.plugin] = await notesOf(s.plugin)
   if (rest.split(/\s+/)[0] !== 'refresh') return guideText(status, changelogs)
-  // Anthropic's prompting guidance, read now, so the lines and the lessons follow what Anthropic says today.
-  const guidance = await guidanceExcerpts($)
-  if (guidance.length > 0) {
+  // Anthropic's prompting guidance is read now, to record the date it was read. Its text is not sent to a model.
+  const pagesRead = await readGuidance($)
+  if (pagesRead > 0) {
     const day = new Date(await $.clock.now()).toISOString().slice(0, 10)
     await update($, guidanceChecked, () => day)
   }
-  const guideNote = guidance.length > 0 ? '' : "Couldn't read Anthropic's guidance just now, so the date is unchanged.\n\n"
+  const guideNote = pagesRead > 0 ? '' : "Couldn't read Anthropic's guidance just now, so the date is unchanged.\n\n"
   if (stale.length === 0) return `${guideNote}The dashboard's guide is up to date with every Companion plugin on in this session. Nothing to refresh.`
   const drafts: string[] = []
   for (const s of stale) {
@@ -2857,19 +2857,19 @@ const guideCommand = async ($: Engine, settings: Settings, rest: string): Promis
     const reply = await $.model.complete({
       model: settings.promptModel,
       system: REFRESH_SYSTEM,
-      prompt: refreshRequest(s.plugin, s.stamped, s.installed, GUIDE.filter(e => e.plugin === s.plugin), notes, headings, guidance),
+      prompt: refreshRequest(s.plugin, s.stamped, s.installed, GUIDE.filter(e => e.plugin === s.plugin), notes, headings),
       maxTokens: 1500,
       effort: 'low',
       timeoutMs: MODEL_TIMEOUT_MS,
     })
-    drafts.push(reply.isAnswered ? refreshText(s.plugin, s.installed, reply.text, settings.promptModel) : `${s.plugin}: ${settings.promptModel} couldn't draft it (${reply.reason}). Nothing was changed.`)
+    drafts.push(reply.isAnswered ? refreshText(s.plugin, s.installed, reply.text, settings.promptModel, [...notes, ...headings].join('\n')) : `${s.plugin}: ${settings.promptModel} couldn't draft it (${reply.reason}). Nothing was changed.`)
   }
   return guideNote + drafts.join('\n\n')
 }
 
-/** The text of each guidance page, tags stripped and cut short, for the refresh to read. Empty when none could be read. */
-const guidanceExcerpts = async ($: Engine): Promise<string[]> => {
-  const out: string[] = []
+/** Reads each guidance page to check it is the real guidance; returns how many were. Their text is never sent to a model. */
+const readGuidance = async ($: Engine): Promise<number> => {
+  let read = 0
   for (const src of GUIDANCE_SOURCES) {
     // The engine's fetch has no abort, so the wait is capped: a stalled page is given up on, not waited for.
     const deadline = new Promise<undefined>(resolve => $.clock.after(GUIDANCE_TIMEOUT_MS, () => resolve(undefined)))
@@ -2887,11 +2887,9 @@ const guidanceExcerpts = async ($: Engine): Promise<string[]> => {
     // A page too short to be the guidance (an error or a sign-in page) is not stamped as read.
     // The page must be the guidance itself (its title names prompt engineering), not a sign-in or an error page.
     if (text.length < GUIDANCE_MIN_CHARS || !/prompt engineering/i.test(text)) continue
-    // Phrases that read as instructions to a model are cut out of the excerpt: a filter, not a guarantee; the person reviews every draft line.
-    const cleaned = text.replace(/ignore (all |any |the )?(previous|prior|above) (instructions|prompts?)|system prompt|you are now|<\|[^|]*\|>|\[\/?INST\]/gi, '[removed]')
-    out.push(`${src.title} (${src.url}): ${cleaned.slice(0, 4000)}`)
+    read++
   }
-  return out
+  return read
 }
 const GUIDANCE_TIMEOUT_MS = 30_000
 const GUIDANCE_MIN_CHARS = 500

@@ -89,9 +89,12 @@ test('the refresh keeps only edit lines in the grammar; prose, and anything that
     'CHANGE | a deploy | the environment, and a package description | Deploys now need a package description.',
     'REMOVE | a test | | Tests no longer need a folder.',
   ].join('\n')
-  const { kept, dropped } = editLines(reply)
+  const sources = 'Data Hub changelog: model required. Deploys now need a package description. Tests no longer need a folder.'
+  const { kept, dropped } = editLines(reply, sources)
   expect(kept).toHaveLength(3)
   expect(kept[0]!.startsWith('ADD | a data hub model')).toBe(true)
   expect(dropped).toBe(2)
-  expect(editLines('Nothing to change.').kept).toEqual(['Nothing to change.'])
+  expect(editLines('Nothing to change.', sources).kept).toEqual(['Nothing to change.'])
+  // A note that is not quoted from the local sources is not an edit.
+  expect(editLines('CHANGE | a deploy | the environment | The Companion team now requires a signed approval.', sources).kept).toEqual([])
 })
