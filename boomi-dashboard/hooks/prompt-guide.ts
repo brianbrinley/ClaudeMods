@@ -12,7 +12,7 @@ import { changelogBetween, compareVersions } from './upgrade'
 export type GuideEntry = { plugin: string; task: string; ask: string }
 
 /** The version of each Companion plugin this guide was last checked against. A plugin with no stamp has no entries yet. */
-export const GUIDE_STAMP: Readonly<Record<string, string>> = { 'bc-integration': '1.0.83' }
+export const GUIDE_STAMP: Readonly<Record<string, string>> = { 'bc-integration': '1.0.103' }
 
 /** The guide. Entries for the other Companion plugins come from `guide refresh`, read against that plugin's own docs and changelog, never written from memory. */
 export const GUIDE: readonly GuideEntry[] = [
@@ -22,6 +22,9 @@ export const GUIDE: readonly GuideEntry[] = [
   { plugin: 'bc-integration', task: 'a map', ask: 'the source and target profiles, and any field rules' },
   { plugin: 'bc-integration', task: 'a test', ask: 'the data to use, and what a pass is' },
   { plugin: 'bc-integration', task: 'anything in production', ask: 'whether Claude may change or run it' },
+  { plugin: 'bc-integration', task: 'a new SFTP connection', ask: 'whether the host key is pinned, and which host entry to use' },
+  { plugin: 'bc-integration', task: 'a REST connection with OAuth', ask: 'whether the user has set up the OAuth connection in the GUI first' },
+  { plugin: 'bc-integration', task: 'a deploy with extension values', ask: 'whether any value is a secret, since values are stored as plain text' },
 ]
 
 /** The guide's lines for the plugins on in this session; the integration plugin's always, since every Boomi prompt is partly about it. */

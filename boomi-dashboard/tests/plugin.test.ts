@@ -3,6 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
 
 import { pollOutcome } from '../hooks/activity'
+import { GUIDE_STAMP } from '../hooks/prompt-guide'
 
 const dashboard = (args = '') => ({ command: 'bc-dashboard', args }) as CommandRunInput
 
@@ -3072,17 +3073,20 @@ test('auto: a prompt whose only tip is a secret is not sent to a model', async (
   expect(requests).toHaveLength(0)
 })
 
-const COMPANION = 'companion/bc-integration/1.0.90'
+// The guide's stamp (hooks/prompt-guide.ts) and a newer Companion version installed, so the guide has moved on whatever the stamp is.
+const STAMPED = GUIDE_STAMP['bc-integration']!
+const INSTALLED = '2.0.0'
+const COMPANION = `companion/bc-integration/${INSTALLED}`
 const DOC = `${COMPANION}/skills/boomi-integration/references/guides/boomi_error_reference.md`
 const DOC_TEXT = '# Errors\n\n## Debugging a failed deploy\n\nRead the execution log first; a deploy error names the environment extension that is missing.\n'
-const CHANGES = '# Changelog\n\n## 1.0.90\n\n- Deploys now need a package description.\n\n## 1.0.83\n\n- An older note.\n'
+const CHANGES = `# Changelog\n\n## ${INSTALLED}\n\n- Deploys now need a package description.\n\n## ${STAMPED}\n\n- Stamped.\n\n## 1.0.83\n\n- An older note.\n`
 
 /** Companion's bc-integration at 1.0.90 under /work, as the plugin cache lists it and `claude plugin list` reports it. */
 const companionInstalled = (on: On) =>
   on('process.run', async (_$, e) => {
     const line = e.argv.join(' ')
     const stdout = line === 'claude plugin list --json'
-      ? JSON.stringify([{ id: 'bc-integration@boomi-companion', version: '1.0.90', enabled: true, scope: 'user', installPath: '/x' }])
+      ? JSON.stringify([{ id: 'bc-integration@boomi-companion', version: INSTALLED, enabled: true, scope: 'user', installPath: '/x' }])
       : line.includes('bc-integration') ? `bc-integration=/work/${COMPANION}/\n` : ''
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -3101,7 +3105,7 @@ test('a rewrite reads Companion’s docs in subfolders through an index kept for
   // Built for the session and kept in memory: it's far too big for the store.
   expect(store.docIndex).toBeUndefined()
   const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
-  expect(await tab.find({ text: "Read Companion's guidance: bc-integration 1.0.90" })).toBeDefined()
+  expect(await tab.find({ text: `Read Companion's guidance: bc-integration ${INSTALLED}` })).toBeDefined()
   // Companion has moved on from the guide's 1.0.83: that is the maintainer's to act on, so the tab doesn't say it.
   await clock.advance(1_000)
   expect(await tab.find({ text: /guide was written for/ })).toBeUndefined()
@@ -3117,7 +3121,7 @@ test('/bc-dashboard prompt guide shows what Companion changed since the guide wa
   await promptWorld($, on, () => undefined, { 'active-development': '', [DOC]: DOC_TEXT, [`${COMPANION}/CHANGELOG.md`]: CHANGES })
   await clock.advance(1_000)
   const status = (await $.command.run(dashboard('prompt guide'))).text
-  expect(status).toContain('◐ bc-integration: written for 1.0.83, installed 1.0.90: Companion has moved on')
+  expect(status).toContain(`◐ bc-integration: written for ${STAMPED}, installed ${INSTALLED}: Companion has moved on`)
   expect(status).toContain('- Deploys now need a package description.')
   expect(status).not.toContain('An older note')
   expect(requests).toHaveLength(0)
@@ -3125,7 +3129,7 @@ test('/bc-dashboard prompt guide shows what Companion changed since the guide wa
   expect(requests).toHaveLength(1)
   expect(requests[0]!.prompt).toContain('Deploys now need a package description.')
   expect(requests[0]!.prompt).not.toContain('An older note')
-  expect(draft).toContain('Draft edits to the guide for bc-integration 1.0.90, by haiku')
+  expect(draft).toContain(`Draft edits to the guide for bc-integration ${INSTALLED}, by haiku`)
   expect(draft).toContain('CHANGE | a deploy | the environment, and a package description')
   expect(draft).toContain('Nothing was changed.')
 })
