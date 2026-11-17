@@ -3731,7 +3731,9 @@ test('out of the box a session mentions the guard as it starts, and a large read
   expect(guardToasts(toasts)).toHaveLength(1)
 })
 
-test('after 30 minutes a large read or a full context mentions it again, three times a session at most', async ($, on) => {
+// The logo and the banner's flamingo tick every half second and second of fake time; over half an hour of it that is thousands of
+// callbacks, past the test's limit. Neither changes what the guard says, so they're off here.
+test('after 30 minutes a large read or a full context mentions it again, three times a session at most', { options: { logo: false, bandAnimation: false } }, async ($, on) => {
   const { toasts, suggestions } = guarded(on, () => 70)
   await startSession($, on, {})
   await clock.advance(3_000)
