@@ -306,9 +306,14 @@ export type PastSession = {
   label?: string
 }
 
+/** One Claude Code session's cost, whether or not it ran a Companion script. */
+export type SpendRow = { id: string; startedAt?: string; costUsd?: number; tokens: number }
+
 export type HistoryState = {
   phase: 'idle' | 'loading' | 'ready' | 'error'
   sessions?: PastSession[]
+  /** Every session the scan read, for the all-Claude-Code totals. */
+  spend?: SpendRow[]
   scannedAt?: number
   /** How many transcripts the scan read. */
   scanned?: number

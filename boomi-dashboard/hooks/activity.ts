@@ -3,7 +3,7 @@
 // attention, the recent feed and the live environment. Plain functions:
 // nothing here touches the engine, so the tests call them directly.
 
-import type { Activity, ActivityKind, CompanionPlugin, Dashboard, Ledger, Outcome, PastSession, Product, Run, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
+import type { Activity, ActivityKind, CompanionPlugin, Dashboard, Ledger, Outcome, PastSession, Product, Run, SpendRow, RuntimeSeen, SessionRecap, StandardsSeen, TokenSplit, Watched } from '../types'
 import type { LoginNudge } from './companion-user'
 import type { LoginCheck } from './login-roles'
 import type { SpendPace } from './spend-history'
@@ -2191,8 +2191,17 @@ export type HistoryTotals = { sessions: number; usd: number; unpriced: number; t
  */
 export type LiveSession = { id?: string; startedAt?: number; usd?: number; tokens?: number }
 
+/** Every session in a scan as its cost: all of Claude Code's use, not only the Companion sessions. */
+export const spendRows = (scan: { sessions?: ScannedSession[] }): SpendRow[] =>
+  (scan.sessions ?? []).map(s => ({
+    id: s.id,
+    startedAt: s.startedAt,
+    costUsd: typeof s.costUsd === 'number' ? s.costUsd : undefined,
+    tokens: Object.values(s.models ?? {}).reduce((n, m) => n + (m.input ?? 0) + (m.output ?? 0) + (m.cacheWrite ?? 0), 0),
+  }))
+
 /** The sessions that started within `ms` of now, added up. A session with no recorded cost counts as unpriced. */
-export const historyTotals = (sessions: readonly PastSession[], now: number, ms = Infinity, live?: LiveSession): HistoryTotals => {
+export const historyTotals = (sessions: readonly SpendRow[], now: number, ms = Infinity, live?: LiveSession): HistoryTotals => {
   const useLive = live?.usd !== undefined
   const rows: { at: number; usd?: number; tokens: number }[] = sessions
     .filter(s => !(useLive && live?.id && s.id === live.id))
@@ -2213,7 +2222,7 @@ const totalsLine = (label: string, t: HistoryTotals) =>
     : `${label}: ${t.sessions} session${t.sessions === 1 ? '' : 's'} · ${formatCost(t.usd)}${t.unpriced ? ` (+${t.unpriced} without a recorded cost)` : ''} · ${formatTokens(t.tokens)} tokens`
 
 /** How to show past sessions: whose is current, whether their folders differ, and in which time zone. */
-export type PastView = { currentId?: string; withProject?: boolean; timeZone?: string; live?: LiveSession }
+export type PastView = { currentId?: string; withProject?: boolean; timeZone?: string; live?: LiveSession; spend?: readonly SpendRow[] }
 
 /** Whether the sessions come from more than one folder, so the folder tells them apart. */
 export const projectsDiffer = (sessions: readonly PastSession[]): boolean => new Set(sessions.map(s => s.project ?? '')).size > 1
@@ -2269,9 +2278,13 @@ export const historySummary = (sessions: readonly PastSession[], now: number, da
   const lines = [
     `Boomi Companion sessions on this machine, last ${days} days:`,
     ...[
-      totalsLine('  This week', historyTotals(sessions, now, 7 * 86_400_000, view.live)),
-      totalsLine('  Last 30 days', historyTotals(sessions, now, 30 * 86_400_000, view.live)),
-      totalsLine(`  All ${days} days`, historyTotals(sessions, now, Infinity, view.live)),
+      ...(view.spend ? [
+        totalsLine('  Claude Code, this week', historyTotals(view.spend, now, 7 * 86_400_000, view.live)),
+        totalsLine('  Claude Code, last 30 days', historyTotals(view.spend, now, 30 * 86_400_000, view.live)),
+      ] : []),
+      totalsLine('  Companion, this week', historyTotals(sessions, now, 7 * 86_400_000, view.live)),
+      totalsLine('  Companion, last 30 days', historyTotals(sessions, now, 30 * 86_400_000, view.live)),
+      totalsLine(`  Companion, all ${days} days`, historyTotals(sessions, now, Infinity, view.live)),
     ].filter((line): line is string => !!line),
     '',
     ...sessions.slice(0, 20).map(s => `  ${pastLine(s, { ...view, withProject: projectsDiffer(sessions) })}`),

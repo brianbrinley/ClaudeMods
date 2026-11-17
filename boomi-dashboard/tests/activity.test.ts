@@ -15,6 +15,7 @@ import {
   pastSessions,
   historyTotals,
   historySummary,
+  spendRows,
   pastParts,
   shortWhen,
   projectsDiffer,
@@ -727,8 +728,8 @@ test('history adds up the week, the month and everything, and says what has no r
   expect(historyTotals(past, NOW, 7 * 86_400_000)).toEqual({ sessions: 1, usd: 3.5, unpriced: 0, tokens: 2000 })
   expect(historyTotals(past, NOW)).toMatchObject({ sessions: 2, usd: 3.5, unpriced: 1 })
   const text = historySummary(past, NOW, 90, { currentId: 'aaaaaaaa-1111', timeZone: 'UTC' })
-  expect(text).toContain('This week: 1 session · $3.50 · 2.0k tokens')
-  expect(text).toContain('All 90 days: 2 sessions · $3.50 (+1 without a recorded cost)')
+  expect(text).toContain('Companion, this week: 1 session · $3.50 · 2.0k tokens')
+  expect(text).toContain('Companion, all 90 days: 2 sessions · $3.50 (+1 without a recorded cost)')
   // Each session: when, how long, the cost and what it was about; then what it did. The folders differ, so they show.
   expect(text).toContain('Oct 10, 09:00 (this session) · 47m · $3.50 · "Build the orders sync process"\n      1 push · 1 deploy · 2 tests · Orders · 2.0k tokens · orders')
   expect(text).toContain('Sep 1, 09:00 · no recorded cost\n      1 create · P · 20 tokens · old')
@@ -745,7 +746,7 @@ test('the session in progress counts at its live cost: it replaces the saved fig
   expect(historyTotals(past, NOW, 7 * 86_400_000, fresh)).toEqual({ sessions: 2, usd: 3.72, unpriced: 0, tokens: 2500 })
   // Nothing read yet: the saved figures stand.
   expect(historyTotals(past, NOW, 7 * 86_400_000, { id: 'aaaaaaaa-1111' })).toEqual(historyTotals(past, NOW, 7 * 86_400_000))
-  expect(historySummary(past, NOW, 90, { currentId: 'dddddddd-4444', live: fresh, timeZone: 'UTC' })).toContain('This week: 2 sessions · $3.72')
+  expect(historySummary(past, NOW, 90, { currentId: 'dddddddd-4444', live: fresh, timeZone: 'UTC' })).toContain('Companion, this week: 2 sessions · $3.72')
 })
 
 test("a failed test's execution is one item, not a second one for its run in Boomi, even once it's closed", () => {
@@ -1300,3 +1301,23 @@ test('sessions with no known price are counted and named, and the month starts o
   expect(new Date(monthStartOf(now)).getDate()).toBe(1)
 })
 
+
+test('the totals cover all of Claude Code, and the Companion sessions are a share of them', () => {
+  const scan = {
+    sessions: [
+      { id: 'aaaaaaaa-1111', startedAt: '2026-10-10T09:00:00Z', costUsd: 3.5, models: { 'claude-opus-5-5': { input: 1000, output: 1000, cacheWrite: 0 } }, commands: ['bash scripts/boomi-deploy.sh a.xml'] },
+      { id: 'cccccccc-3333', startedAt: '2026-10-11T09:00:00Z', costUsd: 20, models: {}, commands: ['cat notes.md'] },
+    ],
+  } as { sessions: ScannedSession[] }
+  const spend = spendRows(scan)
+  expect(spend.map(r => r.id)).toEqual(['aaaaaaaa-1111', 'cccccccc-3333'])
+  expect(spend[0]!.tokens).toBe(2000)
+  // The session that only read a file still spent money: it's in the Claude Code total, and not in the Companion list.
+  expect(historyTotals(spend, NOW, 7 * 86_400_000)).toMatchObject({ sessions: 2, usd: 23.5 })
+  expect(historyTotals(pastSessions(scan), NOW, 7 * 86_400_000)).toMatchObject({ sessions: 1, usd: 3.5 })
+  const text = historySummary(pastSessions(scan), NOW, 90, { timeZone: 'UTC', spend })
+  expect(text).toContain('  Claude Code, this week: 2 sessions · $24')
+  expect(text).toContain('  Companion, this week: 1 session · $3.50')
+  // Without the spend rows, the summary keeps its Companion lines only.
+  expect(historySummary(pastSessions(scan), NOW, 90, { timeZone: 'UTC' })).not.toContain('Claude Code, ')
+})

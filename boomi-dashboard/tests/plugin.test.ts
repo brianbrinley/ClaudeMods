@@ -697,10 +697,11 @@ test('/bc-dashboard history scans the transcripts with the bundled script, and t
   expect(ran[0]!.slice(0, 4)).toEqual(['bash', '-c', 'exec perl "$@"', 'scan-sessions'])
   expect(ran[0]![4]).toMatch(/\/scripts\/scan-sessions\.pl$/)
   expect(ran[0]!.slice(5)).toEqual(['--since', String(NOW - 90 * 86_400_000)])
-  expect(text.text).toContain('This week: 1 session · $3.50')
+  expect(text.text).toContain('Companion, this week: 1 session · $3.50')
   expect(text.text).toContain('$3.50')
   expect(text.text).toContain('1 push · Orders · 2.0k tokens')
-  expect(await pane.find({ text: /This week \$3\.50 · 1 session/ })).toBeDefined()
+  expect(await pane.find({ text: /Claude Code\s+this week \$3\.50/ })).toBeDefined()
+  expect(await pane.find({ text: /Companion\s+this week \$3\.50/ })).toBeDefined()
   expect((await pane.find({ type: 'Button', key: 'history-scan' }))?.props.label).toBe('Rescan')
   const tool = await $.tool.call({ tool: 'mcp__boomi-dashboard__history' } as never)
   expect(JSON.stringify(tool)).toContain('$3.50')
@@ -723,7 +724,7 @@ test('without bash, history runs Perl on its own; without Perl, it says what it 
   expect((await $.command.run(dashboard('history'))).text).toContain('History needs Perl')
   const pane = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PANE })
   expect(await pane.find({ text: /History needs Perl/ })).toBeDefined()
-  expect(await pane.find({ text: /This week \$3\.50/ })).toBeDefined()
+  expect(await pane.find({ text: /Companion\s+this week \$3\.50/ })).toBeDefined()
 })
 
 test('bash without Perl (exit 127) falls through to Perl on its own', async ($, on) => {

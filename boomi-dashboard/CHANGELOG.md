@@ -2,6 +2,12 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.71.0
+
+- **The totals cover all of Claude Code's spend.** The pane's week and 30-day figures counted only the sessions that ran a Companion script, so a session spent reading or editing Companion's files showed as free. Now the pane has two lines: **Claude Code** for all of this machine's spend, and **Companion** for the sessions that ran Companion, as a share of it. `/bc-dashboard history` gives the same figures, with the 30-day line of each.
+- **The budget suggestions still read Companion's own sessions**, since the budget is for Companion.
+- The history scan reports every session's cost, not only the Companion ones. The session list still shows only the Companion sessions.
+
 ## 0.70.0
 
 - **The Prompt tab is friendlier, and says what's true.** In `suggest` the prompt has already gone to Claude, so the tab now opens with a warm note, "Claude has already started on this one. Here's a clearer version to copy for next time.", and offers Copy and Dismiss only. "Use the upgrade" is for `confirm`, where the prompt is held.

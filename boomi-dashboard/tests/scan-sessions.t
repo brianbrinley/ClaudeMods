@@ -69,9 +69,11 @@ is($?, 0, 'exits 0');
 my $scan = $json->decode($out);
 is($scan->{scanned}, 3, 'reads every transcript, subagents included');
 is($scan->{badLines}, 1, 'counts a line it cannot read and goes on');
-is(scalar @{ $scan->{sessions} }, 1, 'lists only sessions that named a Companion script');
+my @ran = grep { @{ $_->{commands} } } @{ $scan->{sessions} };
+is(scalar @ran, 1, 'only one session named a Companion script');
+is(scalar @{ $scan->{sessions} }, 2, 'every session is reported, its cost too');
 
-my ($s) = @{ $scan->{sessions} };
+my ($s) = @ran;
 is($s->{id}, $built, 'by session id');
 is($s->{project}, '/work/orders', 'with its working folder');
 is($s->{costUsd}, 1.25, "takes Claude Code's latest running cost");
@@ -91,7 +93,7 @@ write_lines("$root/-work-orders/$built.jsonl",
   { type => 'custom-title', sessionId => $built, customTitle => 'Orders sync build' },
   reply(session => $built, at => '2026-10-01T10:00:00Z', id => 'msg_9', request => 'req_9',
     content => [$bash->('bash scripts/boomi-component-push.sh active-development/processes/Orders.xml')]));
-my ($titled) = @{ $json->decode(`perl $script --root $root`)->{sessions} };
+my ($titled) = grep { $_->{id} eq $built } @{ $json->decode(`perl $script --root $root`)->{sessions} };
 is($titled->{title}, 'Orders sync build', "keeps the session's own title");
 
 # A session running across months: the running total, split by the month each part was spent in.
@@ -115,6 +117,16 @@ write_lines("$root/-work-mdm/$datahub.jsonl",
     content => [$bash->('bash scripts/datahub-deployment.sh deploy u-1 r-1 --version 2')]));
 my @all = @{ $json->decode(`perl $script --root $root`)->{sessions} };
 ok((grep { $_->{id} eq $datahub } @all), "counts a session that ran only a Data Hub script");
+
+# A session that ran no Companion script still reports its cost, so the totals cover all of Claude Code's use.
+my $plain = 'ffffffff-0000-0000-0000-000000000001';
+write_lines("$root/-work-plain/$plain.jsonl",
+  reply(session => $plain, at => '2026-10-04T10:00:00Z', id => 'msg_p', request => 'req_p',
+    content => [{ type => 'text', text => 'Just a question' }]),
+  { type => 'cost-state', sessionId => $plain, totalCostUSD => 2.25, hasUnknownModelCost => JSON::PP::false });
+my ($plainRow) = grep { $_->{id} eq $plain } @{ $json->decode(`perl $script --root $root`)->{sessions} };
+is($plainRow->{costUsd}, 2.25, 'reports the cost of a session that ran no Companion script');
+is(scalar @{ $plainRow->{commands} }, 0, 'and names no commands for it');
 
 # Each time the conversation compacted is counted; the summary that follows isn't a prompt.
 my $long = 'eeeeeeee-0000-0000-0000-000000000001';

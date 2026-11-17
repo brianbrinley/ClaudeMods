@@ -560,5 +560,7 @@ Use a test `.env` pointed at a TEST environment, and a second folder whose `.env
   **Pass:** no prompt words appear in the store. **Fail:** any prompt text is stored.
 - [ ] **Z7. The AI review.** Run `/bc-dashboard prompt review --ai`.
   **Pass:** three numbered tips, friendly, using only the categories shown. **Fail:** invented statistics, or prompt text quoted back.
+- [ ] **Z9. The totals cover all of Claude Code.** *(0.71.0)* Open the pane with a scanned history (`Scan`), and read the totals.
+  **Pass:** a `Claude Code` line shows this week's and 30 days' spend, and a `Companion` line below it shows the Companion sessions' share. A session that only read files still counts in the Claude Code line. `/bc-dashboard history` shows the same figures in words. **Fail:** one line only, a Companion figure above the Claude Code figure, or a session that spent money missing from the Claude Code line.
 - [ ] **Z8. The report's Prompts section.** After a few tips are counted, run `/bc-dashboard report html`, then open the page.
   **Pass:** a Your prompts section sits above Steps, in plain words, with a card per tip (why, an example, a clearer version, and the numbers) under "Show each tip with an example"; the top bar shows the logo beside "Boomi Companion" on one line. **Fail:** the section is missing before any tips are counted, shows prompt text or codes, or the logo overflows the bar.

@@ -199,6 +199,7 @@ for my $s (values %sessions) {
   $s->{costByMonth} = \%by;
 }
 
-# Only sessions that named a Companion script in a Bash command.
-my @found = sort { ($b->{startedAt} // '') cmp ($a->{startedAt} // '') } grep { $_->{companionCommands} } values %sessions;
+# Every session, newest first: the cost of all of Claude Code's use, and the Companion sessions among them (companionCommands).
+# A session that ran no Companion script has no commands, so the dashboard lists only the ones that did.
+my @found = sort { ($b->{startedAt} // '') cmp ($a->{startedAt} // '') } values %sessions;
 print $out->encode({ version => 1, root => $root, sessions => \@found, scanned => $scanned, badLines => $bad_lines }), "\n";

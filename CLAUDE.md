@@ -8,6 +8,8 @@ Each mod release bumps the version in its `plugin.json` and adds an entry at the
 
 Before pushing a mod change, run `claude plugin validate <mod>` and `claude plugin test <mod>`, and type-check it with `tsc -p <mod>` once Claude Code has loaded it (that's when it lays `.claude-plugin/types/`, which is gitignored).
 
+Before releasing boomi-dashboard, run `python3 boomi-dashboard/scripts/guide-check.py`. It fails when the prompt guide's stamp (`GUIDE_STAMP` in `hooks/prompt-guide.ts`) is behind the Companion version installed on this machine; it prints the steps to update the guide.
+
 The engine follows `$` only within one file: helpers that take `$` live in the hooks module itself; plain functions can live in other files and be unit-tested there.
 
 Credentials never go in a mod's files or in chat. Mods read them from the environment or from the user's own gitignored files.

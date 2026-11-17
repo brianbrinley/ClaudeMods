@@ -10,7 +10,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, PromptSubmitInput, Register } from 'claude-code'
 
-import type { Activity, CompanionPlugin, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, PromptCheckCode, PromptCounts, PromptWeeks, PromptTips, PromptTry, UsageBreakdownSeen, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
+import type { Activity, CompanionPlugin, Dashboard, DiagnosisState, HistoryState, Ledger, PaneTheme, PastSession, Platform, PromptCheckCode, SpendRow, PromptCounts, PromptWeeks, PromptTips, PromptTry, UsageBreakdownSeen, RuntimeSeen, SessionRecap, StandardsSeen, Watched } from '../types'
 import {
   EMPTY_LEDGER,
   STATUS,
@@ -29,6 +29,7 @@ import {
   projectsDiffer,
   historySummary,
   historyTotals,
+  spendRows,
   guardrails,
   guardrailText,
   budgetOf,
@@ -1895,8 +1896,8 @@ const scanHistory = async ($: Engine, settings: Settings): Promise<HistoryState>
       state = { phase: 'error', error: 'Too many sessions to read at once. Lower the historyDays setting and try again.' }
     } else {
       const scan = JSON.parse(ran.stdout) as { sessions?: []; scanned?: number }
-      state = { phase: 'ready', sessions: pastSessions(scan), scannedAt: now, scanned: scan.scanned }
-      await $.store.set(HISTORY_KEY, { sessions: state.sessions, scannedAt: now, scanned: scan.scanned }).catch(() => undefined)
+      state = { phase: 'ready', sessions: pastSessions(scan), spend: spendRows(scan), scannedAt: now, scanned: scan.scanned }
+      await $.store.set(HISTORY_KEY, { sessions: state.sessions, spend: state.spend, scannedAt: now, scanned: scan.scanned }).catch(() => undefined)
     }
   } catch (error) {
     state = { phase: 'error', error: messageOf(error) }
@@ -1912,7 +1913,7 @@ const historyCommand = async ($: Engine, settings: Settings): Promise<string> =>
   if (state.phase === 'error') return state.error ?? 'The transcript scan failed.'
   const currentId = await $.session.id().catch(() => undefined)
   const live = liveSessionOf(await usageOf($), currentId)
-  return historySummary(state.sessions ?? [], await $.clock.now(), settings.historyDays, { currentId, live })
+  return historySummary(state.sessions ?? [], await $.clock.now(), settings.historyDays, { currentId, live, spend: state.spend })
 }
 
 /** This session's figures as they stand now, for the past-session totals. */
@@ -3775,9 +3776,9 @@ const setUpSession = async ($: Engine, settings: Settings) => {
 
   await restoreActivity($, settings)
 
-  const scanned = (await $.store.get(HISTORY_KEY)) as { sessions?: PastSession[]; scannedAt?: number; scanned?: number } | undefined
+  const scanned = (await $.store.get(HISTORY_KEY)) as { sessions?: PastSession[]; spend?: SpendRow[]; scannedAt?: number; scanned?: number } | undefined
   if (Array.isArray(scanned?.sessions)) {
-    await update($, history, (): HistoryState => ({ phase: 'ready', sessions: scanned.sessions, scannedAt: scanned.scannedAt, scanned: scanned.scanned }))
+    await update($, history, (): HistoryState => ({ phase: 'ready', sessions: scanned.sessions, spend: scanned.spend, scannedAt: scanned.scannedAt, scanned: scanned.scanned }))
   }
 
   const folded = await $.store.get(PAST_COLLAPSED_KEY).catch(() => undefined)
@@ -4783,14 +4784,17 @@ export const register: Register = (on, options) => {
         {past.phase === 'error' && line('warning', past.error ?? 'The transcript scan failed.')}
         {past.sessions && past.sessions.length === 0 && note(`No Companion sessions in the last ${settings.historyDays} days.`)}
         {past.sessions && past.sessions.length > 0 && (() => {
+          // Two lines: all of Claude Code's spend, then the Companion sessions' share of it.
           const live = liveSessionOf(usage, sessionId)
+          const everything = past.spend ?? past.sessions
+          const allWeek = historyTotals(everything, now, 7 * 86_400_000, live)
+          const allMonth = historyTotals(everything, now, 30 * 86_400_000, live)
           const week = historyTotals(past.sessions, now, 7 * 86_400_000, live)
           const month = historyTotals(past.sessions, now, 30 * 86_400_000, live)
-          const total = (label: string, x: typeof week) =>
-            `${label} ${formatCost(x.usd)}${x.unpriced ? ` +${x.unpriced} unpriced` : ''} · ${x.sessions} session${x.sessions === 1 ? '' : 's'}`
           return (
             <Box flexDirection="column">
-              {t(`${total('This week', week)}   ${total('30 days', month)}`, { color: p.accent, bold: true })}
+              {t(`Claude Code  this week ${formatCost(allWeek.usd)} · 30 days ${formatCost(allMonth.usd)}`, { color: p.accent, bold: true })}
+              {t(`Companion    this week ${formatCost(week.usd)} · 30 days ${formatCost(month.usd)}`, { color: p.muted })}
               {pastHidden && t(`  ${past.sessions.length} session${past.sessions.length === 1 ? '' : 's'} listed: Show lists them, with Review and Copy`, { color: p.muted })}
               {!pastHidden && past.sessions.slice(0, shown).map((s, i) => {
                 const { head, detail } = pastParts(s, { currentId: sessionId, withProject: projectsDiffer(past.sessions!) })
