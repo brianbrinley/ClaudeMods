@@ -2943,18 +2943,19 @@ test('/bc-dashboard prompt use fills the prompt box; prompt upgrade has the mode
 const PROMPT_TAB = { component: 'Pane', requestId: 'boomi-dashboard-prompt', props: {} as RenderPropsOf['Pane'] } as const
 const tabOpens = () => opens.filter(o => o.id === 'boomi-dashboard-prompt').map(o => o.title)
 
-test('auto: a prompt with tips opens the Prompt tab; it shows the tips, its buttons, and the prompt beside the upgrade', { options: { promptCheck: 'suggest' } }, async ($, on) => {
-  const { closed, filled, typed } = await promptWorld($, on)
+test('auto: a prompt with tips opens the Prompt tab; in suggest it warmly offers a copy, not a use, and the prompt beside the upgrade', { options: { promptCheck: 'suggest' } }, async ($, on) => {
+  const { closed, typed } = await promptWorld($, on)
   await typed(VAGUE)
   expect(tabOpens()).toEqual(['Boomi Dashboard Prompt tips · 4'])
   const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
   expect(await tab.find({ text: /BOOMI DASHBOARD PROMPT TIPS/ })).toBeDefined()
   expect(await tab.find({ text: /"it": the process Orders Sync, the last one this session\?/ })).toBeDefined()
   expect(await tab.find({ text: /YOUR PROMPT/ })).toBeDefined()
-  expect(await tab.find({ text: /By "it" I mean the process Orders Sync/ })).toBeDefined()
-  await tab.press({ key: 'prompt-use' })
-  expect(filled[0]).toContain('By "it" I mean the process Orders Sync')
-  expect(await tab.find({ text: /In the prompt box: fill in any \[placeholder\], then press Enter\./ })).toBeDefined()
+  expect(await tab.find({ text: /By "it" I mean/ })).toBeDefined()
+  // Claude has already started on the prompt as typed, so the tab says so and offers a copy for next time, not a use now.
+  expect(await tab.find({ text: /Claude has already started/ })).toBeDefined()
+  expect(await tab.find({ text: /Use the upgrade/ })).toBeUndefined()
+  expect(await tab.find({ text: /Copy/ })).toBeDefined()
   await tab.press({ key: 'prompt-dismiss' })
   // The dashboard pane made way for the tab, and is back once it's dismissed.
   expect(closed).toEqual(['boomi-dashboard', 'boomi-dashboard-prompt'])
@@ -3100,9 +3101,9 @@ test('a rewrite reads Companion’s docs in subfolders through an index kept for
   expect(store.docIndex).toBeUndefined()
   const tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
   expect(await tab.find({ text: "Read Companion's guidance: bc-integration 1.0.90" })).toBeDefined()
-  // Companion has moved on from the guide's 1.0.83: the tab says so.
+  // Companion has moved on from the guide's 1.0.83: that is the maintainer's to act on, so the tab doesn't say it.
   await clock.advance(1_000)
-  expect(await tab.find({ text: /The dashboard's guide was written for bc-integration 1\.0\.83 \(now 1\.0\.90\)/ })).toBeDefined()
+  expect(await tab.find({ text: /guide was written for/ })).toBeUndefined()
 })
 
 test('/bc-dashboard prompt guide shows what Companion changed since the guide was written; refresh drafts edits and changes nothing', async ($, on) => {
@@ -3436,7 +3437,7 @@ test('a long upgrade is fitted to the pane: the buttons stay in view, Show all d
   await tab.press({ key: 'prompt-rewrite' })
   expect(await tab.find({ text: /▼ \d+ more lines/ })).toBeDefined()
   expect(await tab.find({ text: /Step 40:/ })).toBeUndefined()
-  expect(await tab.find({ text: /Use the upgrade/ })).toBeDefined()
+  expect(await tab.find({ text: /Copy/ })).toBeDefined()
   await tab.press({ key: 'prompt-expand' })
   expect(await tab.find({ text: /▼ \d+ more lines/ })).toBeUndefined()
   expect(await tab.find({ text: /Step 40:/ })).toBeDefined()
@@ -4084,3 +4085,18 @@ test('a subagent’s turn ending doesn’t offer the next step in the main sessi
   await $.command.run(dashboard('text'))
 })
 
+
+test('suggest: after a gap comes up three times in a week, the Prompt tab offers to hold prompts for a fix; Not now hides it', { options: { promptCheck: 'suggest' } }, async ($, on) => {
+  const { typed } = await promptWorld($, on)
+  await typed(VAGUE)
+  await typed(VAGUE)
+  let tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  expect(await tab.find({ text: /Hold prompts like this/ })).toBeUndefined()
+  await tab.unmount()
+  await typed(VAGUE)
+  tab = await $.ui.mount({ plugin: 'boomi-dashboard', surface: 'terminal', ...PROMPT_TAB })
+  expect(await tab.find({ text: /Hold prompts like this/ })).toBeDefined()
+  expect(await tab.find({ text: /Prompt check: suggest/ })).toBeDefined()
+  await tab.press({ key: 'prompt-hold-later' })
+  expect(await tab.find({ text: /Hold prompts like this/ })).toBeUndefined()
+})

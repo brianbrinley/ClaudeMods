@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { LESSONS, checkPrompt, lessonText, recentTotals, reportPromptReview, reviewText, tallyWeek, weekOf } from '../hooks/prompt-check'
+import { LESSONS, checkPrompt, holdNudgeDue, lessonText, recentTotals, reportPromptReview, reviewText, tallyWeek, weekOf } from '../hooks/prompt-check'
 import type { PromptWeeks } from '../types'
 import { editLines } from '../hooks/prompt-guide'
 import { reportHtml } from '../hooks/report-html'
@@ -136,4 +136,17 @@ test('the report prompt section says what came up in plain words, with the numbe
   expect(r.cards[0]!.upgraded).toBe('You used the upgrade about 3 in 10 times.')
   expect(r.summary.join(' ')).not.toMatch(/\[|gap|tally|category/i)
   expect(reportPromptReview({}, WED, {})).toBeUndefined()
+})
+
+test('the hold-for-a-fix offer waits until a gap has come up three times this week', () => {
+  let weeks: PromptWeeks = {}
+  weeks = tallyWeek(weeks, WED, { shown: ['environment'], followed: [], used: [] })
+  weeks = tallyWeek(weeks, WED, { shown: ['environment'], followed: [], used: [] })
+  expect(holdNudgeDue(weeks[weekOf(WED)], [{ code: 'environment' }])).toBe(false)
+  weeks = tallyWeek(weeks, WED, { shown: ['environment'], followed: [], used: [] })
+  expect(holdNudgeDue(weeks[weekOf(WED)], [{ code: 'subject' }])).toBe(false)
+  expect(holdNudgeDue(weeks[weekOf(WED)], [{ code: 'subject' }, { code: 'environment' }])).toBe(true)
+  // A week with no counts, or last week's counts, never offers it.
+  expect(holdNudgeDue(undefined, [{ code: 'environment' }])).toBe(false)
+  expect(holdNudgeDue(weeks[weekOf(WED)], [])).toBe(false)
 })

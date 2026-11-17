@@ -450,6 +450,13 @@ export const reportLines = (counts: PromptCounts | undefined): string[] => {
 
 const WEEKS_KEPT = 8
 
+/** A gap that has come up this many times in one week is worth offering to hold for a quick fix. */
+export const HOLD_AFTER = 3
+
+/** Whether this week's counts show a gap in these tips often enough to offer holding prompts for a fix. */
+export const holdNudgeDue = (week: WeekTally | undefined, tips: readonly { code: PromptCheckCode }[]): boolean =>
+  tips.some(t => (week?.[t.code]?.seen ?? 0) >= HOLD_AFTER)
+
 /** The Monday of the week a time falls in, UTC. */
 export const weekOf = (ms: number): string => {
   const d = new Date(ms)

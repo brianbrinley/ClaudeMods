@@ -150,11 +150,11 @@ import type { UpgradeReport } from './upgrade'
 import { reviewLabel, reviewPrompt, reviewSession, reviewText } from './review'
 import { EMPTY_INDEX, contextLines, docName, folderComponentOf, indexFile, isCurrent, relevantComponents, relevantPlaces, relevantSections, sectionsOf } from './retrieve'
 import type { DocIndex, FolderComponent, Section } from './retrieve'
-import { GUIDANCE_SOURCES, GUIDE, GUIDE_STAMP, REFRESH_SYSTEM, driftNote, guideFor, guideStatus, guideText, refreshRequest, refreshText } from './prompt-guide'
+import { GUIDANCE_SOURCES, GUIDE, GUIDE_STAMP, REFRESH_SYSTEM, guideFor, guideStatus, guideText, refreshRequest, refreshText } from './prompt-guide'
 import { companionUseLine, isFresh, parseUsage, topHabit, usageArgv } from './usage-breakdown'
 import { paceOf, recordDay } from './spend-history'
 import type { SpendDays } from './spend-history'
-import { NO_COUNTS, NUDGE_ONLY, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, isClosingOut, isSuggestionTaken, maskPrompt, reportLines, rewriteParts, rewriteRequest, rewriteSystem, statusPart, tipsText, upgradePrompt, lessonText, recentTotals, reportPromptReview, reviewText as promptReviewText, tallyWeek, LESSONS } from './prompt-check'
+import { NO_COUNTS, NUDGE_ONLY, checkPrompt, countsAfter, countsLine, wrapLines, findSecrets, isCheckable, isClosingOut, isSuggestionTaken, maskPrompt, reportLines, rewriteParts, rewriteRequest, rewriteSystem, statusPart, tipsText, upgradePrompt, lessonText, recentTotals, reportPromptReview, reviewText as promptReviewText, tallyWeek, LESSONS, HOLD_AFTER, holdNudgeDue, weekOf } from './prompt-check'
 import type { PromptReport } from './prompt-check'
 import type { PromptFacts } from './prompt-check'
 import { ACTIVITY_LOG_LINE, activityLogSetting, turnOffActivityLog, turnOnActivityLog } from './activity-env'
@@ -374,6 +374,8 @@ const promptExpanded = atom({ plugin: 'boomi-dashboard', key: 'promptExpanded' }
 
 /** The tips (by their time) whose nudge the person closed in the banner. */
 const promptNudgeHidden = atom({ plugin: 'boomi-dashboard', key: 'promptNudgeHidden' } as const, 0)
+/** The Prompt tab's offer to hold prompts for a fix, dismissed with Not now. */
+const promptHoldHidden = atom({ plugin: 'boomi-dashboard', key: 'promptHoldHidden' } as const, false)
 
 /** The offer to turn on Companion's activity log was put off ("Not now") for this session. */
 const isLogOfferDeclined = atom({ plugin: 'boomi-dashboard', key: 'isLogOfferDeclined' } as const, false)
@@ -2558,6 +2560,18 @@ const checkSubmitted = async ($: Engine, settings: Settings, e: PromptSubmitInpu
   return undefined
 }
 
+/** The offer to hold prompts for a fix, in plain words. */
+const HOLD_NUDGE = "Prompts like this keep coming up. Hold them for a quick fix, and you'll see the upgrade before Claude starts, then send it with one press."
+
+/** Switches promptCheck between suggest and confirm, now and for later sessions; says so, or the command to run where /config refuses. */
+const setPromptCheck = async ($: Engine, settings: Settings, mode: 'suggest' | 'confirm') => {
+  if (await saveSetting($, settings, 'promptCheck', mode)) {
+    await update($, promptNote, () => (mode === 'confirm' ? 'Prompts will be held for a quick fix from now on.' : 'Prompts go to Claude as typed, with the tips after.'))
+  } else {
+    await update($, promptNote, () => `Couldn't change it here. Run: /bc-dashboard config promptCheck ${mode}`)
+  }
+}
+
 /** The Prompt tab's title, in its tab: "Boomi Dashboard Prompt tips · 3". */
 const promptTitle = (count: number) => `Boomi Dashboard Prompt tips · ${count}`
 
@@ -4252,17 +4266,20 @@ export const register: Register = (on, options) => {
     )
     const tries = tips?.tries ?? []
     const shown = tips?.shown ?? Math.max(0, tries.length - 1)
-    const guideDrift = driftNote(guideStatus((await read($, companionPlugins)) ?? []))
+    // Suggest sends the prompt as typed, so by the time this tab opens Claude has started: the tab offers a version to copy for next time.
     const intro = held !== null
       ? "⏸ Held: Claude hasn't seen this prompt yet. Send it, or the upgrade, below."
-      : 'The Boomi Dashboard suggests a clearer prompt. Your prompt went to Claude as typed; use the upgrade next time, or now.'
+      : settings.promptCheck === 'suggest'
+        ? "Claude has already started on this one. Here's a clearer version to copy for next time."
+        : "Here's a clearer version of your last prompt."
+    const nudge = held === null && settings.promptCheck === 'suggest' && !(await read($, promptHoldHidden)) && tips ? holdNudgeDue((await read($, promptWeeks))[weekOf(await $.clock.now())], tips.tips) : false
     // Fitted to the pane: the rows everything but the cards' text takes, so the buttons under the cards stay in view.
     const room = e.props.scroll?.bodyRows || e.viewport?.rows || 40
     const cardColumns = Math.max(12, (isWide ? Math.floor(width / 2) - 1 : width) - 4)
     const tipRows = (tips?.tips ?? []).reduce((n, tip) => n + wrapLines(`  ${tip.text}`, width).length, 0)
     // The note's field wraps as it's typed, beside its Regenerate hint.
     const noteRows = Math.max(1, wrapLines(draft, width - 14).length) - 1
-    const fixedRows = 3 + wrapLines(intro, width).length + 2 + tipRows + 4 + 1 + (said ? wrapLines(said, width).length : 0) + 2 + 2 + noteRows + 1 + (tries[shown]?.note ? 1 : 0) + (busy ? wrapLines(`${spinner} ${settings.promptModel} is writing a better upgrade. The one above is the quick version, and it stays until the new one arrives.`, width).length : 0) + (tips?.guidedBy?.length ? 1 : 0) + (guideDrift ? wrapLines(guideDrift, width).length : 0) + ((tips?.why?.length ?? 0) > 0 ? 2 + (tips?.why ?? []).reduce((n, line) => n + wrapLines(`  ${line}`, width).length, 0) : 0)
+    const fixedRows = 3 + wrapLines(intro, width).length + 2 + tipRows + 4 + 1 + (said ? wrapLines(said, width).length : 0) + 2 + 2 + noteRows + 1 + (tries[shown]?.note ? 1 : 0) + (busy ? wrapLines(`${spinner} ${settings.promptModel} is writing a better upgrade. The one above is the quick version, and it stays until the new one arrives.`, width).length : 0) + (tips?.guidedBy?.length ? 1 : 0) + (nudge ? wrapLines(HOLD_NUDGE, width).length + 1 : 0) + 2 + ((tips?.why?.length ?? 0) > 0 ? 2 + (tips?.why ?? []).reduce((n, line) => n + wrapLines(`  ${line}`, width).length, 0) : 0)
     const textRows = Math.max(4, room - fixedRows - 1)
     // Side by side the cards share the rows; one above the other, your prompt takes up to a third.
     const promptRows = isWide ? textRows : Math.max(2, Math.min(Math.floor(textRows / 3), wrapLines(tips?.masked ?? '', cardColumns).length))
@@ -4334,6 +4351,15 @@ export const register: Register = (on, options) => {
               {card('YOUR PROMPT', tips.masked, false, promptRows)}
               {card(busy ? `UPGRADED  ${spinner} ${settings.promptModel.toUpperCase()} IS WRITING A BETTER ONE…` : tips.rewrittenBy ? `UPGRADED BY ${tips.rewrittenBy.toUpperCase()}` : 'UPGRADED', tips.upgrade, true, upgradeRows)}
             </Box>
+            {nudge ? (
+              <Box flexDirection="column" marginTop={1}>
+                {t(HOLD_NUDGE, { color: p.heading })}
+                <Box flexWrap="wrap" columnGap={1}>
+                  <Button key="prompt-hold-on" label="Hold prompts like this" onPress={() => setPromptCheck($, settings, 'confirm')} />
+                  <Button key="prompt-hold-later" label="Not now" onPress={() => update($, promptHoldHidden, () => true)} />
+                </Box>
+              </Box>
+            ) : undefined}
             <Box flexWrap="wrap" columnGap={1}>
               {held !== null ? (
                 <Box flexWrap="wrap" columnGap={1}>
@@ -4344,10 +4370,12 @@ export const register: Register = (on, options) => {
                 </Box>
               ) : (
                 <Box flexWrap="wrap" columnGap={1}>
-                  <Button key="prompt-use" label="Use the upgrade" onPress={async () => {
-                    const isFilled = await refill($, tips.upgrade)
-                    await update($, promptNote, () => (isFilled ? 'In the prompt box: fill in any [placeholder], then press Enter.' : "The prompt box couldn't take it here: use Copy."))
-                  }} />
+                  {settings.promptCheck === 'suggest' ? undefined : (
+                    <Button key="prompt-use" label="Use the upgrade" onPress={async () => {
+                      const isFilled = await refill($, tips.upgrade)
+                      await update($, promptNote, () => (isFilled ? 'In the prompt box: fill in any [placeholder], then press Enter.' : "The prompt box couldn't take it here: use Copy."))
+                    }} />
+                  )}
                   <Button key="prompt-copy" label="Copy" onPress={async () => {
                     const done = await $.ui.copy({ text: tips.upgrade, surface: e.surface }).catch(() => ({ isCopied: false as const }))
                     await update($, promptNote, () => (done.isCopied ? 'Copied the upgrade.' : "Couldn't copy here."))
@@ -4361,7 +4389,12 @@ export const register: Register = (on, options) => {
             {(tips.why?.length ?? 0) > 0 && heading('Why it changed')}
             {(tips.why ?? []).map(line => t(`  ${line}`))}
             {tips.guidedBy && tips.guidedBy.length > 0 ? t(`Read Companion's guidance: ${tips.guidedBy.join(', ')}`, { color: p.muted }) : undefined}
-            {guideDrift ? t(guideDrift, { color: STATUS.warning.color }) : undefined}
+            {settings.promptCheck === 'off' ? undefined : (
+              <Box flexWrap="wrap" columnGap={1} marginTop={1}>
+                {t(`Prompt check: ${settings.promptCheck}`, { color: p.muted })}
+                <Button key="prompt-mode" label={settings.promptCheck === 'confirm' ? 'Back to suggest' : 'Hold prompts for a fix'} onPress={() => setPromptCheck($, settings, settings.promptCheck === 'confirm' ? 'suggest' : 'confirm')} />
+              </Box>
+            )}
             <Box flexWrap="wrap" columnGap={1} marginTop={1}>
               <Button key="prompt-rewrite" label={busy ? `${spinner} Rewriting…` : tries.length > 1 ? 'Regenerate' : 'Upgrade with a model'} onPress={() => void rewriteFromTab($, settings)} />
               {tries.length > 1 ? (

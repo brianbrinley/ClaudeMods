@@ -2,6 +2,12 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.70.0
+
+- **The Prompt tab is friendlier, and says what's true.** In `suggest` the prompt has already gone to Claude, so the tab now opens with a warm note, "Claude has already started on this one. Here's a clearer version to copy for next time.", and offers Copy and Dismiss only. "Use the upgrade" is for `confirm`, where the prompt is held.
+- **One press to hold prompts for a fix, and one to go back.** When the same gap has come up three times in a week, the tab offers **Hold prompts like this**, which sets `promptCheck` to `confirm` in /config. **Not now** hides the offer for the session. The tab's footer always shows the current mode, with a button to switch to the other. If /config refuses the change, the tab shows the command to run.
+- **The guide's drift note is off the user's screen.** "The dashboard's guide was written for …" was something only the maintainer can act on, so it no longer shows in the Prompt tab. `/bc-dashboard prompt guide` still reports it.
+
 ## 0.69.1
 
 - **This session counts in the past-session totals as it stands.** The week and 30-day figures in the pane, and `/bc-dashboard history`, used the last saved scan, so the session in progress showed $0.00 until the next scan. Its live cost now replaces its saved figure, or is added when the scan hasn't seen it yet.
