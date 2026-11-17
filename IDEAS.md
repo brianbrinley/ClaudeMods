@@ -66,7 +66,7 @@ quadrantChart
 | Next | [The dashboard across all of Boomi Companion](#the-dashboard-across-all-of-boomi-companion) | High | Small first, medium in all | Steps 1-7 built (0.13.0-0.24.0), and **Why?** on a failed BDI run (0.35.0) |
 | 1 | [Execution debugger](#execution-debugger) | High | Small to medium | Log reading built into the dashboard; per-step documents next |
 | 2 | [Credential broker: quick wins](#credential-broker) | High | Small | Secure-storage token tried and removed; API-user guide kept |
-| 3 | [Boomi prompt upgrade](#boomi-prompt-upgrade) | Medium to high | Small | Built: checks, tips and the secret question (0.41.0), the Prompt tab (0.42.0), holding a prompt, the nudge and Regenerate with retrieval (0.43.0), confirm by default (0.44.0), a fitted tab (0.45.0), the look-around nudge (0.46.0) |
+| 3 | [Boomi prompt upgrade](#boomi-prompt-upgrade) | Medium to high | Small | Built: checks, tips and the secret question (0.41.0), the Prompt tab (0.42.0), holding a prompt, the nudge and Regenerate with retrieval (0.43.0), confirm by default (0.44.0), a fitted tab (0.45.0), the look-around nudge (0.46.0), suggest copies and a one-press hold (0.70.0) |
 | 4 | [Process test harness](#process-test-harness) | High | Medium to large | Idea |
 | 5 | [Mock endpoints](#mock-endpoints) | Medium to high | Medium | Idea |
 | 6 | [Boomi onboarding copilot](#boomi-onboarding-copilot) | Medium to high | Medium | Idea |
@@ -134,7 +134,7 @@ quadrantChart
 - **Why in the dashboard, not a mod of its own:** the dashboard already has everything it needs (which Companion plugins are on, the session's components, environment and failed runs, `mask()`, a `prompt.submit` hook, the pane, the prompt box, the report and Review), so a separate mod would mostly be plumbing between the two: shared state, a versioned contract, and button presses passed through state. It also starts with the dashboard, with nothing more to load. `promptCheck: off` turns it off completely, and the checks live in their own file of plain functions with tests. Asking about secrets changes how the dashboard behaves, so the CHANGELOG and the upgrade notice say so.
 - **Why a mod:** it needs a hook on every prompt before it reaches the model, which a skill can't have. The cheap checks cost no tokens, and `/bc-dashboard prompt` covers Claude Code on the web, where no pane or status line shows.
 - **Open questions:**
-  - Whether opening a pane that's already open brings its tab forward; `auto` depends on it, and without it acts like `manual`.
+  - Settled 2026-11-17 by a live check (O9): opening the Prompt tab brings it to the front. The engine's docs don't promise that for an open pane, so the code still closes the dashboard and reopens the tab, which is what gets it there.
   - Whether `manual` can add the tab without taking focus, and how the tab row looks beside the banner on a narrow pane.
   - Whether the `confirm` question and the refilled prompt box work on the web as in the terminal.
   - How often the checks flag real Companion prompts by mistake; that decides which checks are on by default.
