@@ -121,7 +121,7 @@ import {
   rerunArgs,
   knownName,
 } from './activity'
-import type { Attention, BudgetLine, EnvGuard, Level, Reading, ScriptRun, SharePeriod, Usage } from './activity'
+import type { Attention, BudgetLine, EnvGuard, Level, LiveSession, Reading, ScriptRun, SharePeriod, Usage } from './activity'
 import { credentialsFrom, parseEnv, platformClient } from './platform'
 import { changeFolders, environmentChangesIn, environmentGate, environmentNamed, environmentsFrom, refusal, wrapperRuns } from './environment'
 import type { EnvCheck, Environment } from './environment'
@@ -1908,8 +1908,13 @@ const scanHistory = async ($: Engine, settings: Settings): Promise<HistoryState>
 const historyCommand = async ($: Engine, settings: Settings): Promise<string> => {
   const state = await scanHistory($, settings)
   if (state.phase === 'error') return state.error ?? 'The transcript scan failed.'
-  return historySummary(state.sessions ?? [], await $.clock.now(), settings.historyDays, { currentId: await $.session.id().catch(() => undefined) })
+  const currentId = await $.session.id().catch(() => undefined)
+  const live = liveSessionOf(await usageOf($), currentId)
+  return historySummary(state.sessions ?? [], await $.clock.now(), settings.historyDays, { currentId, live })
 }
+
+/** This session's figures as they stand now, for the past-session totals. */
+const liveSessionOf = (usage: Usage, id: string | undefined): LiveSession => ({ id, startedAt: usage.startedAt, usd: usage.usd, tokens: usage.tokens })
 
 /** Copies the command that reopens a past session, to paste in a new terminal; notes whether it took. */
 const copyResume = async ($: Engine, s: PastSession, surface?: Parameters<Engine['ui']['copy']>[0]['surface']) => {
@@ -4745,8 +4750,9 @@ export const register: Register = (on, options) => {
         {past.phase === 'error' && line('warning', past.error ?? 'The transcript scan failed.')}
         {past.sessions && past.sessions.length === 0 && note(`No Companion sessions in the last ${settings.historyDays} days.`)}
         {past.sessions && past.sessions.length > 0 && (() => {
-          const week = historyTotals(past.sessions, now, 7 * 86_400_000)
-          const month = historyTotals(past.sessions, now, 30 * 86_400_000)
+          const live = liveSessionOf(usage, sessionId)
+          const week = historyTotals(past.sessions, now, 7 * 86_400_000, live)
+          const month = historyTotals(past.sessions, now, 30 * 86_400_000, live)
           const total = (label: string, x: typeof week) =>
             `${label} ${formatCost(x.usd)}${x.unpriced ? ` +${x.unpriced} unpriced` : ''} · ${x.sessions} session${x.sessions === 1 ? '' : 's'}`
           return (

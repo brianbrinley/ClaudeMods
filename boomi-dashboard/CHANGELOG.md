@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.69.1
+
+- **This session counts in the past-session totals as it stands.** The week and 30-day figures in the pane, and `/bc-dashboard history`, used the last saved scan, so the session in progress showed $0.00 until the next scan. Its live cost now replaces its saved figure, or is added when the scan hasn't seen it yet.
+
 ## 0.69.0
 
 - **Prompt review and lessons.** Each week the dashboard counts, per kind of gap in a prompt, how often it was shown, how often the next Boomi prompt no longer had the gap, and how often the upgrade was used. Only the counts are kept, never the prompt text. `/bc-dashboard prompt review` says what came up most in two plain sentences; `--deep` adds the numbers, and `--ai` has a model write three tips from the counts alone. The report has a Prompt review section with the same two sentences.

@@ -735,6 +735,19 @@ test('history adds up the week, the month and everything, and says what has no r
   expect(historySummary([], NOW, 90)).toContain('No Boomi Companion sessions')
 })
 
+test('the session in progress counts at its live cost: it replaces the saved figure, or is added when the scan has not seen it', () => {
+  const past = pastSessions(SCAN)
+  // The saved scan had $3.50 for this session; it has since cost $4.25.
+  const live = { id: 'aaaaaaaa-1111', startedAt: Date.parse('2026-10-10T09:00:00Z'), usd: 4.25, tokens: 3000 }
+  expect(historyTotals(past, NOW, 7 * 86_400_000, live)).toEqual({ sessions: 1, usd: 4.25, unpriced: 0, tokens: 3000 })
+  // A session started an hour ago, not in the saved scan yet, is added to this week.
+  const fresh = { id: 'dddddddd-4444', startedAt: NOW - 3_600_000, usd: 0.22, tokens: 500 }
+  expect(historyTotals(past, NOW, 7 * 86_400_000, fresh)).toEqual({ sessions: 2, usd: 3.72, unpriced: 0, tokens: 2500 })
+  // Nothing read yet: the saved figures stand.
+  expect(historyTotals(past, NOW, 7 * 86_400_000, { id: 'aaaaaaaa-1111' })).toEqual(historyTotals(past, NOW, 7 * 86_400_000))
+  expect(historySummary(past, NOW, 90, { currentId: 'dddddddd-4444', live: fresh, timeZone: 'UTC' })).toContain('This week: 2 sessions · $3.72')
+})
+
 test("a failed test's execution is one item, not a second one for its run in Boomi, even once it's closed", () => {
   const tested = act('test', 'failed', 'Orders Sync', NOW - 30, { componentId: ID, executionStatus: 'ERROR', executionId: 'execution-77' })
   const runs = [{ executionId: 'execution-77', processName: 'Orders Sync', processId: ID, status: 'ERROR', at: '2026-10-12T11:59:00Z' }]

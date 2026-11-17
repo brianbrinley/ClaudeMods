@@ -2184,16 +2184,25 @@ export const runWords = (runs: PastSession['runs']): string =>
 
 export type HistoryTotals = { sessions: number; usd: number; unpriced: number; tokens: number }
 
+/**
+ * The session this dashboard is in, as it stands now. The saved scan can be
+ * minutes or hours old, so its entry for this session is replaced by the live
+ * figures, and a session the scan hasn't seen yet is added.
+ */
+export type LiveSession = { id?: string; startedAt?: number; usd?: number; tokens?: number }
+
 /** The sessions that started within `ms` of now, added up. A session with no recorded cost counts as unpriced. */
-export const historyTotals = (sessions: readonly PastSession[], now: number, ms = Infinity): HistoryTotals => {
-  const within = sessions.filter(s => {
-    const at = Date.parse(s.startedAt ?? '')
-    return Number.isNaN(at) ? ms === Infinity : now - at <= ms
-  })
+export const historyTotals = (sessions: readonly PastSession[], now: number, ms = Infinity, live?: LiveSession): HistoryTotals => {
+  const useLive = live?.usd !== undefined
+  const rows: { at: number; usd?: number; tokens: number }[] = sessions
+    .filter(s => !(useLive && live?.id && s.id === live.id))
+    .map(s => ({ at: Date.parse(s.startedAt ?? ''), usd: s.costUsd, tokens: s.tokens }))
+  if (useLive) rows.push({ at: live?.startedAt ?? now, usd: live?.usd, tokens: live?.tokens ?? 0 })
+  const within = rows.filter(r => (Number.isNaN(r.at) ? ms === Infinity : now - r.at <= ms))
   return {
     sessions: within.length,
-    usd: within.reduce((n, s) => n + (s.costUsd ?? 0), 0),
-    unpriced: within.filter(s => s.costUsd === undefined).length,
+    usd: within.reduce((n, s) => n + (s.usd ?? 0), 0),
+    unpriced: within.filter(s => s.usd === undefined).length,
     tokens: within.reduce((n, s) => n + s.tokens, 0),
   }
 }
@@ -2204,7 +2213,7 @@ const totalsLine = (label: string, t: HistoryTotals) =>
     : `${label}: ${t.sessions} session${t.sessions === 1 ? '' : 's'} · ${formatCost(t.usd)}${t.unpriced ? ` (+${t.unpriced} without a recorded cost)` : ''} · ${formatTokens(t.tokens)} tokens`
 
 /** How to show past sessions: whose is current, whether their folders differ, and in which time zone. */
-export type PastView = { currentId?: string; withProject?: boolean; timeZone?: string }
+export type PastView = { currentId?: string; withProject?: boolean; timeZone?: string; live?: LiveSession }
 
 /** Whether the sessions come from more than one folder, so the folder tells them apart. */
 export const projectsDiffer = (sessions: readonly PastSession[]): boolean => new Set(sessions.map(s => s.project ?? '')).size > 1
@@ -2256,13 +2265,13 @@ export const pastLine = (s: PastSession, view: PastView = {}): string => {
 
 /** The history as text: totals for the week, the month and everything scanned, then each session. */
 export const historySummary = (sessions: readonly PastSession[], now: number, days: number, view: PastView = {}): string => {
-  if (sessions.length === 0) return `No Boomi Companion sessions in the transcripts on this machine from the last ${days} days.`
+  if (sessions.length === 0 && view.live?.usd === undefined) return `No Boomi Companion sessions in the transcripts on this machine from the last ${days} days.`
   const lines = [
     `Boomi Companion sessions on this machine, last ${days} days:`,
     ...[
-      totalsLine('  This week', historyTotals(sessions, now, 7 * 86_400_000)),
-      totalsLine('  Last 30 days', historyTotals(sessions, now, 30 * 86_400_000)),
-      totalsLine(`  All ${days} days`, historyTotals(sessions, now)),
+      totalsLine('  This week', historyTotals(sessions, now, 7 * 86_400_000, view.live)),
+      totalsLine('  Last 30 days', historyTotals(sessions, now, 30 * 86_400_000, view.live)),
+      totalsLine(`  All ${days} days`, historyTotals(sessions, now, Infinity, view.live)),
     ].filter((line): line is string => !!line),
     '',
     ...sessions.slice(0, 20).map(s => `  ${pastLine(s, { ...view, withProject: projectsDiffer(sessions) })}`),
