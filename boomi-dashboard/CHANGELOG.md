@@ -2,6 +2,10 @@
 
 `/bc-dashboard upgrade` shows the entries between your version and the latest. Versions before 0.22.0 are summarized from their release commits.
 
+## 0.71.2
+
+- **"it seems" is not a vague subject.** The prompt check counted any standalone "it", so a question such as "it seems to be slower" was held for a process it never meant, and the upgrade asked which process. "it seems", "it looks", "it sounds", "it appears" and "it feels" no longer count. The question it asks now reads "Which process or component is "it"?", not a bare placeholder.
+
 ## 0.71.1
 
 - **The prompt guide covers Companion 1.0.103.** Three new things a person decides up front: the host key for a new SFTP connection, whether an OAuth REST connection was set up in the GUI first, and whether a deploy's extension values hold a secret (they're stored as plain text). Each line is taken from Companion's changelog.
