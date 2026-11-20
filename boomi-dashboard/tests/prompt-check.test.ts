@@ -81,7 +81,10 @@ test('the upgrade fills in what the session knows, leaves a [placeholder] for th
       'Details:\n- Test data: [what to test with]; a pass means [the expected result]',
   )
   const bare = upgradePrompt('deploy it', NONE, checkPrompt('deploy it', NONE))
-  expect(bare).toBe('deploy it.\n\nDetails:\n- The process or component: [which one]\n- Environment: [which environment]')
+  expect(bare).toBe('deploy it.\n\nDetails:\n- Which process or component is "it"? [name it]\n- Environment: [which environment]')
+  const hedged = 'it seems slow to deploy, so check the environment'
+  expect(checkPrompt(hedged, NONE).map(t => t.code)).not.toContain('subject')
+  expect(checkPrompt('it is failing as a process, fix it', NONE).map(t => t.code)).toContain('subject')
   const build = 'build a process that syncs orders'
   expect(upgradePrompt(build, NONE, checkPrompt(build, NONE))).toBe(
     'build a process that syncs orders.\n\nDetails:\n- Source and target: [source system] to [target system]\n- What starts it: [a schedule or a listener]\n- Data format: [JSON, XML, CSV, flat file or EDI]',
