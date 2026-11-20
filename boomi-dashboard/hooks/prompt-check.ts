@@ -82,8 +82,8 @@ const GUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i
 const QUOTED = /["“‘`'][^"”’`']{2,}["”’`']/
 /** A name in title case after the first word: "deploy Orders Sync". */
 const TITLED = /\s[A-Z][A-Za-z0-9]+(?: [A-Z][A-Za-z0-9]+)+/
-/** "it", or "this" and "that" standing alone ("fix this", not "this error" or "a process that syncs"), or "the process". */
-const VAGUE = /\bit\b|\b(this|that)\b(?=\s*([.,;!?]|$|(and|then|to|in|on|with|again|now|first)\b))|\bthe (process|component|map|flow|integration|connector|connection|profile|one)\b/i
+/** "it" (not "it seems", "it looks": those hedge, and name nothing), or "this" and "that" standing alone ("fix this", not "this error" or "a process that syncs"), or "the process". */
+const VAGUE = /\bit\b(?!\s+(seems?|looks?|sounds?|appears?|feels?)\b)|\b(this|that)\b(?=\s*([.,;!?]|$|(and|then|to|in|on|with|again|now|first)\b))|\bthe (process|component|map|flow|integration|connector|connection|profile|one)\b/i
 /** Deploying as something to do: "deploy it", not "the deployed processes". */
 const DEPLOY = /\b(re)?deploy(s|ing)?\b/i
 const ENVIRONMENT = /\b(environments?|env|dev|development|qa|uat|stag\w*|sandbox|prod\w*)\b|\b(to|in|on|into) (the )?test\b/i
@@ -186,7 +186,7 @@ export const upgradePrompt = (text: string, facts: PromptFacts, tips: readonly P
     switch (tip.code) {
       case 'subject':
         if (c) parts.push(`By "it" I mean the ${typeName(c.type)} ${c.name}${c.id ? ` (${c.id})` : ''}.`)
-        else details.push('The process or component: [which one]')
+        else details.push('Which process or component is "it"? [name it]')
         break
       case 'environment':
         if (facts.environmentId) parts.push(`Deploy to environment ${facts.environmentId}.`)
